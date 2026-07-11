@@ -128,8 +128,8 @@ each stage a dense term plus a milestone bonus — the standard recipe for pick-
 |---|---|---|---|
 | `reach_and_bring` | +1.0 | `reach · (1 + bring)`, `reach = exp(−d(ee,cube)²/0.2²)`, `bring = exp(−d(cube,target)²/0.3²)` | Reach the cube (bring only pays once reached). |
 | `grasp_lift` | +15.0 | `exp(−d(ee,cube)²/0.05²) · clamp(cube_z − surface, 0, 0.15)` | Pays for lifting the cube **only while the gripper is on it** — forms the grasp. |
-| `transport` | +8.0 | `clamp((cube_z − surface)/0.03, 0, 1) · exp(−d_xy(cube,bin)²/0.15²)` | **Carries a lifted cube toward the bin.** The lift gate + wide `0.15` width give a horizontal gradient across the whole workspace, so a grasped cube is pulled to the bin. |
-| `place_precise` | +3.0 | `exp(−d(cube,target)²/0.05²)` | Sharpens the final placement over the bin. |
+| `transport` | +40.0 | `clamp((cube_z − surface)/0.06, 0, 1) · Δ(−d_xy(cube,bin))` | **Potential-based carry**: pays only for the per-step *reduction* in the lifted cube's horizontal distance to the bin, so it can't be farmed by hovering. Lift gate ≈ rim height, so the cube must clear the rim first. |
+| `place_precise` | +5.0 | `exp(−d(cube,target)²/0.05²)` | Sharpens placement; `target` is the cube's resting spot **inside** the bin, so lowering the cube in increases the reward. |
 | `in_bin_bonus` | +10.0 | `1` while cube is in the bin | Milestone: reward the actual placement. |
 | `action_rate_l2` | −0.01 | `‖aₜ − aₜ₋₁‖²` | Discourages jerky action changes. |
 | `joint_pos_limits` | −10.0 | penalty for joints at their limits | Keeps the arm off its end-stops. |
@@ -147,12 +147,12 @@ Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
 - **Placement spread** (`mdp/curriculums.py`) — the key one. `PlaceInBinCommand.spread`
   goes `0 → 1`: at **0** the bin and cube sit at a *fixed* layout with the cube a short hop
   (~16 cm) from the bin, so the policy learns the whole pick→carry→place motion on an easy,
-  invariant scene; it's held fixed to ~iter 1000, then linearly ramped to **1** (full
-  workspace randomization of both cube and bin) by ~iter 3500. This "learn fixed, then
+  invariant scene; it's held fixed to ~iter 1500, then linearly ramped to **1** (full
+  workspace randomization of both cube and bin) by ~iter 4000. This "learn fixed, then
   randomize" schedule is the curriculum + progressive-domain-randomization pattern from the
   literature below.
 - **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −1.0` (iters
-  0 / 2000 / 4000): explore freely early, then push toward smooth, hardware-safe motion.
+  0 / 3000 / 5000): explore freely early, then push toward smooth, hardware-safe motion.
 
 ### Approach & references
 

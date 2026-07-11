@@ -48,6 +48,11 @@ class PlaceInBinCommand(CommandTerm):
     # 1 = full workspace randomization. Set by the curriculum term each step.
     self.spread = float(cfg.initial_spread)
 
+    # Horizontal cube->bin distance and its per-step reduction (for the
+    # potential-based transport reward: only *moving closer* pays).
+    self.cube_bin_h = torch.zeros(self.num_envs, device=self.device)
+    self.carry_progress = torch.zeros(self.num_envs, device=self.device)
+
     self.metrics["cube_to_bin"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["in_bin"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["episode_success"] = torch.zeros(self.num_envs, device=self.device)
@@ -63,6 +68,10 @@ class PlaceInBinCommand(CommandTerm):
     cube_pos = self.cube.data.root_link_pos_w
     horiz = torch.norm(cube_pos[:, :2] - self.bin_pos[:, :2], dim=-1)
     self.metrics["cube_to_bin"] = torch.norm(self.target_pos - cube_pos, dim=-1)
+
+    # Per-step reduction in horizontal cube->bin distance (potential shaping).
+    self.carry_progress = self.cube_bin_h - horiz
+    self.cube_bin_h = horiz
 
     # Cube center inside the footprint and below the rim = in the bin.
     rim_top = self.bin_pos[:, 2] + 2.0 * assets.BIN_WALL_HALF + assets.BIN_RIM_HEIGHT
@@ -129,13 +138,16 @@ class PlaceInBinCommand(CommandTerm):
       torch.zeros(n, 6, device=self.device), env_ids=env_ids
     )
 
-    # Cache bin pose; goal = a point just above the bin opening.
+    # Cache bin pose; goal = cube resting inside the bin (on the bin floor). Placing
+    # the cube in now *increases* the place reward, unlike an above-the-rim goal.
     self.bin_pos[env_ids] = bin_pos_w
     target = bin_pos_w.clone()
-    target[:, 2] += (
-      2.0 * assets.BIN_WALL_HALF + assets.BIN_RIM_HEIGHT + assets.CUBE_HALF_SIZE
-    )
+    target[:, 2] += 2.0 * assets.BIN_WALL_HALF + assets.CUBE_HALF_SIZE
     self.target_pos[env_ids] = target
+
+    # Reset transport tracking for these envs (no spurious progress at reset).
+    self.cube_bin_h[env_ids] = torch.norm(cube_xy - bin_xy, dim=-1)
+    self.carry_progress[env_ids] = 0.0
 
   def _update_command(self) -> None:
     pass

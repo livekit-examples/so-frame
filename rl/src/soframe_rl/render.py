@@ -42,7 +42,7 @@ class Args:
   checkpoint_file: str
   """Path to a trained checkpoint (model_XXXX.pt)."""
   task: str = "Mjlab-Pick-Place-Bin-SO101"
-  num_envs: int = 256
+  num_envs: int = 400
   seconds: float = 14.0
   fps: int = 30
   width: int = 1280
@@ -50,11 +50,14 @@ class Args:
   out: str = "fleet.mp4"
   device: str = "cuda:0"
   # Camera: fixed viewpoint behind the arm, easing straight back from the center
-  # robot to the whole grid and tilting from arm-level to near top-down.
+  # robot to a wide, filled field of robots that runs off the frame edges.
   azimuth: float = 180.0
   """Fixed camera azimuth (no panning/orbit); 180 sits behind the arm, looking in."""
   elevation_close: float = -20.0
-  elevation_wide: float = -72.0
+  elevation_wide: float = -38.0
+  wide_dist_frac: float = 0.75
+  """Wide-shot distance as a fraction of the grid radius. <1 keeps the grid
+  overflowing the frame (robots to every edge) so it reads as endless."""
 
 
 def _ease(t: float) -> float:
@@ -104,7 +107,8 @@ def main() -> None:
   ws = np.array([-0.15, -0.45, 0.08])  # rough workspace offset within an env.
   close_look = origins[focus] + ws
   wide_look = center.copy()
-  close_dist, wide_dist = 1.1, 2.3 * radius + 2.0
+  close_dist = 1.1
+  wide_dist = args.wide_dist_frac * radius + 2.0
 
   # Larger extent so the free camera's near/far planes and lighting cover the grid.
   model.stat.extent = max(float(model.stat.extent), 2.0 * radius + 1.0)

@@ -9,7 +9,7 @@
 [runner]
 num_envs = 2048            # parallel environments (scale to your GPU memory)
 num_steps_per_env = 24     # rollout length per PPO update
-max_iterations = 5000
+max_iterations = 6000
 save_interval = 100
 experiment_name = "so101_pick_place_bin"
 

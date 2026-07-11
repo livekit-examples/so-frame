@@ -51,22 +51,22 @@ def transport_reward(
   object_name: str,
   command_name: str,
   surface_z: float,
-  lift_ref: float = 0.03,
-  xy_std: float = 0.15,
+  lift_ref: float = 0.06,
+  max_step: float = 0.05,
 ) -> torch.Tensor:
-  """Reward = (cube is lifted) * (cube is horizontally near the bin).
+  """Potential-based carry reward: (cube lifted) * (reduction in cube->bin distance).
 
-  The lift gate (0->1 as the cube rises ``lift_ref`` off the surface) means only a
-  *carried* cube earns this, and the generous ``xy_std`` gives a smooth gradient that
-  pulls the lifted cube across the workspace toward the bin.
+  Unlike absolute proximity, this pays *only* when a lifted cube actually moves
+  closer to the bin, so it cannot be farmed by hovering in place. The lift gate
+  (0->1 as the cube clears ``lift_ref`` above the surface, ~rim height) forces the
+  cube over the rim before carry is rewarded; ``max_step`` clamps per-step deltas.
   """
   obj: Entity = env.scene[object_name]
   command = env.command_manager.get_term(command_name)
   cube = obj.data.root_link_pos_w
   lifted = ((cube[:, 2] - surface_z) / lift_ref).clamp(min=0.0, max=1.0)
-  horiz = torch.norm(cube[:, :2] - command.target_pos[:, :2], dim=-1)
-  proximity = torch.exp(-torch.square(horiz) / xy_std**2)
-  return lifted * proximity
+  progress = command.carry_progress.clamp(min=-max_step, max=max_step)
+  return lifted * progress
 
 
 def in_bin_bonus(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

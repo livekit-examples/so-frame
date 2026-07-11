@@ -119,7 +119,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "place_precise": RewardTermCfg(
       func=manipulation_mdp.bring_object_reward,
-      weight=3.0,
+      weight=5.0,
       params={"command_name": "place", "object_name": "cube", "std": 0.05},
     ),
     # Pays for lifting the cube only while gripping it (forms the grasp).
@@ -133,16 +133,15 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # set per-robot.
       },
     ),
-    # Carry a lifted cube toward the bin: a dense horizontal gradient to the bin.
+    # Potential-based carry: rewards a lifted cube for moving closer to the bin.
     "transport": RewardTermCfg(
       func=task_mdp.transport_reward,
-      weight=8.0,
+      weight=40.0,
       params={
         "object_name": "cube",
         "command_name": "place",
         "surface_z": 0.083,  # overridden per-robot.
-        "lift_ref": 0.03,
-        "xy_std": 0.15,
+        "lift_ref": 0.06,  # ~rim height: clear the rim before carry pays.
       },
     ),
     # Milestone: cube actually inside the bin.
@@ -180,8 +179,8 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_name": "place",
         "stages": [
           {"step": 0, "spread": 0.0},
-          {"step": 1000 * 24, "spread": 0.0},   # hold fixed to ~iter 1000
-          {"step": 3500 * 24, "spread": 1.0},   # ramp to full by ~iter 3500
+          {"step": 1500 * 24, "spread": 0.0},   # hold fixed to ~iter 1500 (learn placing)
+          {"step": 4000 * 24, "spread": 1.0},   # ramp to full by ~iter 4000
         ],
       },
     ),
@@ -192,8 +191,8 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "joint_vel_hinge",
         "stages": [
           {"step": 0, "weight": -0.01},
-          {"step": 2000 * 24, "weight": -0.1},
-          {"step": 4000 * 24, "weight": -1.0},
+          {"step": 3000 * 24, "weight": -0.1},
+          {"step": 5000 * 24, "weight": -1.0},
         ],
       },
     ),
