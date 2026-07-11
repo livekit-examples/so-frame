@@ -1,7 +1,7 @@
-# SO-101 on Linear Frame — Combined URDF
+# SO-101 on Linear Frame (Combined URDF)
 
 `so101_on_frame.urdf` is a single, ready-to-use model that mounts the **SO-101 arm**
-onto the **1-DOF linear frame** (`so_frame`). Load this one file — mesh paths are
+onto the **1-DOF linear frame** (`so_frame`). Load this one file; mesh paths are
 relative to it, so it works out of the box in URDF viewers, PyBullet, Isaac, MuJoCo
 loaders, etc. from the `urdf/` directory.
 
@@ -26,7 +26,7 @@ Root link: `root` (the fixed frame structure).
 | Joint          | Type       | Range                    | Notes                                  |
 |----------------|------------|--------------------------|----------------------------------------|
 | `dof_slider`   | prismatic  | −0.40286 … +0.41714 m    | The frame's linear axis (carriage travel) |
-| `so101_mount`  | fixed      | —                        | Bolts the SO-101 base to the carriage plate |
+| `so101_mount`  | fixed      | n/a                      | Bolts the SO-101 base to the carriage plate |
 | `shoulder_pan` | revolute   | −1.91986 … +1.91986 rad  | SO-101 joint 1                         |
 | `shoulder_lift`| revolute   | −1.74533 … +1.74533 rad  | SO-101 joint 2                         |
 | `elbow_flex`   | revolute   | −1.69 … +1.69 rad        | SO-101 joint 3                         |
@@ -46,10 +46,10 @@ The frame already carries an orange adapter plate (`base_mount`) fastened to the
 carriage (`20mm_gantry_plate`). That plate is machined with the SO-101 base footprint.
 The `so101_mount` fixed joint seats the SO-101 `base_link` onto it:
 
-- **Contact:** the SO-101 base's flat bottom rests flush on the plate's upper face —
+- **Contact:** the SO-101 base's flat bottom rests flush on the plate's upper face;
   base bottom and plate top meet at the same plane (verified: both at world z ≈ 0.065 m
   with the carriage at slider = 0).
-- **Orientation:** `rpy = (π, 0, π/2)` — a 180° flip about X so the arm points *up*, away
+- **Orientation:** `rpy = (π, 0, π/2)`, a 180° flip about X so the arm points *up*, away
   from the carriage, plus a 90° yaw so the base's screw pattern lines up with the plate.
 - **Position:** `xyz = (0, −0.0410, −0.0124)` in the `base_mount` frame.
 
@@ -64,13 +64,13 @@ The **Hex-Nut Recess Wrist Camera (MF)** mount (`components/wrist_camera/`) is a
 the wrist-roll follower via the fixed joint `wrist_camera_mount_joint` (parent
 `gripper_link`), so it rolls with `wrist_roll` but does not move when the gripper opens.
 
-- **`frame_camera_wrist`** is the virtual camera's optical frame — attach your camera here.
+- **`frame_camera_wrist`** is the virtual camera's optical frame; attach your camera here.
   Convention: **+Z = view direction, +X = image right, +Y = image down** (REP-103 optical
   frame). It is posed to look along the gripper's approach axis (gripper −Z), toward the
   grasp, matching the reference installation photos.
 - Mount STL is in millimetres, so it carries `scale="0.001 0.001 0.001"`.
 
-The mount pose was aligned interactively with `helper/wrist_camera_aligner.html` — open it
+The mount pose was aligned interactively with `helper/wrist_camera_aligner.html`: open it
 in a browser, drag the gizmo to line the mount's clamp holes up with the gripper's holes,
 and it prints the `wrist_camera_mount_joint` / `frame_camera_wrist_joint` origins to paste
 back into the URDF. To nudge it, edit those two joint origins (or re-run the helper).
