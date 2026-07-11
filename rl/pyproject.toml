@@ -1,0 +1,26 @@
+[build-system]
+requires = ["uv_build>=0.8.19,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "soframe-rl"
+version = "0.1.0"
+description = "RL environment (pick a cube, place it in a bin) for the SO-101-on-frame robot, built on mjlab."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  # mjlab is not on PyPI yet; pinned to the tag we developed against.
+  # See [tool.uv.sources] below.
+  "mjlab==1.5.0",
+]
+
+[tool.uv.sources]
+# Pinned to the exact commit this task was developed and validated against.
+mjlab = { git = "https://github.com/mujocolab/mjlab.git", rev = "6c0b6bf0dc7c3fd7e17bbfd7950ba909f4e035ba" }
+
+[project.scripts]
+soframe-train = "soframe_rl.train:main"
+soframe-play = "soframe_rl.play:main"
+
+[tool.uv.build-backend]
+module-name = "soframe_rl"
+module-root = "src"

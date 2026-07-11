@@ -1,0 +1,9 @@
+# uv-managed virtual environment
+.venv/
+
+# training outputs
+logs/
+outputs/
+wandb/
+*.pt
+*.onnx

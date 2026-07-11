@@ -1,0 +1,33 @@
+# Training configuration for the SO-101 pick-and-place task.
+#
+# Edit these values, then run:
+#   uv run soframe-train --task Mjlab-Pick-Place-Bin-SO101
+#
+# Anything here is just the default — every value can still be overridden on the
+# command line via mjlab's tyro flags (e.g. --env.scene.num-envs 2048).
+
+[runner]
+num_envs = 4096            # parallel environments (scale to your GPU memory)
+num_steps_per_env = 24     # rollout length per PPO update
+max_iterations = 5000
+save_interval = 100
+experiment_name = "so101_pick_place_bin"
+
+[algorithm]                # PPO (rsl-rl)
+learning_rate = 1e-3
+schedule = "adaptive"
+gamma = 0.99
+lam = 0.95
+clip_param = 0.2
+entropy_coef = 0.005
+value_loss_coef = 1.0
+use_clipped_value_loss = true
+num_learning_epochs = 5
+num_mini_batches = 4
+desired_kl = 0.01
+max_grad_norm = 1.0
+
+[policy]                   # actor/critic MLP
+hidden_dims = [512, 256, 128]
+activation = "elu"
+init_std = 1.0

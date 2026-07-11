@@ -180,6 +180,8 @@
                   <geom pos="0 0 0.0189" quat="1 0 0 0" type="mesh" rgba="0.94 0.49 0.06 1" mesh="moving_jaw_so101_v1" />
                 </body>
                 <camera name="frame_wrist_camera" pos="0.0025 0.0675 -0.0062" quat="0.000001 0.000000 0.215541 0.976495" fovy="58" />
+                <!-- Grasp reference point between the finger pads (used as the RL end-effector site). -->
+                <site name="grasp_site" pos="0.012 0 -0.07" size="0.008" group="5" rgba="1 0 0 1" />
               </body>
             </body>
           </body>
