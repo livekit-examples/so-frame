@@ -1,0 +1,14 @@
+<launch>
+      <arg name="urdf_file" default="$(find so_frame)/urdf/so_frame.urdf"/>
+      <param name="robot_description" textfile="$(arg urdf_file)"/>
+
+      <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen"/>
+      <arg name="use_gui" default="true"/>
+      <node pkg="joint_state_publisher_gui" type="joint_state_publisher_gui" name="joint_state_publisher_gui">
+            <rosparam param="zeros">
+            </rosparam>
+      </node>
+
+      <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_root" args="0 0 0 0 0 0 map root" />
+      <node pkg="rviz" type="rviz" name="rviz" output="screen"/>
+</launch>
