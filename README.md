@@ -2,7 +2,7 @@
 
 SO-Frame is a cheap and simple evaluation frame for SO101 arms with LeSlider add-on.
 
-![SO-Frame: SO-101 arm on the linear frame with lightbox](media/livekit-box.png)
+![SO-Frame: SO-101 arm on the linear frame with lightbox](assets/livekit-box.png)
 
 ## Quick links
 
