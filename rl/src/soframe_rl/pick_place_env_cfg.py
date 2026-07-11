@@ -186,7 +186,9 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "ema_alpha": 0.01,
       },
     ),
-    # Ramp up the smoothness penalty over training (same shape as mjlab's lift task).
+    # Gently ramp the smoothness penalty over training. Capped at -0.2: a harsh
+    # final stage makes carrying the cube cost more than placing earns, and the
+    # policy freezes instead of moving (task reward must stay dominant).
     "joint_vel_hinge_weight": CurriculumTermCfg(
       func=manipulation_mdp.reward_curriculum,
       params={
@@ -194,7 +196,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "stages": [
           {"step": 0, "weight": -0.01},
           {"step": 3000 * 24, "weight": -0.1},
-          {"step": 5000 * 24, "weight": -1.0},
+          {"step": 5000 * 24, "weight": -0.2},
         ],
       },
     ),

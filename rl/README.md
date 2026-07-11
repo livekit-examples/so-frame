@@ -152,8 +152,10 @@ Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
   randomization exactly as fast as the policy keeps up (backing off if it starts failing).
   Self-pacing to competence avoids a fixed schedule outrunning the policy and eroding
   success — the automatic-domain-randomization pattern from the literature below.
-- **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −1.0` (iters
+- **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −0.2` (iters
   0 / 3000 / 5000): explore freely early, then push toward smooth, hardware-safe motion.
+  The cap matters: if this penalty grows past the task reward, carrying the cube costs
+  more than placing earns and the policy freezes instead of moving.
 
 ### Approach & references
 
