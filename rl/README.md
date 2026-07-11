@@ -145,12 +145,13 @@ Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
 `iterations × num_steps_per_env`):
 
 - **Placement spread** (`mdp/curriculums.py`) — the key one. `PlaceInBinCommand.spread`
-  goes `0 → 1`: at **0** the bin and cube sit at a *fixed* layout with the cube a short hop
-  (~16 cm) from the bin, so the policy learns the whole pick→carry→place motion on an easy,
-  invariant scene; it's held fixed to ~iter 1500, then linearly ramped to **1** (full
-  workspace randomization of both cube and bin) by ~iter 4000. This "learn fixed, then
-  randomize" schedule is the curriculum + progressive-domain-randomization pattern from the
-  literature below.
+  scales the layout from **0** (fixed: cube a short ~16 cm hop from the bin) to **1** (full
+  workspace randomization of cube and bin). It's **performance-gated (ADR-style)**: a
+  smoothed success rate drives it — spread rises only while success ≥ 0.4 and falls below
+  0.2, so it holds the easy fixed layout until the policy can place, then widens
+  randomization exactly as fast as the policy keeps up (backing off if it starts failing).
+  Self-pacing to competence avoids a fixed schedule outrunning the policy and eroding
+  success — the automatic-domain-randomization pattern from the literature below.
 - **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −1.0` (iters
   0 / 3000 / 5000): explore freely early, then push toward smooth, hardware-safe motion.
 

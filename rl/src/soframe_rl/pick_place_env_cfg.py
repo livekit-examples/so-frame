@@ -177,11 +177,13 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       func=task_mdp.command_spread_curriculum,
       params={
         "command_name": "place",
-        "stages": [
-          {"step": 0, "spread": 0.0},
-          {"step": 1500 * 24, "spread": 0.0},   # hold fixed to ~iter 1500 (learn placing)
-          {"step": 4000 * 24, "spread": 1.0},   # ramp to full by ~iter 4000
-        ],
+        # Performance-gated: hold the fixed layout until the policy places well,
+        # then widen randomization only as fast as success allows (back off if it
+        # drops). Self-paces to competence instead of a fixed schedule.
+        "up_threshold": 0.4,
+        "down_threshold": 0.2,
+        "step": 1.0e-4,
+        "ema_alpha": 0.01,
       },
     ),
     # Ramp up the smoothness penalty over training (same shape as mjlab's lift task).
