@@ -99,3 +99,12 @@ Same setup, plus what each camera sees:
 | Setup | `frame_wrist_camera` | `frame_overhead_camera` |
 |:---:|:---:|:---:|
 | ![setup](simulation/assets/setup.png) | ![wrist camera](simulation/assets/cam_wrist.png) | ![overhead camera](simulation/assets/cam_overhead.png) |
+
+### USD (OpenUSD)
+
+`simulation/usd/so101_on_frame.usd` is a USD scene with physically-based materials
+(aluminium, matte mica side panels, white/orange PLA, black plastic, steel) and soft
+overhead lighting, for usdview / Blender / Omniverse. See
+**[simulation/usd/README.md](simulation/usd/README.md)**.
+
+![USD render](simulation/assets/usd_render.png)
