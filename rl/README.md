@@ -41,6 +41,24 @@ Training parameters (parallel envs, iterations, PPO hyperparameters, network siz
 live in **[`train.toml`](train.toml)** — edit that file rather than the Python. Any value
 can still be overridden per-run on the CLI (e.g. `--env.scene.num-envs 2048`).
 
+### Pretrained checkpoint
+
+A trained policy ships in **[`checkpoints/model_3300.pt`](checkpoints/model_3300.pt)**
+(~4 MB): **55.6% place-success at 94% workspace randomization**, trained with the full
+recipe below (staged rewards, ADR spread curriculum, linear smoothness ramp). Try it
+without training anything:
+
+```bash
+# interactive viewer
+uv run soframe-play Mjlab-Pick-Place-Bin-SO101 --checkpoint-file checkpoints/model_3300.pt
+
+# fleet video (one arm -> endless field); vary --seed for different rollouts
+uv run soframe-render --checkpoint-file checkpoints/model_3300.pt --seed 0 --out fleet.mp4
+```
+
+Both need a GPU for best results but run on CPU (slowly; pass `--device cpu` to
+`soframe-render`).
+
 ### Fleet render
 
 `soframe-render` rolls out a trained checkpoint across many environments (default 400)
@@ -69,6 +87,7 @@ rl/
 ├── pyproject.toml            uv project; mjlab dep + console scripts
 ├── .python-version           pinned to 3.13
 ├── train.toml                training params (edit this to tune runs)
+├── checkpoints/model_3300.pt pretrained policy (55.6% success @ 94% randomization)
 └── src/soframe_rl/
     ├── __init__.py           imports config -> registers the task
     ├── train.py / play.py    thin wrappers around mjlab's CLIs

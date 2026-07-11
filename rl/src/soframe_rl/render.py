@@ -53,6 +53,9 @@ class Args:
   """Episode length during the render. Play mode never times out, so each arm would
   finish its attempt in a few seconds and then freeze; finite episodes auto-reset
   envs with fresh cube/bin positions so the whole field keeps acting."""
+  seed: int | None = None
+  """Env seed. Set different values to get different cube/bin layouts and rollouts
+  from the same checkpoint (e.g. to hunt for a take where the focus arm nails it)."""
   # Camera: fixed viewpoint behind the arm, easing straight back from the center
   # robot to a wide, filled field of robots that runs off the frame edges.
   azimuth: float = 180.0
@@ -95,6 +98,7 @@ def main() -> None:
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.scene.spec_fn = _add_skybox  # nice sky instead of a black background.
   env_cfg.episode_length_s = args.episode_seconds  # finite -> envs keep resetting.
+  env_cfg.seed = args.seed
   agent_cfg = load_rl_cfg(args.task)
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=args.device, render_mode=None)
@@ -146,10 +150,13 @@ def main() -> None:
   frames: list[np.ndarray] = []
   obs, _ = wrapped.reset()
   # Stagger episode phases so envs don't reset in lockstep (keeps the field alive
-  # with arms at every stage of the task instead of synchronized freezes).
+  # with arms at every stage of the task instead of synchronized freezes) — but pin
+  # the focus env to episode start, so the close-up always shows a complete
+  # attempt from t=0.
   env.episode_length_buf = torch.randint_like(
     env.episode_length_buf, high=int(env.max_episode_length)
   )
+  env.episode_length_buf[focus] = 0
 
   for f in range(n_frames):
     with torch.inference_mode():

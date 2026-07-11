@@ -7,3 +7,6 @@ outputs/
 wandb/
 *.pt
 *.onnx
+
+# ... except the released pretrained checkpoint
+!checkpoints/*.pt
