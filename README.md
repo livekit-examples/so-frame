@@ -2,8 +2,7 @@
 
 SO-Frame is a cheap and simple evaluation frame for SO101 arms with LeSlider add-on.
 
-<!-- TODO: replace with a photo/render of the assembled frame -->
-> 📷 _Image placeholder — add a photo/render of the assembled SO-Frame here._
+![SO-Frame — SO-101 arm on the linear frame with lightbox](media/livekit-box.png)
 
 ## Quick links
 
@@ -16,28 +15,34 @@ SO-Frame is a cheap and simple evaluation frame for SO101 arms with LeSlider add
 The box frame is built entirely from **2020 (20×20 mm) T-slot aluminium extrusion**. The
 [LeSlider][leslider] add-on provides the 1-DOF linear motion and has its own BOM.
 
+> Amazon links below are examples (US) to show the right part — brands/pack sizes vary and
+> listings change, so double-check specs before buying.
+
 ### Aluminium extrusion
 
-| Part | Length | Qty |
-|------|--------|-----|
-| 2020 T-slot extrusion | 1000 mm (100 cm) | 5 |
-| 2020 T-slot extrusion | 500 mm (50 cm)  | 9 |
+| Part | Length | Qty | Example link |
+|------|--------|-----|--------------|
+| 2020 T-slot extrusion | 1000 mm (100 cm) | 5 | [Amazon](https://www.amazon.com/dp/B07Z787MB8) |
+| 2020 T-slot extrusion | 500 mm (50 cm)  | 9 | [Amazon](https://www.amazon.com/dp/B07Z7H8MZG) |
 
-**Total: 9.5 m** of 2020 extrusion (5 × 1 m + 9 × 0.5 m).
+**Total: 9.5 m** of 2020 extrusion (5 × 1 m + 9 × 0.5 m). Extrusion is usually sold in
+fixed lengths or cut-to-order — buy to match, or cut longer stock down.
 
 ### Brackets & handles
 
-| Part | Qty |
-|------|-----|
-| 3-way hidden corner bracket (2020) | 8 |
-| 2020 angle bracket (profile joiner) | 2 |
-| Handle | 2 |
+| Part | Qty | Example link |
+|------|-----|--------------|
+| 3-way hidden corner bracket (2020) | 8 | [Amazon (8-pack)](https://www.amazon.com/dp/B08C9Q2TGW) |
+| 2020 angle bracket (L / profile joiner) | 2 | [Amazon](https://www.amazon.com/dp/B07GGLYX9V) |
+| Handle | 2 | [Amazon (2-pack)](https://www.amazon.com/dp/B0DK79GL6G) |
 
 ### Fasteners
 
 Every bracket/handle screw pairs with a matching drop-in **T-nut**. Use **M5** or **M4** to
 match your bracket & T-nut kit — 2020 kits are usually **M5** (some use **M4**); the counts
-are the same either way.
+are the same either way. An assortment kit like
+[this M5 T-nut + button-head screw set](https://www.amazon.com/dp/B0DZH4HCF1) covers all of
+the below.
 
 | Used on | Screws / part | Screws | T-nuts |
 |---------|---------------|--------|--------|
@@ -58,7 +63,7 @@ gantry + rack & pinion). It adds its own hardware — 4× V-wheel assemblies, 4�
 low-profile screws, 4× M5 nylock nuts, eccentric spacers, and the pinion/rack — see the
 [LeSlider][leslider] BOM.
 
-[leslider]: https://github.com/TODO/LeSlider <!-- TODO: set the real LeSlider link -->
+[leslider]: https://github.com/pham-tuan-binh/leslider
 
 
 ## Simulation
