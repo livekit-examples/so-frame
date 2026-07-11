@@ -121,10 +121,17 @@ overhead lighting, for usdview / Blender / Omniverse. See
 
 ## Reinforcement Learning
 
+<img src="assets/rl-endless.gif" alt="Endless RL render in simulation" width="440">
+
 `rl/` is a reinforcement-learning task, built on [mjlab](https://github.com/mujocolab/mjlab)
 (Isaac Lab's manager-based API on GPU-accelerated MuJoCo-Warp) and the
 [simulation](#simulation) MJCF model, where the arm **picks up a cube and places it in a
 bin**. The cube and bin are randomized on the workspace each episode.
+
+> **Heads up on the current policy.** It doesn't actually pick and place. The policy found a
+> shortcut and instead **putts the cube like a golf shot**, whacking it across the workspace
+> and into the bin rather than grasping and lifting it. It's a fun bit of reward hacking, and
+> the reward shaping is still being tuned to coax out a proper grasp.
 
 It imports the MJCF model unmodified (the only change is a `grasp_site` on the gripper) and
 adds the cube and bin as separate mjlab entities, so `simulation/` stays untouched. The
