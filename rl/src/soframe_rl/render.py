@@ -54,8 +54,8 @@ class Args:
   azimuth: float = 180.0
   """Fixed camera azimuth (no panning/orbit); 180 sits behind the arm, looking in."""
   elevation_close: float = -20.0
-  elevation_wide: float = -38.0
-  wide_dist_frac: float = 0.75
+  elevation_wide: float = -14.0
+  wide_dist_frac: float = 0.28
   """Wide-shot distance as a fraction of the grid radius. <1 keeps the grid
   overflowing the frame (robots to every edge) so it reads as endless."""
 
@@ -66,11 +66,30 @@ def _ease(t: float) -> float:
   return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 
 
+def _add_skybox(spec: mujoco.MjSpec) -> None:
+  """Add a gradient skybox so the background isn't black at low camera angles.
+
+  mjlab's plane scene has no skybox, so anything above the horizon renders black.
+  """
+  if any(t.type == mujoco.mjtTexture.mjTEXTURE_SKYBOX for t in spec.textures):
+    return
+  spec.add_texture(
+    name="render_skybox",
+    type=mujoco.mjtTexture.mjTEXTURE_SKYBOX,
+    builtin=mujoco.mjtBuiltin.mjBUILTIN_GRADIENT,
+    rgb1=[0.45, 0.6, 0.8],
+    rgb2=[0.1, 0.13, 0.2],
+    width=512,
+    height=512,
+  )
+
+
 def main() -> None:
   args = tyro.cli(Args)
 
   env_cfg = load_env_cfg(args.task, play=True)
   env_cfg.scene.num_envs = args.num_envs
+  env_cfg.scene.spec_fn = _add_skybox  # nice sky instead of a black background.
   agent_cfg = load_rl_cfg(args.task)
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=args.device, render_mode=None)
@@ -86,6 +105,10 @@ def main() -> None:
 
   # Host model/data for rendering; big geom budget for the whole fleet.
   model = env.sim.mj_model
+  # Size the offscreen framebuffer to the requested resolution, else MuJoCo renders
+  # into a smaller default buffer and letterboxes the rest with a black bar.
+  model.vis.global_.offwidth = args.width
+  model.vis.global_.offheight = args.height
   data = mujoco.MjData(model)
   renderer = mujoco.Renderer(
     model, height=args.height, width=args.width,
