@@ -4,10 +4,12 @@ SO-Frame is a cheap, open evaluation frame for SO101 arms (with the LeSlider add
 at [LiveKit](https://livekit.io) as a reproducible environment for debugging our robotics
 products: [Portal](https://github.com/livekit/portal) and
 [Agents](https://github.com/livekit/agents). It ships with a [simulation](#simulation)
-(URDF + MuJoCo + USD) and a [reinforcement-learning](#reinforcement-learning) pick-and-place
+(URDF + MuJoCo + USD) and a complementary [reinforcement-learning](#reinforcement-learning) pick-and-place
 task built on it.
 
-![SO-Frame: SO-101 arm on the linear frame with lightbox](assets/livekit-box.png)
+| Real | Sim | RL |
+| :---: | :---: | :---: |
+| <img src="assets/real.gif" alt="Real SO-Frame rig" width="320"> | <img src="assets/sim.png" alt="MuJoCo simulation" width="320"> | <img src="assets/rl-endless.gif" alt="Endless RL render" width="320"> |
 
 ## Quick links
 
@@ -102,8 +104,8 @@ camera details.
 
 Same setup, plus what each camera sees:
 
-| Setup | `frame_wrist_camera` | `frame_overhead_camera` |
-|:---:|:---:|:---:|
+|                 Setup                 |               `frame_wrist_camera`               |                `frame_overhead_camera`                 |
+| :-----------------------------------: | :----------------------------------------------: | :----------------------------------------------------: |
 | ![setup](simulation/assets/setup.png) | ![wrist camera](simulation/assets/cam_wrist.png) | ![overhead camera](simulation/assets/cam_overhead.png) |
 
 ### USD (OpenUSD)
@@ -113,8 +115,8 @@ Same setup, plus what each camera sees:
 overhead lighting, for usdview / Blender / Omniverse. See
 **[simulation/usd/README.md](simulation/usd/README.md)**.
 
-| Setup | `frame_wrist_camera` | `frame_overhead_camera` |
-|:---:|:---:|:---:|
+|                      Setup                      |                 `frame_wrist_camera`                 |                  `frame_overhead_camera`                   |
+| :---------------------------------------------: | :--------------------------------------------------: | :--------------------------------------------------------: |
 | ![USD render](simulation/assets/usd_render.png) | ![wrist camera](simulation/assets/usd_cam_wrist.png) | ![overhead camera](simulation/assets/usd_cam_overhead.png) |
 
 ## Reinforcement Learning
