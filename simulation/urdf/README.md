@@ -3,10 +3,10 @@
 `so101_on_frame.urdf` is a single, ready-to-use model that mounts the **SO-101 arm**
 onto the **1-DOF linear frame** (`so_frame`). Load this one file; mesh paths are
 relative to it, so it works out of the box in URDF viewers, PyBullet, Isaac, MuJoCo
-loaders, etc. from the `urdf/` directory.
+loaders, etc. from the `simulation/urdf/` directory.
 
 ```
-urdf/
+simulation/urdf/
 ├── so101_on_frame.urdf          <- load this
 ├── README.md
 └── components/
