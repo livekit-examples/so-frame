@@ -44,3 +44,33 @@ def grasp_lift_reward(
   )
   lift = (obj_pos_w[:, 2] - surface_z).clamp(min=0.0, max=max_lift)
   return reach * lift
+
+
+def transport_reward(
+  env: ManagerBasedRlEnv,
+  object_name: str,
+  command_name: str,
+  surface_z: float,
+  lift_ref: float = 0.03,
+  xy_std: float = 0.15,
+) -> torch.Tensor:
+  """Reward = (cube is lifted) * (cube is horizontally near the bin).
+
+  The lift gate (0->1 as the cube rises ``lift_ref`` off the surface) means only a
+  *carried* cube earns this, and the generous ``xy_std`` gives a smooth gradient that
+  pulls the lifted cube across the workspace toward the bin — the transport signal the
+  reach/bring terms lack.
+  """
+  obj: Entity = env.scene[object_name]
+  command = env.command_manager.get_term(command_name)
+  cube = obj.data.root_link_pos_w
+  lifted = ((cube[:, 2] - surface_z) / lift_ref).clamp(min=0.0, max=1.0)
+  horiz = torch.norm(cube[:, :2] - command.target_pos[:, :2], dim=-1)
+  proximity = torch.exp(-torch.square(horiz) / xy_std**2)
+  return lifted * proximity
+
+
+def in_bin_bonus(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """Milestone reward: 1.0 while the cube is inside the bin (from the command metric)."""
+  command = env.command_manager.get_term(command_name)
+  return command.metrics["in_bin"]

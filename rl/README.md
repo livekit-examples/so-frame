@@ -120,26 +120,55 @@ armature — so gains are first-class, tunable, sim-to-real knobs rather than bu
 Per-env, per-step weighted sum (`pick_place_env_cfg.py`). Distances use the `grasp_site`
 and the cube/target positions; `d` is Euclidean distance:
 
+The reward is a **staged decomposition** (reach → grasp/lift → carry → place → in-bin),
+each stage a dense term plus a milestone bonus — the standard recipe for pick-and-place RL
+(see [references](#approach--references)):
+
 | Term | Weight | Form | Purpose |
 |---|---|---|---|
-| `reach_and_bring` | +1.0 | `reach · (1 + bring)`, `reach = exp(−d(ee,cube)²/0.2²)`, `bring = exp(−d(cube,target)²/0.3²)` | The `(1 + bring)` gate means moving the cube toward the bin only pays **once the gripper has reached the cube** — so the policy learns to reach first, then transport. |
-| `place_precise` | +1.0 | `exp(−d(cube,target)²/0.05²)` | Tight Gaussian that sharpens the final placement over the bin. |
-| `grasp_lift` | +15.0 | `exp(−d(ee,cube)²/0.05²) · clamp(cube_z − surface, 0, 0.15)` | Pays for lifting the cube **only while the gripper is on it** — the signal that was missing when the first run stalled at reaching. |
+| `reach_and_bring` | +1.0 | `reach · (1 + bring)`, `reach = exp(−d(ee,cube)²/0.2²)`, `bring = exp(−d(cube,target)²/0.3²)` | Reach the cube (bring only pays once reached). |
+| `grasp_lift` | +15.0 | `exp(−d(ee,cube)²/0.05²) · clamp(cube_z − surface, 0, 0.15)` | Pays for lifting the cube **only while the gripper is on it** — forms the grasp. |
+| `transport` | +8.0 | `clamp((cube_z − surface)/0.03, 0, 1) · exp(−d_xy(cube,bin)²/0.15²)` | **Carries a lifted cube toward the bin.** The wide `0.15` width gives a real horizontal gradient — the transport signal `reach_and_bring` lacked (why run 1 stalled at reaching). |
+| `place_precise` | +3.0 | `exp(−d(cube,target)²/0.05²)` | Sharpens the final placement over the bin. |
+| `in_bin_bonus` | +10.0 | `1` while cube is in the bin | Milestone: reward the actual placement. |
 | `action_rate_l2` | −0.01 | `‖aₜ − aₜ₋₁‖²` | Discourages jerky action changes. |
 | `joint_pos_limits` | −10.0 | penalty for joints at their limits | Keeps the arm off its end-stops. |
-| `joint_vel_hinge` | −0.01→−1.0 | `Σ max(|v|−0.5, 0)²` | Penalizes joint speeds above 0.5 rad/s; weight is curriculum-ramped. |
+| `joint_vel_hinge` | −0.01→−1.0 | `Σ max(|v|−0.5, 0)²` | Penalizes joint speeds above 0.5 rad/s; curriculum-ramped. |
 
-`reach_and_bring` and `place_precise` are reused verbatim from mjlab's manipulation task
-(`staged_position_reward`, `bring_object_reward`). **Success** (tracked as a metric, not a
-reward) = cube center horizontally inside the bin footprint and below the rim.
+`reach_and_bring`/`place_precise` are reused from mjlab (`staged_position_reward`,
+`bring_object_reward`); `grasp_lift`, `transport`, `in_bin_bonus` are in `mdp/rewards.py`.
+**Success** (a metric, not a reward) = cube center inside the bin footprint, below the rim.
 
 ### Curriculum
 
-One term ramps the `joint_vel_hinge` weight by training progress: `−0.01` at step 0 →
-`−0.1` at 500 iterations → `−1.0` at 1000 iterations (steps counted as
-`iterations × num_steps_per_env`). Early training barely penalizes fast motion so the arm
-can freely explore reaching and grasping; later it's pushed hard toward smooth,
-hardware-safe trajectories.
+Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
+`iterations × num_steps_per_env`):
+
+- **Placement spread** (`mdp/curriculums.py`) — the key one. `PlaceInBinCommand.spread`
+  goes `0 → 1`: at **0** the bin and cube sit at a *fixed* layout with the cube a short hop
+  (~16 cm) from the bin, so the policy learns the whole pick→carry→place motion on an easy,
+  invariant scene; it's held fixed to ~iter 1000, then linearly ramped to **1** (full
+  workspace randomization of both cube and bin) by ~iter 3500. This "learn fixed, then
+  randomize" schedule is the curriculum + progressive-domain-randomization pattern from the
+  literature below.
+- **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −1.0` (iters
+  0 / 2000 / 4000): explore freely early, then push toward smooth, hardware-safe motion.
+
+### Approach & references
+
+The first attempt used only reach/bring and randomized placement from the start; it
+collapsed to "reach and hover" — no transport, no placing. The redesign follows common
+practice for pick-and-place RL:
+
+- **Staged, decomposed rewards with milestone bonuses** (reach → grasp → lift → carry →
+  place): [Pick-and-place RL survey](https://www.mdpi.com/2218-6581/10/3/105),
+  [Task decomposition + dedicated reward system](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10296071/),
+  [Reward engineering for object pick-and-place](https://arxiv.org/pdf/2001.03792).
+- **Curriculum: start fixed/easy, then scale up randomization by a 0→1 coefficient gated on
+  progress** — [Dynamic reward curriculum for loco-manipulation](https://arxiv.org/pdf/2509.13239),
+  [Domain randomization / ADR](https://www.emergentmind.com/topics/domain-randomization),
+  [Asymmetric self-play with ADR](https://arxiv.org/pdf/2101.04882).
+- **Start the object within easy reach early**, then expand: [SO-100 cube-lift in Isaac Lab](https://medium.com/@kabilankb2003/training-so-100-robot-for-cube-lifting-in-isaac-lab-from-simulation-to-intelligent-control-with-9e81f94c6d6e).
 
 ### Configs
 

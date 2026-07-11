@@ -7,7 +7,7 @@
 # command line via mjlab's tyro flags (e.g. --env.scene.num-envs 2048).
 
 [runner]
-num_envs = 4096            # parallel environments (scale to your GPU memory)
+num_envs = 2048            # parallel environments (scale to your GPU memory)
 num_steps_per_env = 24     # rollout length per PPO update
 max_iterations = 5000
 save_interval = 100

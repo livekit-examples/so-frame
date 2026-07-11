@@ -42,6 +42,7 @@ def so101_pick_place_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # Objects rest on the lightbox bottom panel (the added collision pad height).
   cfg.rewards["grasp_lift"].params["surface_z"] = WORK_SURFACE_Z
+  cfg.rewards["transport"].params["surface_z"] = WORK_SURFACE_Z
   cfg.commands["place"].surface_z = WORK_SURFACE_Z
 
   cfg.viewer.body_name = "gripper_link"
@@ -51,5 +52,7 @@ def so101_pick_place_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.episode_length_s = int(1e9)
     cfg.observations["actor"].enable_corruption = False
     cfg.curriculum = {}
+    # No curriculum in play -> show the hard case: full randomization.
+    cfg.commands["place"].initial_spread = 1.0
 
   return cfg

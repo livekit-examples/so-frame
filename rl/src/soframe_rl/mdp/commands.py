@@ -44,9 +44,14 @@ class PlaceInBinCommand(CommandTerm):
     self.bin_pos = torch.zeros(self.num_envs, 3, device=self.device)
     self.episode_success = torch.zeros(self.num_envs, device=self.device)
 
+    # Curriculum spread in [0, 1]: 0 = fixed nominal layout (cube next to bin),
+    # 1 = full workspace randomization. Set by the curriculum term each step.
+    self.spread = float(cfg.initial_spread)
+
     self.metrics["cube_to_bin"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["in_bin"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["episode_success"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["spread"] = torch.zeros(self.num_envs, device=self.device)
 
   # -- CommandTerm API -------------------------------------------------------
 
@@ -69,6 +74,7 @@ class PlaceInBinCommand(CommandTerm):
     self.episode_success = torch.maximum(self.episode_success, inside)
     self.metrics["in_bin"] = inside
     self.metrics["episode_success"] = self.episode_success
+    self.metrics["spread"][:] = self.spread
 
   def compute_success(self) -> torch.Tensor:
     return self.metrics["in_bin"] > 0.5
@@ -79,17 +85,27 @@ class PlaceInBinCommand(CommandTerm):
     origins = self._env.scene.env_origins[env_ids]
     r = self.cfg
 
+    c = self.spread
     lo = torch.tensor([r.workspace_x[0], r.workspace_y[0]], device=self.device)
     hi = torch.tensor([r.workspace_x[1], r.workspace_y[1]], device=self.device)
+    bin_nom = torch.tensor(r.bin_nominal, device=self.device)
+    cube_nom = torch.tensor(r.cube_nominal, device=self.device)
+    dev = torch.tensor(r.spread_xy, device=self.device)  # max deviation at spread=1.
 
-    # Sample bin + cube xy, rejecting cube placements too close to the bin.
-    bin_xy = sample_uniform(lo, hi, (n, 2), device=self.device)
-    cube_xy = sample_uniform(lo, hi, (n, 2), device=self.device)
-    for _ in range(r.max_reject_iters):
-      too_close = torch.norm(cube_xy - bin_xy, dim=-1) < r.min_separation
-      if not too_close.any():
-        break
-      cube_xy[too_close] = sample_uniform(lo, hi, (n, 2), device=self.device)[too_close]
+    def _sample_around(nom: torch.Tensor) -> torch.Tensor:
+      # nominal + spread-scaled uniform deviation, clamped to the workspace.
+      xy = nom + c * dev * sample_uniform(-1.0, 1.0, (n, 2), device=self.device)
+      return torch.clamp(xy, lo, hi)
+
+    # spread=0 -> both at their (fixed) nominals, cube a short hop from the bin.
+    bin_xy = _sample_around(bin_nom)
+    cube_xy = _sample_around(cube_nom)
+    if c > 0.0:  # only meaningful once positions vary.
+      for _ in range(r.max_reject_iters):
+        too_close = torch.norm(cube_xy - bin_xy, dim=-1) < r.min_separation
+        if not too_close.any():
+          break
+        cube_xy[too_close] = _sample_around(cube_nom)[too_close]
 
     z0 = torch.zeros(n, device=self.device)
     surf = r.surface_z
@@ -142,13 +158,21 @@ class PlaceInBinCommandCfg(CommandTermCfg):
   # Height (world z) of the work surface the bin sits on and the cube spawns above.
   surface_z: float = 0.083
 
-  # Workspace sampling ranges (env-relative). VALIDATE in viewer.
+  # Workspace bounds (env-relative) that sampled positions are clamped to.
   workspace_x: tuple[float, float] = (-0.35, -0.10)
   workspace_y: tuple[float, float] = (-0.65, -0.30)
   cube_z: tuple[float, float] = (0.02, 0.04)  # spawn clearance above surface_z.
 
-  # Keep the cube from spawning under/next to the bin.
-  min_separation: float = 0.14
+  # Curriculum: at spread=0 the bin and cube sit at these fixed nominals (cube a
+  # short hop from the bin -> easy place); spread in (0,1] scales uniform deviation
+  # up to +/- spread_xy, reaching full workspace coverage at spread=1.
+  initial_spread: float = 0.0
+  bin_nominal: tuple[float, float] = (-0.225, -0.475)
+  cube_nominal: tuple[float, float] = (-0.225, -0.315)  # ~0.16 m from bin in +y.
+  spread_xy: tuple[float, float] = (0.12, 0.16)
+
+  # Keep the cube from spawning under/next to the bin (applied once spread>0).
+  min_separation: float = 0.12
   max_reject_iters: int = 10
 
   def build(self, env: ManagerBasedRlEnv) -> PlaceInBinCommand:

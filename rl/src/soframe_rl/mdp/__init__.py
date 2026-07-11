@@ -14,6 +14,15 @@ from soframe_rl.mdp.commands import (
 from soframe_rl.mdp.observations import (
   cube_to_goal_distance as cube_to_goal_distance,
 )
+from soframe_rl.mdp.curriculums import (
+  command_spread_curriculum as command_spread_curriculum,
+)
 from soframe_rl.mdp.rewards import (
   grasp_lift_reward as grasp_lift_reward,
+)
+from soframe_rl.mdp.rewards import (
+  in_bin_bonus as in_bin_bonus,
+)
+from soframe_rl.mdp.rewards import (
+  transport_reward as transport_reward,
 )

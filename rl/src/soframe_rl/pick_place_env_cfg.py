@@ -119,7 +119,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "place_precise": RewardTermCfg(
       func=manipulation_mdp.bring_object_reward,
-      weight=1.0,
+      weight=3.0,
       params={"command_name": "place", "object_name": "cube", "std": 0.05},
     ),
     # Bridges reach -> transport: pays for lifting the cube while gripping it.
@@ -132,6 +132,24 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "reach_std": 0.05,
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # set per-robot.
       },
+    ),
+    # Carry a lifted cube toward the bin (the transport gradient reach/bring lack).
+    "transport": RewardTermCfg(
+      func=task_mdp.transport_reward,
+      weight=8.0,
+      params={
+        "object_name": "cube",
+        "command_name": "place",
+        "surface_z": 0.083,  # overridden per-robot.
+        "lift_ref": 0.03,
+        "xy_std": 0.15,
+      },
+    ),
+    # Milestone: cube actually inside the bin.
+    "in_bin_bonus": RewardTermCfg(
+      func=task_mdp.in_bin_bonus,
+      weight=10.0,
+      params={"command_name": "place"},
     ),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01),
     "joint_pos_limits": RewardTermCfg(
@@ -150,16 +168,32 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
   }
 
-  # Ramp up the smoothness penalty over training (same shape as mjlab's lift task).
+  # Curriculum. `common_step_counter` increments once per env step, i.e.
+  # iterations * num_steps_per_env (24). Thresholds below are in that unit
+  # (iteration count shown in comments), independent of num_envs.
   curriculum = {
+    # Placement curriculum: hold a fixed cube-next-to-bin layout while the policy
+    # learns pick->carry->place, then ramp to full workspace randomization.
+    "placement_spread": CurriculumTermCfg(
+      func=task_mdp.command_spread_curriculum,
+      params={
+        "command_name": "place",
+        "stages": [
+          {"step": 0, "spread": 0.0},
+          {"step": 1000 * 24, "spread": 0.0},   # hold fixed to ~iter 1000
+          {"step": 3500 * 24, "spread": 1.0},   # ramp to full by ~iter 3500
+        ],
+      },
+    ),
+    # Ramp up the smoothness penalty over training (same shape as mjlab's lift task).
     "joint_vel_hinge_weight": CurriculumTermCfg(
       func=manipulation_mdp.reward_curriculum,
       params={
         "reward_name": "joint_vel_hinge",
         "stages": [
           {"step": 0, "weight": -0.01},
-          {"step": 500 * 24, "weight": -0.1},
-          {"step": 1000 * 24, "weight": -1.0},
+          {"step": 2000 * 24, "weight": -0.1},
+          {"step": 4000 * 24, "weight": -1.0},
         ],
       },
     ),
