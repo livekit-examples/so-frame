@@ -2631,7 +2631,7 @@ function updateReadout(){
   xyz = "${f(xyz[0])} ${f(xyz[1])} ${f(xyz[2])}"
   rpy = "${f(rpy[0])} ${f(rpy[1])} ${f(rpy[2])}"
 
-frame_camera_wrist_joint (parent gripper_link):
+frame_wrist_camera_joint (parent gripper_link):
   xyz = "${f(cp.x)} ${f(cp.y)} ${f(cp.z)}"
   rpy = "${f(crpy[0])} ${f(crpy[1])} ${f(crpy[2])}"`;
 }
