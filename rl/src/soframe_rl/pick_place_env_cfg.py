@@ -188,16 +188,16 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # Smoothness penalty: LINEAR ramp, never a step. A discrete 10x jump (even
     # -0.01 -> -0.1) yanks the reward landscape and can collapse a trained policy;
-    # ramping per-step lets it adapt by slowing down gradually. Capped at -0.15 so
-    # the task reward stays dominant (a harsh penalty makes carrying cost more
-    # than placing earns, and the policy freezes).
+    # ramping per-step lets it adapt by slowing down gradually. Capped at -0.05:
+    # measured on this task, success holds to ~-0.05 and erodes fast beyond ~-0.06
+    # (the penalty starts outbidding the task rewards and carrying stops paying).
     "joint_vel_hinge_weight": CurriculumTermCfg(
       func=task_mdp.reward_weight_ramp_curriculum,
       params={
         "reward_name": "joint_vel_hinge",
         "milestones": [
           {"step": 3000 * 24, "weight": -0.01},  # flat until ~iter 3000
-          {"step": 7000 * 24, "weight": -0.15},  # then ramp gently to -0.15
+          {"step": 7000 * 24, "weight": -0.05},  # then ramp gently to -0.05
         ],
       },
     ),
