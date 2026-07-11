@@ -20,6 +20,7 @@ mjlab = { git = "https://github.com/mujocolab/mjlab.git", rev = "6c0b6bf0dc7c3fd
 [project.scripts]
 soframe-train = "soframe_rl.train:main"
 soframe-play = "soframe_rl.play:main"
+soframe-render = "soframe_rl.render:main"
 
 [tool.uv.build-backend]
 module-name = "soframe_rl"

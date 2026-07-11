@@ -83,7 +83,10 @@ model is imported, never edited (bar the one `grasp_site`):
   actuators**, and re-declares them in Python (see below). It's a *fixed-base* articulated
   entity, so mjlab's `auto_wrap_fixed_base_mocap` wraps it in a **mocap body**. That wrap
   also pulls in the frame's 45 loose `worldbody` geoms, so the whole rig (frame + arm)
-  duplicates and positions correctly in every parallel env.
+  duplicates and positions correctly in every parallel env. `get_spec` also adds an
+  **invisible collision pad** at the lightbox's bottom panel: that panel (`Part_1_1`) is
+  visual-only in the model, so without the pad objects fall through it to the ground plane
+  below the frame. The pad gives them a surface to rest on at `WORK_SURFACE_Z`.
 - **`cube`** — `assets.get_cube_spec()`: a free (`freejoint`) 2.5 cm, 30 g box with high
   tangential friction so the gripper can hold it.
 - **`bin`** — `assets.get_bin_spec()`: a base plate + four walls. No freejoint → fixed
@@ -91,9 +94,10 @@ model is imported, never edited (bar the one `grasp_site`):
   teleported to a new spot each episode.
 
 mjlab attaches each entity under a per-env frame and adds a ground **plane**
-(`TerrainEntityCfg`). The robot is lifted `+0.09 m` (`HOME_KEYFRAME.pos`) so the model's
-original floor level lands on that plane, which is the workspace surface. Physics runs at
-`timestep=0.005` with `decimation=4` (policy acts at 50 Hz).
+(`TerrainEntityCfg`). The rig sits at `HOME_KEYFRAME.pos.z = 0.09` so the frame's legs rest
+on the plane and the lightbox bottom panel is at `WORK_SURFACE_Z`; the cube and bin sit on
+that panel, in the arm's reach. Physics runs at `timestep=0.005` with `decimation=4`
+(policy acts at 50 Hz).
 
 ### Managers
 
@@ -120,6 +124,7 @@ and the cube/target positions; `d` is Euclidean distance:
 |---|---|---|---|
 | `reach_and_bring` | +1.0 | `reach · (1 + bring)`, `reach = exp(−d(ee,cube)²/0.2²)`, `bring = exp(−d(cube,target)²/0.3²)` | The `(1 + bring)` gate means moving the cube toward the bin only pays **once the gripper has reached the cube** — so the policy learns to reach first, then transport. |
 | `place_precise` | +1.0 | `exp(−d(cube,target)²/0.05²)` | Tight Gaussian that sharpens the final placement over the bin. |
+| `grasp_lift` | +15.0 | `exp(−d(ee,cube)²/0.05²) · clamp(cube_z − surface, 0, 0.15)` | Pays for lifting the cube **only while the gripper is on it** — the signal that was missing when the first run stalled at reaching. |
 | `action_rate_l2` | −0.01 | `‖aₜ − aₜ₋₁‖²` | Discourages jerky action changes. |
 | `joint_pos_limits` | −10.0 | penalty for joints at their limits | Keeps the arm off its end-stops. |
 | `joint_vel_hinge` | −0.01→−1.0 | `Σ max(|v|−0.5, 0)²` | Penalizes joint speeds above 0.5 rad/s; weight is curriculum-ramped. |

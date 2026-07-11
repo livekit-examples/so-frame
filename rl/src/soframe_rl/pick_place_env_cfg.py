@@ -122,6 +122,17 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=1.0,
       params={"command_name": "place", "object_name": "cube", "std": 0.05},
     ),
+    # Bridges reach -> transport: pays for lifting the cube while gripping it.
+    "grasp_lift": RewardTermCfg(
+      func=task_mdp.grasp_lift_reward,
+      weight=15.0,
+      params={
+        "object_name": "cube",
+        "surface_z": 0.083,  # overridden per-robot.
+        "reach_std": 0.05,
+        "asset_cfg": SceneEntityCfg("robot", site_names=()),  # set per-robot.
+      },
+    ),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01),
     "joint_pos_limits": RewardTermCfg(
       func=mdp.joint_pos_limits,

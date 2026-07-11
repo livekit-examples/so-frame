@@ -92,10 +92,12 @@ class PlaceInBinCommand(CommandTerm):
       cube_xy[too_close] = sample_uniform(lo, hi, (n, 2), device=self.device)[too_close]
 
     z0 = torch.zeros(n, device=self.device)
-    cube_z = sample_uniform(r.cube_z[0], r.cube_z[1], (n,), device=self.device)
+    surf = r.surface_z
+    bin_z = torch.full((n,), surf, device=self.device)  # bin base on the work floor.
+    cube_z = surf + sample_uniform(r.cube_z[0], r.cube_z[1], (n,), device=self.device)
     yaw = sample_uniform(-math.pi, math.pi, (n,), device=self.device)
 
-    bin_pos_w = torch.stack([bin_xy[:, 0], bin_xy[:, 1], z0], dim=-1) + origins
+    bin_pos_w = torch.stack([bin_xy[:, 0], bin_xy[:, 1], bin_z], dim=-1) + origins
     cube_pos_w = torch.stack([cube_xy[:, 0], cube_xy[:, 1], cube_z], dim=-1) + origins
     bin_quat = quat_from_euler_xyz(z0, z0, z0)  # upright, identity.
     cube_quat = quat_from_euler_xyz(z0, z0, yaw)
@@ -137,10 +139,13 @@ class PlaceInBinCommandCfg(CommandTermCfg):
   cube_name: str = "cube"
   bin_name: str = "bin"
 
-  # Workspace sampling ranges (env-relative), on the plane. VALIDATE in viewer.
+  # Height (world z) of the work surface the bin sits on and the cube spawns above.
+  surface_z: float = 0.083
+
+  # Workspace sampling ranges (env-relative). VALIDATE in viewer.
   workspace_x: tuple[float, float] = (-0.35, -0.10)
   workspace_y: tuple[float, float] = (-0.65, -0.30)
-  cube_z: tuple[float, float] = (0.02, 0.03)
+  cube_z: tuple[float, float] = (0.02, 0.04)  # spawn clearance above surface_z.
 
   # Keep the cube from spawning under/next to the bin.
   min_separation: float = 0.14

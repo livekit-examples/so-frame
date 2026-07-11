@@ -11,6 +11,7 @@ from soframe_rl.pick_place_env_cfg import make_pick_place_env_cfg
 from soframe_rl.so101_constants import (
   GRASP_SITE,
   SO101_ACTION_SCALE,
+  WORK_SURFACE_Z,
   get_so101_robot_cfg,
 )
 from soframe_rl.train_params import PARAMS
@@ -32,11 +33,16 @@ def so101_pick_place_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = SO101_ACTION_SCALE
 
-  # Point the end-effector observation + reward at the grasp site.
+  # Point the end-effector observation + rewards at the grasp site.
   cfg.observations["actor"].terms["ee_to_cube"].params["asset_cfg"].site_names = (
     GRASP_SITE,
   )
   cfg.rewards["reach_and_bring"].params["asset_cfg"].site_names = (GRASP_SITE,)
+  cfg.rewards["grasp_lift"].params["asset_cfg"].site_names = (GRASP_SITE,)
+
+  # Objects rest on the lightbox bottom panel (the added collision pad height).
+  cfg.rewards["grasp_lift"].params["surface_z"] = WORK_SURFACE_Z
+  cfg.commands["place"].surface_z = WORK_SURFACE_Z
 
   cfg.viewer.body_name = "gripper_link"
 

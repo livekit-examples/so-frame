@@ -48,15 +48,36 @@ ARM_JOINTS = (
 GRIPPER_JOINT = "gripper"
 
 
+# World-space height (m) of the lightbox bottom panel's top surface. The model's
+# bottom panel (Part_1_1 mesh, centered ~(-0.245, -0.5)) is visual-only (contype 0),
+# so objects fall through it to the ground plane. We add an invisible collision pad
+# coincident with it so the cube/bin rest on the (visible) white panel.
+WORK_SURFACE_Z = 0.083
+
+
 def get_spec() -> mujoco.MjSpec:
-  """Load the SO-101 model and strip its XML actuators.
+  """Load the SO-101 model, strip its XML actuators, add a collision floor pad.
 
   mjlab adds actuators from the ``EntityArticulationInfoCfg`` below; leaving the
-  XML's ``<position>`` actuators in place would double them up.
+  XML's ``<position>`` actuators in place would double them up. The lightbox's
+  bottom panel is visual-only, so we add an invisible collidable pad at
+  ``WORK_SURFACE_Z`` matching it, giving the arm a surface to place objects on.
   """
   spec = mujoco.MjSpec.from_file(str(SO101_XML))
   for actuator in list(spec.actuators):
     spec.delete(actuator)
+
+  # Pad top at WORK_SURFACE_Z (world). The rig is placed at init z (HOME_KEYFRAME),
+  # so convert to model-local z by subtracting that offset.
+  top_local = WORK_SURFACE_Z - HOME_KEYFRAME.pos[2]
+  half_thick = 0.02
+  spec.worldbody.add_geom(
+    name="work_floor_collision",
+    type=mujoco.mjtGeom.mjGEOM_BOX,
+    size=[0.30, 0.32, half_thick],
+    pos=[-0.245, -0.50, top_local - half_thick],
+    rgba=[1.0, 1.0, 1.0, 0.0],  # invisible; the model's white panel is the visual.
+  )
   return spec
 
 
@@ -117,10 +138,10 @@ ARTICULATION = EntityArticulationInfoCfg(
 ##
 # Initial state (home keyframe).
 #
-# pos z=+0.09 lifts the rig so the model's original floor level (z=-0.09 in the
-# standalone scene) coincides with mjlab's terrain plane at z=0, i.e. the workspace
-# surface. joint_pos is a gentle "arm folded toward the workspace, gripper open"
-# pose — VALIDATE and adjust in the viewer (sign conventions unchecked).
+# pos z=0.09 sets the frame's leg bottoms on mjlab's terrain plane (z=0) with the
+# lightbox body raised on them, matching the real rig. Objects rest on the added
+# white work floor at WORK_SURFACE_Z (0.08), inside the lightbox and in reach.
+# joint_pos is a gentle "arm folded toward the workspace, gripper open" pose.
 ##
 
 HOME_KEYFRAME = EntityCfg.InitialStateCfg(

@@ -14,3 +14,6 @@ from soframe_rl.mdp.commands import (
 from soframe_rl.mdp.observations import (
   cube_to_goal_distance as cube_to_goal_distance,
 )
+from soframe_rl.mdp.rewards import (
+  grasp_lift_reward as grasp_lift_reward,
+)
