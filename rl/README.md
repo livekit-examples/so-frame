@@ -232,18 +232,6 @@ The reward decomposition and curriculum follow common practice for pick-and-plac
   `so101_constants.py` and `assets.py` define the entities. `config/__init__.py` registers
   the task so mjlab's CLI can find it.
 
-## ⚠️ Must validate on the GPU box before trusting results
-
-These were set from geometry/estimates and need confirmation in the viewer:
-
-1. **Workspace ranges** (`so101_constants.WORKSPACE_*`, `PlaceInBinCommandCfg`) —
-   confirm the sampled cube/bin region is actually reachable.
-2. **Home pose + vertical offset** (`HOME_KEYFRAME`) — `pos.z=+0.09` aligns the
-   original floor with mjlab's plane; joint signs (esp. gripper open/close) are
-   unconfirmed.
-3. **Actuator gains** — starting values mirror the generic XML gains, **not**
-   calibrated STS3215 / rail-drive params. Tune + randomize before sim-to-real.
-
 ## TODO
 
 Deliberately not in this scaffold yet:
