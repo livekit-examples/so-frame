@@ -1,0 +1,3 @@
+WARNING Sat Jul 11 22:36:00 2026: Attach conflict when attaching 'so101_on_frame', policy is 'warning'
+integrator: parent has 0, child has 3, keeping parent value
+

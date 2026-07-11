@@ -178,10 +178,13 @@ Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
   randomization exactly as fast as the policy keeps up (backing off if it starts failing).
   Self-pacing to competence avoids a fixed schedule outrunning the policy and eroding
   success — the automatic-domain-randomization pattern from the literature below.
-- **Smoothness** — ramps the `joint_vel_hinge` weight `−0.01 → −0.1 → −0.2` (iters
-  0 / 3000 / 5000): explore freely early, then push toward smooth, hardware-safe motion.
-  The cap matters: if this penalty grows past the task reward, carrying the cube costs
-  more than placing earns and the policy freezes instead of moving.
+- **Smoothness** — the `joint_vel_hinge` weight ramps **linearly** from `−0.01` (flat
+  until ~iter 3000) to `−0.15` by ~iter 7000 (`reward_weight_ramp_curriculum`): explore
+  freely early, then push toward smooth, hardware-safe motion. Two properties matter:
+  the change must be *gradual* (a discrete several-fold jump in a penalty shifts the
+  reward landscape faster than PPO can adapt and can collapse a trained policy), and
+  *capped* (if the penalty outweighs the task reward, carrying the cube costs more than
+  placing earns and the policy freezes instead of moving).
 
 ### Approach & references
 

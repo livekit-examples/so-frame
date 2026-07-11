@@ -186,17 +186,18 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "ema_alpha": 0.01,
       },
     ),
-    # Gently ramp the smoothness penalty over training. Capped at -0.2: a harsh
-    # final stage makes carrying the cube cost more than placing earns, and the
-    # policy freezes instead of moving (task reward must stay dominant).
+    # Smoothness penalty: LINEAR ramp, never a step. A discrete 10x jump (even
+    # -0.01 -> -0.1) yanks the reward landscape and can collapse a trained policy;
+    # ramping per-step lets it adapt by slowing down gradually. Capped at -0.15 so
+    # the task reward stays dominant (a harsh penalty makes carrying cost more
+    # than placing earns, and the policy freezes).
     "joint_vel_hinge_weight": CurriculumTermCfg(
-      func=manipulation_mdp.reward_curriculum,
+      func=task_mdp.reward_weight_ramp_curriculum,
       params={
         "reward_name": "joint_vel_hinge",
-        "stages": [
-          {"step": 0, "weight": -0.01},
-          {"step": 3000 * 24, "weight": -0.1},
-          {"step": 5000 * 24, "weight": -0.2},
+        "milestones": [
+          {"step": 3000 * 24, "weight": -0.01},  # flat until ~iter 3000
+          {"step": 7000 * 24, "weight": -0.15},  # then ramp gently to -0.15
         ],
       },
     ),
