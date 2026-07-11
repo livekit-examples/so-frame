@@ -107,4 +107,6 @@ Same setup, plus what each camera sees:
 overhead lighting, for usdview / Blender / Omniverse. See
 **[simulation/usd/README.md](simulation/usd/README.md)**.
 
-![USD render](simulation/assets/usd_render.png)
+| Setup | `frame_wrist_camera` | `frame_overhead_camera` |
+|:---:|:---:|:---:|
+| ![USD render](simulation/assets/usd_render.png) | ![wrist camera](simulation/assets/usd_cam_wrist.png) | ![overhead camera](simulation/assets/usd_cam_overhead.png) |

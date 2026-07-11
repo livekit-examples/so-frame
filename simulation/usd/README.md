@@ -24,13 +24,23 @@ Colors follow the same scheme as the URDF/MJCF.
 ## Lighting
 
 Soft light from above: a large rectangular **area light** over the frame (like the softbox
-in the real rig) plus a dim **dome** for ambient fill. A framing **camera** (`/World/Camera`)
-is included.
+in the real rig) plus a dim **dome** for ambient fill.
+
+## Cameras
+
+Three cameras: `/World/Camera` (the framing view above) plus the two on-robot cameras at the
+same frames as the URDF/MJCF:
+
+| `frame_wrist_camera` | `frame_overhead_camera` |
+|:---:|:---:|
+| ![wrist](../assets/usd_cam_wrist.png) | ![overhead](../assets/usd_cam_overhead.png) |
 
 ## Render
 
 ```bash
 usdrecord --camera /World/Camera --imageWidth 1600 so101_on_frame.usd out.png
+# or a robot camera:
+usdrecord --camera /World/frame_wrist_camera --imageWidth 960 so101_on_frame.usd wrist.png
 ```
 
 (Any USD-aware renderer works; the preview above is Hydra/Storm.)
