@@ -8,7 +8,7 @@ SO-Frame is a cheap and simple evaluation frame for SO101 arms with LeSlider add
 
 - [Bill of Materials](#bill-of-materials)
 - [CAD (Onshape)](https://cad.onshape.com/documents/e30ffd8480ec1a7673eb62f7/w/bb71304b5f8bcda7c376a401/e/bfa112e7dd1062bab3fa5a65)
-- [Simulation (URDF + MuJoCo)](simulation/README.md)
+- [Simulation (URDF + MuJoCo)](#simulation)
 
 ## Bill of Materials
 
@@ -67,7 +67,35 @@ low-profile screws, 4× M5 nylock nuts, eccentric spacers, and the pinion/rack. 
 
 ## Simulation
 
-A ready-to-use combined model (both **URDF** and **MuJoCo/MJCF**) mounts the SO-101 arm on
-the frame's slider, with a wrist camera and an overhead camera. See
-**[simulation/README.md](simulation/README.md)** for renders, camera views, kinematics,
-mounting details, and the interactive alignment helper.
+The SO-Frame + SO-101 + two cameras, described two ways that share the same meshes: a
+**URDF** and a **MuJoCo (MJCF)** model. The arm mounts on the frame's slider, with a wrist
+camera and an overhead camera.
+
+### URDF
+
+`simulation/urdf/so101_on_frame.urdf` is the combined model for URDF viewers, PyBullet,
+Isaac, etc. It includes the slider joint, the arm, and both camera frames
+(`frame_wrist_camera`, `frame_overhead_camera`). See
+**[simulation/urdf/README.md](simulation/urdf/README.md)** for kinematics, joint limits, the
+mounting details, and the interactive camera-alignment helper.
+
+![SO-Frame setup](simulation/assets/setup.png)
+
+### MJCF (MuJoCo)
+
+`simulation/mjcf/scene.xml` is the MuJoCo model. On top of the URDF geometry it adds
+actuators, box collisions for the frame, a floor/light/skybox, and the two cameras as real
+renderable MuJoCo cameras. Load it with:
+
+```bash
+python -m mujoco.viewer --mjcf=simulation/mjcf/scene.xml
+```
+
+See **[simulation/mjcf/README.md](simulation/mjcf/README.md)** for actuators, collision, and
+camera details.
+
+Same setup, plus what each camera sees:
+
+| Setup | `frame_wrist_camera` | `frame_overhead_camera` |
+|:---:|:---:|:---:|
+| ![setup](simulation/assets/setup.png) | ![wrist camera](simulation/assets/cam_wrist.png) | ![overhead camera](simulation/assets/cam_overhead.png) |
