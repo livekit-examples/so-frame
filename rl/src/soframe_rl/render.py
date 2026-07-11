@@ -49,6 +49,10 @@ class Args:
   height: int = 720
   out: str = "fleet.mp4"
   device: str = "cuda:0"
+  episode_seconds: float = 6.0
+  """Episode length during the render. Play mode never times out, so each arm would
+  finish its attempt in a few seconds and then freeze; finite episodes auto-reset
+  envs with fresh cube/bin positions so the whole field keeps acting."""
   # Camera: fixed viewpoint behind the arm, easing straight back from the center
   # robot to a wide, filled field of robots that runs off the frame edges.
   azimuth: float = 180.0
@@ -90,6 +94,7 @@ def main() -> None:
   env_cfg = load_env_cfg(args.task, play=True)
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.scene.spec_fn = _add_skybox  # nice sky instead of a black background.
+  env_cfg.episode_length_s = args.episode_seconds  # finite -> envs keep resetting.
   agent_cfg = load_rl_cfg(args.task)
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=args.device, render_mode=None)
@@ -140,6 +145,11 @@ def main() -> None:
   n_frames = int(args.seconds * args.fps)
   frames: list[np.ndarray] = []
   obs, _ = wrapped.reset()
+  # Stagger episode phases so envs don't reset in lockstep (keeps the field alive
+  # with arms at every stage of the task instead of synchronized freezes).
+  env.episode_length_buf = torch.randint_like(
+    env.episode_length_buf, high=int(env.max_episode_length)
+  )
 
   for f in range(n_frames):
     with torch.inference_mode():
