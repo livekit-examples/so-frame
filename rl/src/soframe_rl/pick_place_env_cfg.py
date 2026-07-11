@@ -122,7 +122,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=3.0,
       params={"command_name": "place", "object_name": "cube", "std": 0.05},
     ),
-    # Bridges reach -> transport: pays for lifting the cube while gripping it.
+    # Pays for lifting the cube only while gripping it (forms the grasp).
     "grasp_lift": RewardTermCfg(
       func=task_mdp.grasp_lift_reward,
       weight=15.0,
@@ -133,7 +133,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # set per-robot.
       },
     ),
-    # Carry a lifted cube toward the bin (the transport gradient reach/bring lack).
+    # Carry a lifted cube toward the bin: a dense horizontal gradient to the bin.
     "transport": RewardTermCfg(
       func=task_mdp.transport_reward,
       weight=8.0,

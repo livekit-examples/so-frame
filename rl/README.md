@@ -128,7 +128,7 @@ each stage a dense term plus a milestone bonus — the standard recipe for pick-
 |---|---|---|---|
 | `reach_and_bring` | +1.0 | `reach · (1 + bring)`, `reach = exp(−d(ee,cube)²/0.2²)`, `bring = exp(−d(cube,target)²/0.3²)` | Reach the cube (bring only pays once reached). |
 | `grasp_lift` | +15.0 | `exp(−d(ee,cube)²/0.05²) · clamp(cube_z − surface, 0, 0.15)` | Pays for lifting the cube **only while the gripper is on it** — forms the grasp. |
-| `transport` | +8.0 | `clamp((cube_z − surface)/0.03, 0, 1) · exp(−d_xy(cube,bin)²/0.15²)` | **Carries a lifted cube toward the bin.** The wide `0.15` width gives a real horizontal gradient — the transport signal `reach_and_bring` lacked (why run 1 stalled at reaching). |
+| `transport` | +8.0 | `clamp((cube_z − surface)/0.03, 0, 1) · exp(−d_xy(cube,bin)²/0.15²)` | **Carries a lifted cube toward the bin.** The lift gate + wide `0.15` width give a horizontal gradient across the whole workspace, so a grasped cube is pulled to the bin. |
 | `place_precise` | +3.0 | `exp(−d(cube,target)²/0.05²)` | Sharpens the final placement over the bin. |
 | `in_bin_bonus` | +10.0 | `1` while cube is in the bin | Milestone: reward the actual placement. |
 | `action_rate_l2` | −0.01 | `‖aₜ − aₜ₋₁‖²` | Discourages jerky action changes. |
@@ -156,9 +156,7 @@ Two curriculum terms ramp by training progress (`common_step_counter`, i.e.
 
 ### Approach & references
 
-The first attempt used only reach/bring and randomized placement from the start; it
-collapsed to "reach and hover" — no transport, no placing. The redesign follows common
-practice for pick-and-place RL:
+The reward decomposition and curriculum follow common practice for pick-and-place RL:
 
 - **Staged, decomposed rewards with milestone bonuses** (reach → grasp → lift → carry →
   place): [Pick-and-place RL survey](https://www.mdpi.com/2218-6581/10/3/105),

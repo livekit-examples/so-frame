@@ -1,10 +1,10 @@
 """Task-specific rewards for the pick-and-place task.
 
-The base reach->bring reward is reused from mjlab; the missing piece that left the
-first policy stuck at "reach only" is a signal for actually grasping and lifting the
-cube. ``grasp_lift_reward`` provides it: it pays for cube height above the work
-surface, gated on the gripper being right at the cube, so the only way to earn it is
-to close on the cube and lift it.
+The base reach->bring reward is reused from mjlab. These terms add the rest of the
+staged signal: ``grasp_lift_reward`` pays for cube height above the work surface, gated
+on the gripper being right at the cube, so it is earned only by closing on the cube and
+lifting it; ``transport_reward`` then carries a lifted cube toward the bin; and
+``in_bin_bonus`` rewards the final placement.
 """
 
 from __future__ import annotations
@@ -58,8 +58,7 @@ def transport_reward(
 
   The lift gate (0->1 as the cube rises ``lift_ref`` off the surface) means only a
   *carried* cube earns this, and the generous ``xy_std`` gives a smooth gradient that
-  pulls the lifted cube across the workspace toward the bin — the transport signal the
-  reach/bring terms lack.
+  pulls the lifted cube across the workspace toward the bin.
   """
   obj: Entity = env.scene[object_name]
   command = env.command_manager.get_term(command_name)
