@@ -7,9 +7,9 @@ products: [Portal](https://github.com/livekit/portal) and
 (URDF + MuJoCo + USD) and a complementary [reinforcement-learning](#reinforcement-learning) pick-and-place
 task built on it.
 
-| Real | Sim | RL |
-| :---: | :---: | :---: |
-| <img src="assets/real.gif" alt="Real SO-Frame rig" width="320"> | <img src="assets/sim.png" alt="MuJoCo simulation" width="320"> | <img src="assets/rl-endless.gif" alt="Endless RL render" width="320"> |
+| Real | RL in Sim |
+| :---: | :---: |
+| <img src="assets/real.gif" alt="Real SO-Frame rig" width="440"> | <img src="assets/rl-endless.gif" alt="Endless RL render in simulation" width="440"> |
 
 ## Quick links
 
