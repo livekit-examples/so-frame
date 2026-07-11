@@ -26,19 +26,41 @@ uv sync                 # resolves + locks (uv.lock) + installs into rl/.venv
 mjlab is pulled from a pinned git commit (see `[tool.uv.sources]` in
 `pyproject.toml`); it is not yet on PyPI.
 
-## Train / play
+## Train / play / render
 
 ```bash
-uv run soframe-train Mjlab-Pick-Place-Bin-SO101
-uv run soframe-play  Mjlab-Pick-Place-Bin-SO101 --checkpoint-file <path>
+uv run soframe-train  Mjlab-Pick-Place-Bin-SO101
+uv run soframe-play   Mjlab-Pick-Place-Bin-SO101 --checkpoint-file <path>
+uv run soframe-render --checkpoint-file <path> --out fleet.mp4
 ```
 
-Both wrappers `import soframe_rl` first (registering the task) and then delegate to
-mjlab's own `train`/`play` CLIs, so all of mjlab's flags apply.
+The train/play wrappers `import soframe_rl` first (registering the task) and then delegate
+to mjlab's own `train`/`play` CLIs, so all of mjlab's flags apply.
 
 Training parameters (parallel envs, iterations, PPO hyperparameters, network size)
 live in **[`train.toml`](train.toml)** — edit that file rather than the Python. Any value
 can still be overridden per-run on the CLI (e.g. `--env.scene.num-envs 2048`).
+
+### Fleet render
+
+`soframe-render` rolls out a trained checkpoint across many environments (default 400)
+and renders a single camera move: it starts behind one arm at its lightbox, then eases
+straight back (no panning) to a low, wide shot where the grid of rigs overflows the frame
+and reads as an endless field. Useful both as a hero shot and to debug what a policy
+actually does.
+
+Details worth knowing:
+
+- **Episodes are finite and phase-staggered** (`--episode-seconds`, default 6). Play mode
+  never times out, so an arm would finish one attempt and freeze; here envs continuously
+  auto-reset to fresh cube/bin layouts, keeping every arm active for the whole clip.
+- The focus env is the one nearest the grid center and renders in full; all other envs'
+  moving parts are stamped in with `mjv_addGeoms`.
+- Camera framing is tunable: `--azimuth` (180 = behind the arm), `--elevation-close/-wide`,
+  `--wide-dist-frac` (wide-shot distance as a fraction of grid radius; <1 keeps robots
+  running past the frame edges). A gradient skybox is added (the plane scene has none).
+- Runs on CPU or GPU (`--device`). On a shared box, prefer `nice -n 19` + CPU if a
+  training run owns the GPU.
 
 ## Layout
 
@@ -50,14 +72,18 @@ rl/
 └── src/soframe_rl/
     ├── __init__.py           imports config -> registers the task
     ├── train.py / play.py    thin wrappers around mjlab's CLIs
+    ├── render.py             fleet render: one arm -> endless field (soframe-render)
     ├── train_params.py       loads train.toml
     ├── so101_constants.py    robot EntityCfg: loads the imported XML, strips its
     │                         actuators, re-declares actuators/gains in Python,
-    │                         home keyframe, action scale, workspace ranges
+    │                         home keyframe, action scale, work-floor collision pad
     ├── assets.py             get_cube_spec (free box) + get_bin_spec (fixed tray)
     ├── pick_place_env_cfg.py robot-agnostic manager wiring (obs/act/reward/etc.)
     ├── mdp/
-    │   ├── commands.py       PlaceInBinCommand: randomizes cube + bin, goal = bin
+    │   ├── commands.py       PlaceInBinCommand: spread-scaled cube+bin placement,
+    │   │                     goal inside the bin, carry-progress tracking
+    │   ├── rewards.py        grasp_lift, potential-based transport, in_bin_bonus
+    │   ├── curriculums.py    command_spread_curriculum (ADR: success-gated spread)
     │   └── observations.py   cube_to_goal_distance (command-agnostic)
     └── config/
         ├── env_cfg.py        SO-101 specialization (entities, scale, grasp site)
