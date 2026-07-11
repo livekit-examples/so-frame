@@ -1,0 +1,28 @@
+<mujoco model="sts3215">
+  <!--
+    Feetech STS3215 serial-bus servo: actuator model for the SO-101 arm joints.
+    Identified parameters (BAM, model "m1"):
+      kt               = 1.21164135295077      (torque constant)
+      R                = 2.6761663274455603      (winding resistance)
+      armature         = 0.02840336348682085
+      friction_base    = 0.05239296084748866      (Coulomb / dry friction)
+      friction_viscous = 0.05908515565091076
+      q_offset         = -0.05116067663549731   (per-joint calibration zero offset, rad)
+
+    MuJoCo mapping (class "sts3215"):
+      joint.armature     = armature
+      joint.frictionloss = friction_base                 (Coulomb)
+      joint.damping      = friction_viscous + kt^2/R      (viscous + motor back-EMF)
+                         = 0.05908515565091076 + 0.548574 = 0.607659
+    The position actuator is the servo's internal position loop; kp/forcerange are the
+    controller gain and torque limit (tune to taste; STS3215 stalls ~3 N-m).
+    q_offset is a calibration offset (not applied here; the URDF uses the "new calib" zero).
+    Include this file and tag the arm joints/actuators with  class="sts3215".
+  -->
+  <default>
+    <default class="sts3215">
+      <joint armature="0.0284034" damping="0.607659" frictionloss="0.0523930"/>
+      <position kp="20" forcerange="-3.0 3.0"/>
+    </default>
+  </default>
+</mujoco>

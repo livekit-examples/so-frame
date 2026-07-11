@@ -10,7 +10,8 @@ python -m mujoco.viewer --mjcf=simulation/mjcf/scene.xml
 ```
 simulation/mjcf/
 ├── scene.xml            <- load this (model + floor/light/skybox)
-└── so101_on_frame.xml   <- the model (bodies, joints, actuators, cameras)
+├── so101_on_frame.xml   <- the model (bodies, joints, actuators, cameras)
+└── sts3215.xml          <- Feetech STS3215 servo model (included by the model)
 ```
 
 Meshes are shared with the URDF via `meshdir="../urdf"`, so this reuses
@@ -23,8 +24,11 @@ Meshes are shared with the URDF via `meshdir="../urdf"`, so this reuses
 `dof_slider` (the frame slider) + `shoulder_pan`, `shoulder_lift`, `elbow_flex`,
 `wrist_flex`, `wrist_roll`, `gripper`.
 
-> Actuator gains and joint damping/armature are reasonable generic values (not vendor STS3215
-> params). Tune the `arm` / `slider` `<default>` classes in `so101_on_frame.xml` for your use.
+The 6 arm joints use the **`sts3215` class** from `sts3215.xml` (`<include>`d by the model),
+which carries the Feetech STS3215's identified parameters (BAM model): `armature`,
+`frictionloss` (Coulomb), and `damping` = viscous friction + `kt²/R` back-EMF. Position-loop
+`kp`/`forcerange` live in that class too and are tunable. The `dof_slider` (frame rack &
+pinion) uses its own `slider` class in `so101_on_frame.xml`.
 
 ## Cameras
 
