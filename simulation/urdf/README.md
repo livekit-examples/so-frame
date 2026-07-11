@@ -35,7 +35,7 @@ Root link: `root` (the fixed frame structure).
 | `gripper`      | revolute   | −0.17453 … +1.74533 rad  | SO-101 gripper jaw                     |
 
 Chain: `root → … → 100cm_4 →[dof_slider]→ 20mm_gantry_plate →[fixed]→ base_mount
-→[so101_mount]→ base_link →[shoulder_pan]→ … → gripper_link →[fixed]→ frame_camera_wrist`.
+→[so101_mount]→ base_link →[shoulder_pan]→ … → gripper_link →[fixed]→ frame_wrist_camera`.
 
 The **new calibration** of the arm is used (each arm joint's zero is the middle of its
 range).
@@ -58,13 +58,22 @@ hole pattern milled into the `base_mount` plate (best fit: yaw ≈ 90°, ~1.2 mm
 matched holes). If you later get the exact CAD mate, only the `so101_mount` `<origin>`
 needs adjusting; nothing else changes.
 
-## Wrist camera
+## Cameras
+
+The model has **two camera frames** (both use the +Z = view direction convention):
+
+- **`frame_wrist_camera`** — eye-in-hand, on the wrist (see below).
+- **`frame_overhead_camera`** — on the frame's `32mm_camera_holder`, looking down at the
+  workspace. This one comes straight from the `so_frame` CAD (an Onshape mate connector) and
+  is fixed to the frame.
+
+### Wrist camera
 
 The **Hex-Nut Recess Wrist Camera (MF)** mount (`components/wrist_camera/`) is attached to
 the wrist-roll follower via the fixed joint `wrist_camera_mount_joint` (parent
 `gripper_link`), so it rolls with `wrist_roll` but does not move when the gripper opens.
 
-- **`frame_camera_wrist`** is the virtual camera's optical frame; attach your camera here.
+- **`frame_wrist_camera`** is the virtual camera's optical frame; attach your camera here.
   Convention: **+Z = view direction, +X = image right, +Y = image down** (REP-103 optical
   frame). It is posed to look along the gripper's approach axis (gripper −Z), toward the
   grasp, matching the reference installation photos.
@@ -72,7 +81,7 @@ the wrist-roll follower via the fixed joint `wrist_camera_mount_joint` (parent
 
 The mount pose was aligned interactively with `helper/wrist_camera_aligner.html`: open it
 in a browser, drag the gizmo to line the mount's clamp holes up with the gripper's holes,
-and it prints the `wrist_camera_mount_joint` / `frame_camera_wrist_joint` origins to paste
+and it prints the `wrist_camera_mount_joint` / `frame_wrist_camera_joint` origins to paste
 back into the URDF. To nudge it, edit those two joint origins (or re-run the helper).
 
 ## Colors
@@ -89,4 +98,4 @@ Set in the combined URDF (edit the palette at the top of the build if you want t
 `so101_on_frame.urdf` is assembled from `components/base_frame/urdf/so_frame.urdf` and
 `components/so101_arm/so101_new_calib.urdf`: mesh paths rewritten to be relative, the two
 robots merged, the `so101_mount` joint added, the wrist camera (`wrist_camera_mount` +
-`frame_camera_wrist`) attached, and the color scheme applied.
+`frame_wrist_camera`) attached, and the color scheme applied.

@@ -1,0 +1,53 @@
+# SO-101 on Linear Frame (MuJoCo / MJCF)
+
+MuJoCo version of the combined model. **Load `scene.xml`** (it includes the model plus a
+floor, lights, and skybox):
+
+```bash
+python -m mujoco.viewer --mjcf=simulation/mjcf/scene.xml
+```
+
+```
+simulation/mjcf/
+├── scene.xml            <- load this (model + floor/light/skybox)
+└── so101_on_frame.xml   <- the model (bodies, joints, actuators, cameras)
+```
+
+Meshes are shared with the URDF via `meshdir="../urdf"`, so this reuses
+`../urdf/components/**/*.stl` (no duplicated files).
+
+## Actuators
+
+7 position actuators, `ctrlrange` set to each joint's limit:
+
+`dof_slider` (the frame slider) + `shoulder_pan`, `shoulder_lift`, `elbow_flex`,
+`wrist_flex`, `wrist_roll`, `gripper`.
+
+> Actuator gains and joint damping/armature are reasonable generic values (not vendor STS3215
+> params). Tune the `arm` / `slider` `<default>` classes in `so101_on_frame.xml` for your use.
+
+## Cameras
+
+Two cameras, named to match the URDF camera frames:
+
+| Camera | View |
+|--------|------|
+| `frame_wrist_camera`    | eye-in-hand, looks down the gripper approach at the grasp |
+| `frame_overhead_camera` | on the frame's camera-holder, looks down at the workspace |
+
+Render from one with `renderer.update_scene(data, camera="frame_wrist_camera")` (or
+`"frame_overhead_camera"`). Note: MuJoCo cameras look down their local **−Z**, so the poses
+here are the optical frames rotated 180° about X from the REP-103 (+Z view) convention used
+in the URDF.
+
+## Collision
+
+The frame meshes are **visual only** (`contype=0`). Collision for the 2020 frame is provided
+by 14 **box geoms** (one per extrusion, group 3) so the arm can't pass through the rails. The
+arm keeps its own mesh collisions. The frame is static (welded to the world); only the slider
+and the arm move.
+
+## Regenerating
+
+Converted from `../urdf/so101_on_frame.urdf` with MuJoCo's URDF importer, then augmented with
+the `<option>`/`<default>`, actuators, the two cameras, and the extrusion collision boxes.

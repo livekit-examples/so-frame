@@ -2,7 +2,7 @@
 <robot name="so101_on_frame">
   <!-- Combined model: SO-101 arm on the 1-DOF linear frame, with wrist camera. -->
   <!-- Actuated joints: dof_slider (prismatic) + shoulder_pan/shoulder_lift/elbow_flex/wrist_flex/wrist_roll/gripper. -->
-  <!-- frame_camera_wrist = camera optical frame (+Z = view direction, +X right, +Y down). -->
+  <!-- frame_wrist_camera = camera optical frame (+Z = view direction, +X right, +Y down). -->
   <!-- Mesh paths are relative to this file. -->
   <material name="3d_printed">
     <color rgba="1 1 1 1" />
@@ -1803,16 +1803,16 @@
     <parent link="gripper_link" />
     <child link="wrist_camera_mount" />
   </joint>
-  <link name="frame_camera_wrist">
+  <link name="frame_wrist_camera">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="1e-6" />
       <inertia ixx="1e-9" ixy="0" ixz="0" iyy="1e-9" iyz="0" izz="1e-9" />
     </inertial>
   </link>
-  <joint name="frame_camera_wrist_joint" type="fixed">
+  <joint name="frame_wrist_camera_joint" type="fixed">
     <origin xyz="0.0025 0.0675 -0.0062" rpy="-2.7071 0 3.14159" />
     <parent link="gripper_link" />
-    <child link="frame_camera_wrist" />
+    <child link="frame_wrist_camera" />
   </joint>
 </robot>
