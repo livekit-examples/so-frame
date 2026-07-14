@@ -921,8 +921,10 @@ if __name__ == "__main__":
                     print(f"Step {global_step}: new best (success_at_end={score[0]:.2f}, "
                           f"return={score[1]:.2f}) saved to {best_model_path}")
 
-        # Collect
-        if global_step < args.learning_starts:
+        # Collect. Before learning_starts, a fresh run explores with random actions; a
+        # warm-started run (--checkpoint) collects with the loaded policy instead, so the
+        # buffer holds its (good) trajectories rather than junk by the time updates begin.
+        if global_step < args.learning_starts and args.checkpoint is None:
             actions = envs.action_space.sample()
         else:
             actions = get_rollout_action(obs['rgb'], obs['state'])
