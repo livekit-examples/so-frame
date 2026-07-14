@@ -60,6 +60,7 @@
     <geom pos="-0.895 0.0847604 -0.021219" quat="-0.707108 2.23686e-06 0.707106 2.23686e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.5 0.0100032 1.4268e-06" quat="-3.17504e-06 -0.707108 3.17504e-06 -0.707106" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="-0.245005 -0.499999 -0.0120002" quat="0.707104 1.65916e-06 9.38177e-07 -0.70711" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_1" />
+    <geom pos="-0.245005 -0.499999 -0.0110002" quat="0.500001 0.499999 -0.500003 0.499997" type="box" size="0.02 0.255 0.52" density="0" rgba="1 1 1 0" />
     <geom pos="-0.415245 2.14664e-06 0.0212227" quat="0.499997 0.500002 0.499997 -0.500004" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_100cm" />
     <geom pos="-0.500013 -1.01 4.10695e-06" quat="-0.500002 -0.500002 -0.499999 -0.499996" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="0.404988 -0.93525 0.0212218" quat="-0.707105 -9.3818e-07 -0.707108 5.4119e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
@@ -73,13 +74,16 @@
     <geom pos="0.40499 -1.03123 0.594757" quat="-0.500002 -0.500004 -0.499996 -0.499998" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="0.00999041 -1.01 0.520002" quat="0.500003 -0.500003 -0.499999 0.499995" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="-0.245009 -1.022 0.260001" quat="7.07107e-06 4.47371e-06 0.707105 0.707109" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_2" />
+    <geom pos="-0.245009 -1.021 0.260001" quat="-7.0132e-07 0.707113 0.707101 3.29868e-06" type="box" size="0.02 0.255 0.27" density="0" rgba="1 1 1 0" />
     <geom pos="-0.311569 -1.01 0.566501" quat="-0.707111 3.60506e-07 2.95783e-06 -0.707102" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.1 0.1 0.1 1" mesh="Handle" />
     <geom pos="-0.266234 -0.935198 1.43" quat="1 2.3464e-06 -2.34642e-06 -6.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.24506 -1.00995 0.715002" quat="1 2.3464e-06 -2.34642e-06 -6.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="_32mm_Camera_Holder" />
     <geom pos="-0.502003 -0.499994 0.260003" quat="-0.500002 -0.500004 -0.499996 -0.499998" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1" />
+    <geom pos="-0.501003 -0.499994 0.260003" quat="0.707108 -0.707105 4.24264e-06 -4.24264e-06" type="box" size="0.02 0.27 0.52" density="0" rgba="1 1 1 0" />
     <geom pos="-0.894999 0.0847651 0.498781" quat="0.707108 -7.64876e-06 -0.707106 -3.17504e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.31156 0.0100021 0.566501" quat="0.707112 -1.29864e-06 5.77241e-06 0.707101" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.1 0.1 0.1 1" mesh="Handle" />
     <geom pos="-0.245001 0.021999 0.260001" quat="0.707109 0.707105 -4.83419e-06 -6.71058e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_2" />
+    <geom pos="-0.245001 0.020999 0.260001" quat="2.93819e-06 0.707101 -0.707113 1.0618e-06" type="box" size="0.02 0.255 0.27" density="0" rgba="1 1 1 0" />
     <geom pos="-0.0090026 -1 0.0299964" quat="-1 -1.76036e-12 -1.32679e-06 1.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Angle_Bracket_2020_Aluminium_Profile_Joiner" />
     <geom pos="-0.0212212 -2.91741e-07 0.114755" quat="-0.707105 -0.707108 0 1.87637e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_100cm" />
     <geom pos="0.00800005 -5.79609e-08 0.03" quat="-1.32679e-06 -2.65359e-06 3.52081e-12 -1" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Angle_Bracket_2020_Aluminium_Profile_Joiner" />

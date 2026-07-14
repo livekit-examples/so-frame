@@ -4,18 +4,18 @@ SO-Frame is a cheap, open evaluation frame for SO101 arms (with the LeSlider add
 at [LiveKit](https://livekit.io) as a reproducible environment for debugging our robotics
 products: [Portal](https://github.com/livekit/portal) and
 [Agents](https://github.com/livekit/agents). It ships with a [simulation](#simulation)
-(URDF + MuJoCo + USD) and a complementary [reinforcement-learning](#reinforcement-learning) pick-and-place
-task built on it.
+(URDF + MuJoCo + USD) and a complementary [reinforcement-learning](#reinforcement-learning)
+pick-and-place task, solved two ways (state-based and vision-based) built on it.
 
-| Real | RL in Sim |
-| :---: | :---: |
+|                              Real                               |                                      RL in Sim                                      |
+| :-------------------------------------------------------------: | :---------------------------------------------------------------------------------: |
 | <img src="assets/real.gif" alt="Real SO-Frame rig" width="440"> | <img src="assets/rl-endless.gif" alt="Endless RL render in simulation" width="440"> |
 
 ## Quick links
 
 - [Bill of Materials](#bill-of-materials)
 - [CAD (Onshape)](https://cad.onshape.com/documents/e30ffd8480ec1a7673eb62f7/w/bb71304b5f8bcda7c376a401/e/bfa112e7dd1062bab3fa5a65)
-- [Simulation (URDF + MuJoCo)](#simulation)
+- [Simulation (URDF + MuJoCo + USD)](#simulation)
 - [Reinforcement Learning](#reinforcement-learning)
 
 ## Bill of Materials
@@ -75,9 +75,9 @@ low-profile screws, 4× M5 nylock nuts, eccentric spacers, and the pinion/rack. 
 
 ## Simulation
 
-The SO-Frame + SO-101 + two cameras, described two ways that share the same meshes: a
-**URDF** and a **MuJoCo (MJCF)** model. The arm mounts on the frame's slider, with a wrist
-camera and an overhead camera.
+The SO-Frame + SO-101 + two cameras, described three ways that share the same meshes: a
+**URDF**, a **MuJoCo (MJCF)** model, and a **USD** scene. The arm mounts on the frame's
+slider, with a wrist camera and an overhead camera.
 
 ### URDF
 
@@ -121,24 +121,25 @@ overhead lighting, for usdview / Blender / Omniverse. See
 
 ## Reinforcement Learning
 
+`rl/` contains two implementations of the same **pick-up-a-cube-and-place-it-in-a-bin**
+task, with the cube and bin randomized each episode. They differ in what the policy
+observes: `rl/mjlab/` is **state-based** (trains on ground-truth object poses), while
+`rl/maniskill/` is **vision-based** (trains on camera pixels only).
+
+### `rl/mjlab/`
+
 <img src="assets/rl-endless.gif" alt="Endless RL render in simulation" width="440">
 
-`rl/` is a reinforcement-learning task, built on [mjlab](https://github.com/mujocolab/mjlab)
-(Isaac Lab's manager-based API on GPU-accelerated MuJoCo-Warp) and the
-[simulation](#simulation) MJCF model, where the arm **picks up a cube and places it in a
-bin**. The cube and bin are randomized on the workspace each episode.
+Built on [mjlab](https://github.com/mujocolab/mjlab) (Isaac Lab's manager-based API on
+GPU-accelerated MuJoCo-Warp), using the [simulation](#simulation) MJCF model. Trains with
+PPO (rsl-rl) across thousands of parallel environments on ground-truth cube/bin poses.
 
 > **Heads up on the current policy.** It doesn't actually pick and place. The policy found a
 > shortcut and instead **putts the cube like a golf shot**, whacking it across the workspace
 > and into the bin rather than grasping and lifting it. It's a fun bit of reward hacking, and
 > the reward shaping is still being tuned to coax out a proper grasp.
 
-It imports the MJCF model unmodified (the only change is a `grasp_site` on the gripper) and
-adds the cube and bin as separate mjlab entities, so `simulation/` stays untouched. The
-policy trains with PPO (rsl-rl) across thousands of parallel environments; a staged
-reach→bring reward with a smoothness curriculum drives the behaviour.
-
-It's a [uv](https://docs.astral.sh/uv/) project. From `rl/`:
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/mjlab/`:
 
 ```bash
 uv sync
@@ -146,7 +147,41 @@ uv run soframe-train Mjlab-Pick-Place-Bin-SO101
 uv run soframe-play  Mjlab-Pick-Place-Bin-SO101 --checkpoint-file <path>
 ```
 
-Training parameters live in `rl/train.toml`. Because it runs on MuJoCo-Warp, training needs a
-**Linux + NVIDIA GPU** machine (macOS can build and CPU smoke-test). See
-**[rl/README.md](rl/README.md)** for the full environment, reward, curriculum, manager, and
-config details.
+Training parameters live in `rl/mjlab/train.toml`. Because it runs on MuJoCo-Warp, training
+needs a **Linux + NVIDIA GPU** machine (macOS can build and CPU smoke-test). See
+**[rl/mjlab/README.md](rl/mjlab/README.md)** for the full environment, reward, curriculum,
+manager, and config details.
+
+### `rl/maniskill/`
+
+Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
+RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
+(SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
+Sim-to-Real Robotics](https://arxiv.org/abs/2602.21203) (Almuzairee & Christensen, 2026), a
+visual Soft Actor-Critic that reaches strong success rates in **minutes** of wall-clock time.
+
+This folder is a direct port of the paper's [reference implementation](https://github.com/aalmuzairee/squint)
+(which already targets an SO-101 arm in ManiSkill3), retargeted onto this repo's
+frame-mounted rig and its existing calibrated `frame_wrist_camera`/`frame_overhead_camera`
+mounts and `simulation/urdf/so101_on_frame.urdf`.
+
+**SAPIEN vs MuJoCo camera convention**: the two engines define a camera's local forward/right/up
+axes differently. SAPIEN uses `(forward, right, up) = (+X, -Y, +Z)` (see
+`sapien_utils.look_at`'s docstring), while MuJoCo uses `(forward, right, up) = (-Z, +X, +Y)`.
+Both `simulation/urdf/so101_on_frame.urdf` and `simulation/mjcf/so101_on_frame.xml` calibrate
+their camera joints/bodies from the same physical mount, at the same position, but the URDF's
+rotation is the MJCF's rotation converted through this fixed axis remap (a constant rotation
+`P` with `R_sapien = R_mujoco @ P`), not a copy of the MJCF's raw quaternion: porting the
+quaternion directly renders the wrong direction in SAPIEN despite the shared calibration.
+
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/maniskill/`:
+
+```bash
+uv sync
+uv run python examples/visualize_sim.py
+uv run python train_squint.py --env_id=SOFramePickPlaceBin-v1
+```
+
+Needs a **Linux + NVIDIA GPU** machine (ManiSkill3/SAPIEN + CUDA; macOS can read/edit code but
+not train). See **[rl/maniskill/README.md](rl/maniskill/README.md)** for the task,
+observation/reward design, domain randomization, and training details.

@@ -1,0 +1,785 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "MuJoCo USD Converter v0.2.0"
+    }
+    defaultPrim = "so101_on_frame"
+    doc = """Generated from Composed Stage of root layer /tmp/tmp7xo4emga/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dz9udo35/usdex_so101_on_frame/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dz9udo35/temp_so101_on_frame/so101_on_frame.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    subLayers = [
+        @./physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+over "so101_on_frame"
+{
+    over "Geometry"
+    {
+        over "Box" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+        }
+
+        over "Box_1" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+        }
+
+        over "Box_2" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+        }
+
+        over "Box_3" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+        }
+
+        over "Box_4" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_5" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_6" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_7" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_8" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_9" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_10" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_11" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_12" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_13" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_14" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_15" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_16" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "Box_17" (
+            prepend apiSchemas = ["MjcCollisionAPI"]
+        )
+        {
+            uniform int mjc:group = 3
+        }
+
+        over "tn__20mm_gantry_plate_"
+        {
+            over "shoulder_link"
+            {
+                over "upper_arm_link"
+                {
+                    over "lower_arm_link"
+                    {
+                        over "wrist_link"
+                        {
+                            over "gripper_link"
+                            {
+                                over "grasp_site" (
+                                    prepend apiSchemas = ["MjcSiteAPI"]
+                                )
+                                {
+                                    uniform int mjc:group = 5
+                                }
+
+                                over "moving_jaw_so101_v1_link"
+                                {
+                                    over "gripper" (
+                                        delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                        prepend apiSchemas = ["MjcJointAPI"]
+                                    )
+                                    {
+                                        uniform double mjc:actuatorfrcrange:max = 10
+                                        uniform double mjc:actuatorfrcrange:min = -10
+                                        uniform double mjc:armature = 0.0284034
+                                        uniform double mjc:damping = 0.607659
+                                        uniform double mjc:frictionloss = 0.052393
+                                    }
+
+                                    over "moving_jaw_so101_v1"
+                                    {
+                                    }
+
+                                    over "moving_jaw_so101_v1_1"
+                                    {
+                                    }
+                                }
+
+                                over "wrist_roll" (
+                                    delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                    prepend apiSchemas = ["MjcJointAPI"]
+                                )
+                                {
+                                    uniform double mjc:actuatorfrcrange:max = 10
+                                    uniform double mjc:actuatorfrcrange:min = -10
+                                    uniform double mjc:armature = 0.0284034
+                                    uniform double mjc:damping = 0.607659
+                                    uniform double mjc:frictionloss = 0.052393
+                                }
+
+                                over "sts3215_03a_v1"
+                                {
+                                }
+
+                                over "sts3215_03a_v1_1"
+                                {
+                                }
+
+                                over "wrist_roll_follower_so101_v1"
+                                {
+                                }
+
+                                over "wrist_roll_follower_so101_v1_1"
+                                {
+                                }
+
+                                over "tn__SOARM101_camera_wrist_mount_rd0"
+                                {
+                                }
+                            }
+
+                            over "wrist_flex" (
+                                delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                                prepend apiSchemas = ["MjcJointAPI"]
+                            )
+                            {
+                                uniform double mjc:actuatorfrcrange:max = 10
+                                uniform double mjc:actuatorfrcrange:min = -10
+                                uniform double mjc:armature = 0.0284034
+                                uniform double mjc:damping = 0.607659
+                                uniform double mjc:frictionloss = 0.052393
+                            }
+
+                            over "sts3215_03a_no_horn_v1"
+                            {
+                            }
+
+                            over "sts3215_03a_no_horn_v1_1"
+                            {
+                            }
+
+                            over "wrist_roll_pitch_so101_v2"
+                            {
+                            }
+
+                            over "wrist_roll_pitch_so101_v2_1"
+                            {
+                            }
+                        }
+
+                        over "elbow_flex" (
+                            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                            prepend apiSchemas = ["MjcJointAPI"]
+                        )
+                        {
+                            uniform double mjc:actuatorfrcrange:max = 10
+                            uniform double mjc:actuatorfrcrange:min = -10
+                            uniform double mjc:armature = 0.0284034
+                            uniform double mjc:damping = 0.607659
+                            uniform double mjc:frictionloss = 0.052393
+                        }
+
+                        over "under_arm_so101_v1"
+                        {
+                        }
+
+                        over "under_arm_so101_v1_1"
+                        {
+                        }
+
+                        over "motor_holder_so101_wrist_v1"
+                        {
+                        }
+
+                        over "motor_holder_so101_wrist_v1_1"
+                        {
+                        }
+
+                        over "sts3215_03a_v1"
+                        {
+                        }
+
+                        over "sts3215_03a_v1_1"
+                        {
+                        }
+                    }
+
+                    over "shoulder_lift" (
+                        delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                        prepend apiSchemas = ["MjcJointAPI"]
+                    )
+                    {
+                        uniform double mjc:actuatorfrcrange:max = 10
+                        uniform double mjc:actuatorfrcrange:min = -10
+                        uniform double mjc:armature = 0.0284034
+                        uniform double mjc:damping = 0.607659
+                        uniform double mjc:frictionloss = 0.052393
+                    }
+
+                    over "sts3215_03a_v1"
+                    {
+                    }
+
+                    over "sts3215_03a_v1_1"
+                    {
+                    }
+
+                    over "upper_arm_so101_v1"
+                    {
+                    }
+
+                    over "upper_arm_so101_v1_1"
+                    {
+                    }
+                }
+
+                over "shoulder_pan" (
+                    delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+                    prepend apiSchemas = ["MjcJointAPI"]
+                )
+                {
+                    uniform double mjc:actuatorfrcrange:max = 10
+                    uniform double mjc:actuatorfrcrange:min = -10
+                    uniform double mjc:armature = 0.0284034
+                    uniform double mjc:damping = 0.607659
+                    uniform double mjc:frictionloss = 0.052393
+                }
+
+                over "sts3215_03a_v1"
+                {
+                }
+
+                over "sts3215_03a_v1_1"
+                {
+                }
+
+                over "motor_holder_so101_base_v1"
+                {
+                }
+
+                over "motor_holder_so101_base_v1_1"
+                {
+                }
+
+                over "rotation_pitch_so101_v1"
+                {
+                }
+
+                over "rotation_pitch_so101_v1_1"
+                {
+                }
+            }
+
+            over "dof_slider" (
+                delete apiSchemas = ["PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+                prepend apiSchemas = ["MjcJointAPI"]
+            )
+            {
+                uniform double mjc:actuatorfrcrange:max = 1
+                uniform double mjc:actuatorfrcrange:min = -1
+                uniform double mjc:armature = 0.1
+                uniform double mjc:damping = 8
+            }
+
+            over "_20mm_gantry_plate"
+            {
+            }
+
+            over "Base_Mount"
+            {
+            }
+
+            over "SG_ZIJI_15"
+            {
+            }
+
+            over "XG_ZIJI_16"
+            {
+            }
+
+            over "MOTOR_1723_3"
+            {
+            }
+
+            over "PCB_CHAZUO_92"
+            {
+            }
+
+            over "GE_27"
+            {
+            }
+
+            over "_________v2"
+            {
+            }
+
+            over "Pinion"
+            {
+            }
+
+            over "_________v2_1"
+            {
+            }
+
+            over "ZK_122"
+            {
+            }
+
+            over "base_motor_holder_so101_v1"
+            {
+            }
+
+            over "base_motor_holder_so101_v1_1"
+            {
+            }
+
+            over "base_so101_v2"
+            {
+            }
+
+            over "base_so101_v2_1"
+            {
+            }
+
+            over "sts3215_03a_v1"
+            {
+            }
+
+            over "sts3215_03a_v1_1"
+            {
+            }
+
+            over "waveshare_mounting_plate_so101_v2"
+            {
+            }
+
+            over "waveshare_mounting_plate_so101_v2_1"
+            {
+            }
+
+            over "M5x25_low_profile_screw"
+            {
+            }
+
+            over "M5_Nylock"
+            {
+            }
+
+            over "M5_Nylock_1"
+            {
+            }
+
+            over "M5_Nylock_2"
+            {
+            }
+
+            over "M5_Nylock_3"
+            {
+            }
+
+            over "M5x25_low_profile_screw_1"
+            {
+            }
+
+            over "M5x25_low_profile_screw_2"
+            {
+            }
+
+            over "M5x25_low_profile_screw_3"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5"
+            {
+            }
+
+            over "Solid_V_Wheel"
+            {
+            }
+
+            over "_6mm_Spacer"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_1"
+            {
+            }
+
+            over "_1mm_5mm_shim"
+            {
+            }
+
+            over "_1mm_5mm_shim_1"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_2"
+            {
+            }
+
+            over "_6mm_Spacer_1"
+            {
+            }
+
+            over "Solid_V_Wheel_1"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_3"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_4"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_5"
+            {
+            }
+
+            over "Solid_V_Wheel_2"
+            {
+            }
+
+            over "Eccentric_Spacer"
+            {
+            }
+
+            over "_1mm_5mm_shim_2"
+            {
+            }
+
+            over "_1mm_5mm_shim_3"
+            {
+            }
+
+            over "Eccentric_Spacer_1"
+            {
+            }
+
+            over "Solid_V_Wheel_3"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_6"
+            {
+            }
+
+            over "Ball_Bearing_625_2RS_5x16x5_7"
+            {
+            }
+        }
+
+        over "_100cm"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020"
+        {
+        }
+
+        over "_50cm"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_1"
+        {
+        }
+
+        over "_100cm_1"
+        {
+        }
+
+        over "_50cm_1"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_2"
+        {
+        }
+
+        over "Part_1_1"
+        {
+        }
+
+        over "_100cm_2"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_3"
+        {
+        }
+
+        over "_50cm_2"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_4"
+        {
+        }
+
+        over "_50cm_3"
+        {
+        }
+
+        over "_50cm_4"
+        {
+        }
+
+        over "_50cm_5"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_5"
+        {
+        }
+
+        over "_100cm_3"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_6"
+        {
+        }
+
+        over "_50cm_6"
+        {
+        }
+
+        over "Inside_Corner_Bracket_3_Way_Hidden_2020_7"
+        {
+        }
+
+        over "Part_1_2"
+        {
+        }
+
+        over "Handle"
+        {
+        }
+
+        over "_50cm_7"
+        {
+        }
+
+        over "_32mm_Camera_Holder"
+        {
+        }
+
+        over "Part_1"
+        {
+        }
+
+        over "_50cm_8"
+        {
+        }
+
+        over "Handle_1"
+        {
+        }
+
+        over "Part_1_2_1"
+        {
+        }
+
+        over "Angle_Bracket_2020_Aluminium_Profile_Joiner"
+        {
+        }
+
+        over "_100cm_4"
+        {
+        }
+
+        over "Angle_Bracket_2020_Aluminium_Profile_Joiner_1"
+        {
+        }
+    }
+
+    over "Physics"
+    {
+        over "PhysicsMaterial" (
+            prepend apiSchemas = ["MjcMaterialAPI"]
+        )
+        {
+        }
+
+        def MjcActuator "dof_slider"
+        {
+            uniform double[] mjc:biasPrm = [0, -400, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 0.41714
+            uniform double mjc:ctrlRange:min = -0.40286
+            uniform double mjc:forceRange:max = 100
+            uniform double mjc:forceRange:min = -100
+            uniform double[] mjc:gainPrm = [400, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/dof_slider>
+        }
+
+        def MjcActuator "shoulder_pan"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 1.91986
+            uniform double mjc:ctrlRange:min = -1.91986
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/shoulder_pan>
+        }
+
+        def MjcActuator "shoulder_lift"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 1.74533
+            uniform double mjc:ctrlRange:min = -1.74533
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/shoulder_lift>
+        }
+
+        def MjcActuator "elbow_flex"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 1.69
+            uniform double mjc:ctrlRange:min = -1.69
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/elbow_flex>
+        }
+
+        def MjcActuator "wrist_flex"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 1.65806
+            uniform double mjc:ctrlRange:min = -1.65806
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/wrist_flex>
+        }
+
+        def MjcActuator "wrist_roll"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 2.84121
+            uniform double mjc:ctrlRange:min = -2.74385
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link/wrist_roll>
+        }
+
+        def MjcActuator "gripper"
+        {
+            uniform double[] mjc:biasPrm = [0, -20, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:ctrlRange:max = 1.74533
+            uniform double mjc:ctrlRange:min = -0.17453
+            uniform double mjc:forceRange:max = 3
+            uniform double mjc:forceRange:min = -3
+            uniform double[] mjc:gainPrm = [20, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            custom rel mjc:target
+            prepend rel mjc:target = </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link/moving_jaw_so101_v1_link/gripper>
+        }
+    }
+
+    over "fix_base_joint"
+    {
+    }
+}
+

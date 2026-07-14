@@ -149,10 +149,10 @@ def main() -> None:
   n_frames = int(args.seconds * args.fps)
   frames: list[np.ndarray] = []
   obs, _ = wrapped.reset()
-  # Stagger episode phases so envs don't reset in lockstep (keeps the field alive
-  # with arms at every stage of the task instead of synchronized freezes) — but pin
-  # the focus env to episode start, so the close-up always shows a complete
-  # attempt from t=0.
+  # Stagger episode phases so envs don't reset in lockstep, keeping the field alive
+  # with arms at every stage of the task instead of synchronized freezes. The focus
+  # env is pinned to episode start, so the close-up always shows a complete attempt
+  # from t=0.
   env.episode_length_buf = torch.randint_like(
     env.episode_length_buf, high=int(env.max_episode_length)
   )

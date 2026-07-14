@@ -47,11 +47,21 @@ in the URDF.
 ## Collision
 
 The frame meshes are **visual only** (`contype=0`). Collision for the 2020 frame is provided
-by 14 **box geoms** (one per extrusion, group 3) so the arm can't pass through the rails. The
-arm keeps its own mesh collisions. The frame is static (welded to the world); only the slider
-and the arm move.
+by 14 **box geoms** (one per extrusion, group 3) so the arm can't pass through the rails.
+
+The lightbox's 4 panels (`Part_1`, `Part_1_1`, `Part_1_2` ×2, floor + 3 walls) are visual-only
+meshes too, so each also gets an invisible box geom (`rgba="1 1 1 0"`, no group override) as a
+collision pad. `Part_1_1` is the floor: without its pad, anything placed on the work surface
+falls straight through to the ground plane. These pads used to be added at runtime by
+`rl/mjlab` (a `work_floor_collision` geom injected via `mujoco.MjSpec`); they're now baked into
+this file instead, so every consumer of this model (mjlab, the Isaac Sim MJCF import in
+`../usd/README.md`, etc.) gets a real work surface without needing its own patch.
+
+The arm keeps its own mesh collisions. The frame is static (welded to the world); only the
+slider and the arm move.
 
 ## Regenerating
 
 Converted from `../urdf/so101_on_frame.urdf` with MuJoCo's URDF importer, then augmented with
-the `<option>`/`<default>`, actuators, the two cameras, and the extrusion collision boxes.
+the `<option>`/`<default>`, actuators, the two cameras, the extrusion collision boxes, and the
+lightbox panel collision pads.
