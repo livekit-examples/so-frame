@@ -1647,10 +1647,20 @@
         <color rgba="0.94 0.49 0.06 1" />
       </material>
     </visual>
+    <!-- Collision is split in two so each convex hull hugs the true surface (a single
+         hull of this concave part stands ~7 mm proud at the finger, gripping objects
+         with visible daylight). Split geometry from Squint's so101.urdf
+         (github.com/aalmuzairee/squint), shipped here as the pieces' convex hulls. -->
     <collision>
       <origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0" />
       <geometry>
-        <mesh filename="components/so101_arm/assets/wrist_roll_follower_so101_v1.stl" />
+        <mesh filename="components/so101_arm/assets/fixed_jaw_base_convex.obj" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0" />
+      <geometry>
+        <mesh filename="components/so101_arm/assets/fixed_jaw_finger_convex.obj" />
       </geometry>
     </collision>
   </link>
