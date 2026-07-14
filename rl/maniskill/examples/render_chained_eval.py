@@ -46,15 +46,24 @@ args = parser.parse_args()
 
 fail_step_cap = int(args.fail_seconds * args.fps)
 
+# Camera jitter is part of domain randomization (sim-to-real), but in a video it just
+# reads as shake -- keep the cameras steady here even when --domain_randomization is on.
+steady_cameras = dict(
+    wrist_camera_pos_noise=(0.0, 0.0, 0.0), wrist_camera_rot_noise=(0.0, 0.0, 0.0),
+    wrist_camera_fov_noise=0.0,
+    overhead_camera_pos_noise=(0.0, 0.0, 0.0), overhead_camera_rot_noise=(0.0, 0.0, 0.0),
+    overhead_camera_fov_noise=0.0,
+)
+
 env_kwargs = dict(
     obs_mode="rgb",
     render_mode="sensors",
     num_envs=1,
     domain_randomization=args.domain_randomization,
+    domain_randomization_config=dict(realism_mode=args.realism_mode, **steady_cameras),
     sensor_configs=dict(width=args.render_size, height=args.render_size),
 )
 if args.realism_mode:
-    env_kwargs["domain_randomization_config"] = dict(realism_mode=True)
     env_kwargs["sensor_configs"]["shader_pack"] = "rt-fast"
     env_kwargs["sim_backend"] = "cpu"
 else:

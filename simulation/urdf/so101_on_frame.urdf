@@ -1825,8 +1825,10 @@
   <joint name="frame_wrist_camera_joint" type="fixed">
     <!-- rpy converted from the MJCF's calibrated frame_wrist_camera quat via the fixed
          axis remap between MuJoCo's camera convention (forward,right,up)=(-Z,X,Y) and
-         SAPIEN's (forward,right,up)=(X,-Y,Z); see sapien_utils.look_at's docstring. -->
-    <origin xyz="0.0025 0.0675 -0.0062" rpy="0.0 1.136305 -1.570797" />
+         SAPIEN's (forward,right,up)=(X,-Y,Z); see sapien_utils.look_at's docstring.
+         The pi roll about the optical axis matches the physical camera's upside-down
+         mounting: it rotates the produced image 180 degrees, nothing else. -->
+    <origin xyz="0.0025 0.0675 -0.0062" rpy="3.141593 1.136305 -1.570797" />
     <parent link="gripper_link" />
     <child link="frame_wrist_camera" />
   </joint>
