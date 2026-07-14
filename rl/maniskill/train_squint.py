@@ -106,7 +106,7 @@ class Args:
     `--evaluate --checkpoint <path> --num_eval_envs 1` for a single high-fidelity rollout."""
     num_envs: int = 1024
     """the number of parallel environments"""
-    num_eval_envs: int = 16
+    num_eval_envs: int = 32
     """the number of parallel evaluation environments"""
     partial_reset: bool = False
     """whether to let parallel environments reset upon termination instead of truncation"""
@@ -128,7 +128,7 @@ class Args:
     """the rendering mode of the environment, could be rgb or all"""
     render_size: int = 128
     """square size to render from env (HxW) - before downsampling"""
-    image_size: int = 16
+    image_size: int = 32
     """square size of the input image for actor (HxW) - after downsampling"""
     apply_jitter: bool = True
     """applies color jitter to all input RGB observations (better for sim2real)"""
@@ -223,6 +223,7 @@ def evaluate(args, eval_envs, get_action_fn, logger, eval_output_dir, max_episod
 
     logger.total_eval_time += eval_time
     logger.log(d=eval_d, step=global_step)
+    return eval_d
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,7 +479,7 @@ class Critic(nn.Module):
 class DeployAgent(nn.Module):
     """Standalone deployment wrapper for a real-robot deploy script. Handles downsampling and inference."""
 
-    def __init__(self, sim_env, sample_obs, target_image_size=16, device=None):
+    def __init__(self, sim_env, sample_obs, target_image_size=32, device=None):
         super().__init__()
         self.device = device
         self.target_image_size = target_image_size
@@ -891,22 +892,34 @@ if __name__ == "__main__":
     desc = ""
     d = {}
 
+    best_eval = (-float("inf"), -float("inf"))  # (success_at_end, return)
+    best_model_path = model_path.replace("ckpt.pt", "ckpt_best.pt")
+
     for iteration in range(args.num_total_iterations + 2):  # +2 for final eval
         # Evaluate
         if args.eval_freq > 0 and ((global_step - args.num_envs) // args.eval_freq) < (global_step // args.eval_freq):
-            evaluate(args, eval_envs, get_eval_action, logger, eval_output_dir,
-                     max_episode_steps, global_step, pbar)
+            eval_d = evaluate(args, eval_envs, get_eval_action, logger, eval_output_dir,
+                              max_episode_steps, global_step, pbar)
             if args.evaluate:
                 break
             if args.save_model:
-                torch.save({
+                ckpt = {
                     'encoder': encoder.state_dict(),
                     'actor': actor.state_dict(),
                     'critic': critic_target.state_dict(),
                     'log_alpha': log_alpha,
                     'global_step': global_step,
-                }, model_path)
+                }
+                torch.save(ckpt, model_path)
                 print(f"Step {global_step}: model checkpoint saved to {model_path}")
+                # Eval success varies checkpoint to checkpoint, so the final weights are
+                # not necessarily the best ones seen -- keep the best separately.
+                score = (float(eval_d['eval/success_at_end']), float(eval_d['eval/return']))
+                if score > best_eval:
+                    best_eval = score
+                    torch.save(ckpt, best_model_path)
+                    print(f"Step {global_step}: new best (success_at_end={score[0]:.2f}, "
+                          f"return={score[1]:.2f}) saved to {best_model_path}")
 
         # Collect
         if global_step < args.learning_starts:

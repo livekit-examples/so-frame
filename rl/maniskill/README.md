@@ -65,6 +65,39 @@ At the paper's own settings (1024 parallel envs, 1.5M timesteps) their pick-and-
 converges in roughly 15 minutes on a single RTX 3090. Expect a similar order of magnitude
 here, adjustable via `--num_envs`/`--total_timesteps`.
 
+## Rendering a trained checkpoint
+
+`examples/render_chained_eval.py` renders a checkpoint's rollouts as one continuous video:
+episodes play back-to-back with no gaps (single env, wrist + overhead cameras only, no
+third-person view, no multi-env tiling). An episode cuts to a fresh one immediately on
+success; one that hasn't succeeded gets at least `--fail_seconds` of runway before cutting,
+so failed attempts aren't shown too briefly.
+
+```bash
+# Fast rasterizer (matches what the policy actually saw during training)
+uv run python examples/render_chained_eval.py \
+    --checkpoint checkpoints/model_best.pt \
+    --num_episodes 10 --fail_seconds 5 --out /tmp/rollout.mp4
+
+# Ray-traced shading, real PBR textures, overhead softbox lighting -- for a nicer-looking
+# render, never used for training. Single-env only: ray tracing isn't supported on the
+# gpu-parallelized sensor camera path, so this drops the sim backend to cpu.
+uv run python examples/render_chained_eval.py \
+    --checkpoint checkpoints/model_best.pt \
+    --realism_mode --render_size 512 \
+    --num_episodes 5 --fail_seconds 5 --out /tmp/rollout_realistic.mp4
+```
+
+**`--target_image_size` must match whatever `--image_size` the checkpoint was actually
+trained with** (default is 32; `checkpoints/model_best.pt`, i.e. `slider_pickplace_v7`, was
+trained at 16, so pass `--target_image_size 16` for it specifically). The render resolution
+(`--render_size`) is independent of this -- `DeployAgent` downsamples internally before
+feeding the policy, so you can render at high resolution for visual quality while the policy
+still sees exactly what it was trained on.
+
+For a single high-fidelity still image (not a rollout) with a scripted open/close gripper
+motion instead of a trained policy, see `examples/render_realistic.py`.
+
 ## Layout
 
 ```
@@ -74,9 +107,10 @@ rl/maniskill/
 ├── utils.py                           Squint's obs wrappers (resolution downsample/"squint", color jitter)
 ├── examples/
 │   ├── visualize_sim.py               scripted open/close-gripper sanity check
-│   ├── check_joint_order.py           confirms SAPIEN's active-joint ordering assumption
 │   ├── measure_work_surface.py        recovers the lightbox floor's world-space height/footprint
-│   └── render_frames.py               dumps camera frames for a quick visual check
+│   ├── render_frames.py               dumps camera frames for a quick visual check
+│   ├── render_chained_eval.py         continuous rollout video from a checkpoint (see below)
+│   └── render_realistic.py            single ray-traced high-fidelity still
 └── src/soframe_rl_maniskill/
     ├── robot/so101_on_frame.py        ManiSkill agent: this repo's frame-mounted SO-101
     └── envs/
@@ -105,7 +139,7 @@ Squint's own robot description does.
 
 | Component | Source |
 |---|---|
-| `rgb` | The URDF's already-calibrated `frame_wrist_camera` mount (58° FOV, matching the physical camera, see `simulation/urdf/README.md`), rendered at `--render_size` (default 128×128) then downsampled to `--image_size` (default 16×16): Squint's "resolution squinting". |
+| `rgb` | The URDF's already-calibrated `frame_wrist_camera` and `frame_overhead_camera` mounts (see `simulation/urdf/README.md`), rendered at `--render_size` (default 128×128) then downsampled to `--image_size` (default 32×32): Squint's "resolution squinting". The two cameras' images are stacked along the channel axis (H×W×6). |
 | `state` | Proprioception only: joint positions (`noisy_qpos`, with sim2real noise) plus controller state. **No ground-truth cube/bin poses.** |
 
 This is Squint's own default too. Its `obs_mode="rgb+segmentation"` has no `state` component
@@ -132,11 +166,11 @@ success decomposition, gated by contact and pose checks in `evaluate()`.
 |---|---|---|
 | Always | `2·(1 − tanh(5·d(tcp, cube)))` | Reach toward the cube. |
 | `is_item_grasped` | `3 + place_reward` | Once grasped, reward closing the cube-to-bin distance (`place_reward` combines an overall distance term with a separate XY/Z-gated term that rewards lifting above the bin rim before descending into it). |
-| `is_item_above_bin` | `4 + place_reward + dropped + gripper_openness + static_bonus` | Once positioned over the bin, reward releasing the cube and coming to rest. |
-| `success` | `9` | Cube inside the bin footprint, ungrasped, robot static. |
-| Penalties | `−6` touching ground, `−3` touching bin, `−1` while not yet lifted | Discourage contact-heavy shortcuts and encourage picking up quickly. |
+| `is_item_above_bin` | `4 + place_reward + dropped + gripper_openness + static_bonus` | Once positioned over the bin, reward releasing the cube and coming to rest. The `static_bonus` only pays out after the cube is actually released, and success pays over twice this stage's ceiling: both are deliberate, since an earlier reward where holding-forever nearly matched success got exploited exactly that way. |
+| `success` | `20` | Cube settled at rest inside the bin, ungrasped, robot static and clear of the bin. |
+| Penalties | `−3` touching bin, `−1` while not yet lifted | Discourage contact-heavy shortcuts and encourage picking up quickly. |
 
-`compute_normalized_dense_reward` divides by 9 (the success reward) for scale-invariant
+`compute_normalized_dense_reward` divides by 20 (the success reward) for scale-invariant
 logging, matching Squint's convention.
 
 ### Domain randomization
@@ -150,8 +184,9 @@ default (`domain_randomization=False`; `train_squint.py` turns it on via
 | Gripper stiffness / damping | Per-episode, `(500, 2000)` / `(50, 200)` |
 | Ambient lighting | Per-env ambient color in `(0.2, 0.5)` |
 | Robot color | Off by default; `"random"` for per-episode RGB |
-| Wrist camera pose | Small per-step jitter (±2 mm, ±1°) on top of the URDF's calibrated mount pose |
-| Wrist camera FOV | ±1° per episode |
+| Cube / bin color | Per-episode random RGB (`randomize_item_color` / `randomize_bin_color`, both on by default; the fixed colors are blue and dark yellow) |
+| Wrist + overhead camera pose | Small per-step jitter (±2 mm, ±1°) on top of the URDF's calibrated mount poses |
+| Wrist + overhead camera FOV | ±1° per episode |
 | Initial joint pose | Gaussian noise, configurable std (`initial_qpos_noise_scale`, `robot_qpos_noise_std`) |
 | Cube/bin friction, density | Per-episode uniform ranges |
 | Background | Greenscreen overlay compositing the sim background out (`black_overlay.png` by default; swap in a photo of your own table for a closer sim-to-real match) |

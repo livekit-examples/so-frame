@@ -1,7 +1,8 @@
 """Render a trained checkpoint as one continuous video: episodes play back-to-back with
-no gaps, each ending (and a fresh one starting) on success, failure/timeout, or a fixed
-per-episode step cap -- whichever comes first. Single env, wrist + overhead cameras only
-(no third-person view, no multi-env tiling).
+no gaps. A successful episode cuts to a new one right away; one that hasn't succeeded
+runs for --fail_seconds before cutting, so failed attempts get a consistent amount of
+screen time. Single env, wrist + overhead cameras only (no third-person view, no
+multi-env tiling).
 
 Run from rl/maniskill/:
     uv run python examples/render_chained_eval.py \
@@ -33,14 +34,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, required=True)
 parser.add_argument("--env_id", type=str, default="SOFramePickPlaceBin-v1")
 parser.add_argument("--num_episodes", type=int, default=10)
-parser.add_argument("--episode_cap", type=int, default=200, help="force a reset after this many steps even without success/failure")
+parser.add_argument("--fail_seconds", type=float, default=5.0, help="how long an episode that hasn't succeeded runs before cutting to a fresh one")
 parser.add_argument("--render_size", type=int, default=512)
 parser.add_argument("--fps", type=int, default=20)
+parser.add_argument("--target_image_size", type=int, default=32, help="must match the checkpoint's own image_size (32 is the current default; older checkpoints like slider_pickplace_v7 used 16)")
 parser.add_argument("--realism_mode", action="store_true")
 parser.add_argument("--domain_randomization", action="store_true")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--out", type=str, default="/tmp/chained_eval.mp4")
 args = parser.parse_args()
+
+fail_step_cap = int(args.fail_seconds * args.fps)
 
 env_kwargs = dict(
     obs_mode="rgb",
@@ -59,10 +63,12 @@ else:
 env = gym.make(args.env_id, **env_kwargs)
 env = FlattenRGBDObservationWrapper(env, rgb=True, depth=False, state=True)
 
-device = torch.device("cuda" if torch.cuda.is_available() and not args.realism_mode else "cpu")
+# Policy inference stays on cuda even in realism mode (only the *sim* drops to cpu
+# there); obs are moved to this device explicitly each step.
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 obs, info = env.reset(seed=args.seed)
-deploy_agent = DeployAgent(env, obs, target_image_size=16, device=device).to(device)
+deploy_agent = DeployAgent(env, obs, target_image_size=args.target_image_size, device=device).to(device)
 deploy_agent.load_checkpoint(args.checkpoint)
 deploy_agent.eval()
 
@@ -73,7 +79,8 @@ writer = cv2.VideoWriter(
 episode = 0
 step_in_episode = 0
 successes = 0
-print(f"Rendering {args.num_episodes} chained episodes (cap {args.episode_cap} steps each) to {args.out}")
+print(f"Rendering {args.num_episodes} chained episodes to {args.out} "
+      f"(cut on success, else after {args.fail_seconds}s / {fail_step_cap} steps)")
 
 while episode < args.num_episodes:
     obs_gpu = {"rgb": obs["rgb"].to(device), "state": obs["state"].to(device)}
@@ -90,8 +97,10 @@ while episode < args.num_episodes:
     frame = np.concatenate(cams, axis=1)
     writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
+    # Cut right away on success (ManiSkill maps info["success"] straight to `terminated`,
+    # so this is the same signal); otherwise cut once the episode has had its runway.
     success = bool(info.get("success", torch.zeros(1, dtype=torch.bool))[0])
-    done = bool(terminated[0]) or bool(truncated[0]) or step_in_episode >= args.episode_cap
+    done = success or step_in_episode >= fail_step_cap
     if done:
         episode += 1
         successes += int(success)

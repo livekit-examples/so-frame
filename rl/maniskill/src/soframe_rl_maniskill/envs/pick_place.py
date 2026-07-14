@@ -75,7 +75,8 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 
     item_friction_range: Sequence[float] = (0.5, 1.0)
     item_density_range: Sequence[float] = (400, 400)  # ~30 g at 2.5 cm cube.
-    randomize_item_color: bool = False
+    randomize_item_color: bool = True
+    randomize_bin_color: bool = True
 
 
 @register_env("SOFramePickPlaceBin-v1", max_episode_steps=200)
@@ -155,31 +156,27 @@ class PickPlaceBin(DefaultCameraEnv):
 
     def _load_scene(self, options: dict):
         super()._load_scene(options)
-        # WORK_SURFACE_Z (-0.01) is below world z=0: a ground plane at the default altitude
-        # would sit *above* the panels' own collision (added to the URDF, see module
-        # docstring) and catch falling objects before they ever reach it. Push it well below
-        # everything so it's just a safety catch-all, not the resting surface.
+        # The lightbox floor at WORK_SURFACE_Z (0) is the real resting surface; this
+        # ground plane sits far below it purely as a safety catch-all for anything that
+        # rolls off the panels.
         self.ground = build_ground(self.scene, altitude=-1.0)
 
         cfg = self.domain_randomization_config
+
+        def sample_range(value_range):
+            """Per-env uniform sample under domain randomization, midpoint otherwise."""
+            if self.domain_randomization:
+                return self._batched_episode_rng.uniform(low=value_range[0], high=value_range[1])
+            return np.full(self.num_envs, (value_range[0] + value_range[1]) / 2)
+
+        half_sizes = sample_range(cfg.cube_half_size_range)
+        frictions = sample_range(cfg.item_friction_range)
+        densities = sample_range(cfg.item_density_range)
+
         colors = np.zeros((self.num_envs, 3))
         colors[:, 2] = 1  # Blue cube.
-        frictions = np.ones(self.num_envs) * (cfg.item_friction_range[0] + cfg.item_friction_range[1]) / 2
-        densities = np.ones(self.num_envs) * (cfg.item_density_range[0] + cfg.item_density_range[1]) / 2
-        half_sizes = np.ones(self.num_envs) * (cfg.cube_half_size_range[0] + cfg.cube_half_size_range[1]) / 2
-
-        if self.domain_randomization:
-            half_sizes = self._batched_episode_rng.uniform(
-                low=cfg.cube_half_size_range[0], high=cfg.cube_half_size_range[1]
-            )
-            if cfg.randomize_item_color:
-                colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
-            frictions = self._batched_episode_rng.uniform(
-                low=cfg.item_friction_range[0], high=cfg.item_friction_range[1]
-            )
-            densities = self._batched_episode_rng.uniform(
-                low=cfg.item_density_range[0], high=cfg.item_density_range[1]
-            )
+        if self.domain_randomization and cfg.randomize_item_color:
+            colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
 
         self.item_half_sizes = common.to_tensor(half_sizes, device=self.device)
         self.item_dimensions = torch.stack([self.item_half_sizes] * 3, dim=-1)
@@ -211,27 +208,16 @@ class PickPlaceBin(DefaultCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        bin_color = sapien.render.RenderMaterial(base_color=[0.55, 0.45, 0.05, 1.0])  # dark yellow
-        if self.domain_randomization_config.realism_mode:
-            bin_color.set_roughness(0.55)
-            bin_color.set_metallic(0.0)
+        bin_colors = np.ones((self.num_envs, 3)) * [0.55, 0.45, 0.05]  # dark yellow
+        if self.domain_randomization and cfg.randomize_bin_color:
+            bin_colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
+        bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
         thickness = 0.004
         self.bin_thickness = thickness
 
-        bin_half_sizes_x = np.ones(self.num_envs) * (cfg.bin_half_size_x_range[0] + cfg.bin_half_size_x_range[1]) / 2
-        bin_half_sizes_y = np.ones(self.num_envs) * (cfg.bin_half_size_y_range[0] + cfg.bin_half_size_y_range[1]) / 2
-        bin_half_sizes_z = np.ones(self.num_envs) * (cfg.bin_half_size_z_range[0] + cfg.bin_half_size_z_range[1]) / 2
-
-        if self.domain_randomization:
-            bin_half_sizes_x = self._batched_episode_rng.uniform(
-                low=cfg.bin_half_size_x_range[0], high=cfg.bin_half_size_x_range[1]
-            )
-            bin_half_sizes_y = self._batched_episode_rng.uniform(
-                low=cfg.bin_half_size_y_range[0], high=cfg.bin_half_size_y_range[1]
-            )
-            bin_half_sizes_z = self._batched_episode_rng.uniform(
-                low=cfg.bin_half_size_z_range[0], high=cfg.bin_half_size_z_range[1]
-            )
+        bin_half_sizes_x = sample_range(cfg.bin_half_size_x_range)
+        bin_half_sizes_y = sample_range(cfg.bin_half_size_y_range)
+        bin_half_sizes_z = sample_range(cfg.bin_half_size_z_range)
 
         self.bin_half_sizes_x = common.to_tensor(bin_half_sizes_x, device=self.device)
         self.bin_half_sizes_y = common.to_tensor(bin_half_sizes_y, device=self.device)
@@ -244,6 +230,11 @@ class PickPlaceBin(DefaultCameraEnv):
         for i in range(self.num_envs):
             bin_half_size = [bin_half_sizes_x[i], bin_half_sizes_y[i], bin_half_sizes_z[i]]
             builder = self.scene.create_actor_builder()
+
+            bin_color = sapien.render.RenderMaterial(base_color=bin_colors[i])
+            if self.domain_randomization_config.realism_mode:
+                bin_color.set_roughness(0.55)
+                bin_color.set_metallic(0.0)
 
             bin_center_pose = sapien.Pose([0.0, 0.0, thickness / 2])
             bin_center_half_size = [bin_half_size[0], bin_half_size[1], thickness / 2]
@@ -313,19 +304,11 @@ class PickPlaceBin(DefaultCameraEnv):
                 [self.bin_spawn_center[0], self.bin_spawn_center[1], 0]
             )
 
-            region = [
-                [-self.spawn_half_size, -self.spawn_half_size],
-                [self.spawn_half_size, self.spawn_half_size],
-            ]
-            sampler = randomization.UniformPlacementSampler(
-                bounds=region, batch_size=b, device=self.device
-            )
-
-            item_radius = self.item_half_sizes.max().item() + 0.01
-            bin_radius = self.bin_radius.max().item() + 0.01
-
-            item_xy_offset = sampler.sample(item_radius, 100)
-            bin_xy_offset = sampler.sample(bin_radius, 100, verbose=False)
+            # Item and bin spawn in separate, non-overlapping regions (0.4 m apart along
+            # the rail), so their offsets are just independent uniform samples -- no
+            # placement-collision handling needed between them.
+            item_xy_offset = (torch.rand(b, 2) * 2 - 1) * self.spawn_half_size
+            bin_xy_offset = (torch.rand(b, 2) * 2 - 1) * self.spawn_half_size
 
             item_xyz = torch.zeros((b, 3))
             item_xyz[:, :2] = item_spawn_center[env_idx, :2] + item_xy_offset
@@ -395,6 +378,9 @@ class PickPlaceBin(DefaultCameraEnv):
         inside_x = torch.abs(offset[:, 0]) < self.bin_half_sizes_x
         inside_y = torch.abs(offset[:, 1]) < self.bin_half_sizes_y
         is_item_above_bin = inside_x & inside_y
+        # Actually settled at its resting height inside the bin -- not still falling
+        # toward it, and not perched on a wall rim (a rim-rest sits ~4.5 cm higher).
+        is_item_in_bin = is_item_above_bin & (offset[:, 2] < 0.01)
 
         item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_sizes + 1e-3)
 
@@ -403,11 +389,13 @@ class PickPlaceBin(DefaultCameraEnv):
         is_item_grasped = self.agent.is_grasping(self.item)
         is_robot_static = self.agent.is_static()
 
-        robot_touching_ground = self.agent.is_touching(self.ground)
         robot_touching_bin = self.agent.is_touching(self.bin)
         robot_touching_item = self.agent.is_touching(self.item)
 
-        success = is_item_above_bin & (~robot_touching_item) & is_robot_static & (~robot_touching_bin)
+        success = (
+            is_item_in_bin & is_item_static
+            & (~robot_touching_item) & is_robot_static & (~robot_touching_bin)
+        )
 
         return {
             "inside_x": inside_x,
@@ -417,9 +405,9 @@ class PickPlaceBin(DefaultCameraEnv):
             "is_item_static": is_item_static,
             "success": success,
             "is_item_above_bin": is_item_above_bin,
+            "is_item_in_bin": is_item_in_bin,
             "is_item_grasped": is_item_grasped,
             "is_robot_static": is_robot_static,
-            "robot_touching_ground": robot_touching_ground,
             "robot_touching_bin": robot_touching_bin,
             "robot_touching_item": robot_touching_item,
         }
@@ -430,7 +418,7 @@ class PickPlaceBin(DefaultCameraEnv):
         return (self.agent.robot.get_qpos()[:, idx] - gripper_min) / (gripper_max - gripper_min)
 
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
-        tcp_to_item_dist = torch.linalg.norm(self.agent.tcp_pose.p - self.item.pose.p, axis=1)
+        tcp_to_item_dist = torch.linalg.norm(self.agent.tcp_pos - self.item.pose.p, axis=1)
         reaching_reward = 2 * (1 - torch.tanh(5 * tcp_to_item_dist))
         reward = reaching_reward
 
@@ -469,7 +457,6 @@ class PickPlaceBin(DefaultCameraEnv):
 
         reward[info["success"]] = 20
 
-        reward -= 6 * info["robot_touching_ground"].float()
         reward -= 3 * info["robot_touching_bin"].float()
         reward -= 1 * (~info["item_lifted"]).float()
 

@@ -143,17 +143,20 @@ class BaseRandomEnv(BaseEnv):
 
     def _load_lighting(self, options: dict):
         if self.domain_randomization_config.realism_mode:
-            # Overhead softbox (area light) plus a dim ambient dome, matching the real
-            # rig's own lighting (see simulation/usd/README.md) -- for one-off
+            # Just one real light: an overhead softbox (area light), matching the real
+            # rig's own single box light (see simulation/usd/README.md) -- for one-off
             # visualization renders (see examples/render_realistic.py). A directional
-            # "sun" light casts a hard-edged shadow no matter how dim, so this uses only
-            # a light with physical size (an area light) for a soft, diffuse shadow,
-            # which needs the ray-traced shader (rt/rt-fast) to render correctly.
-            # Training never sets realism_mode, so this branch has no effect on the
-            # flat/shadowless lighting used during RL.
-            self.scene.set_ambient_light([0.8, 0.8, 0.85])
+            # "sun" light casts a hard-edged shadow no matter how dim, so this uses a
+            # light with physical size for a soft, diffuse shadow, which needs the
+            # ray-traced shader (rt/rt-fast) to render correctly. The lightbox's vertical
+            # side walls naturally render darker than the floor under a straight-overhead
+            # light (their surface normal faces sideways, away from the light, not up
+            # toward it) -- moderate ambient softens that contrast. Training never sets
+            # realism_mode, so this branch has no effect on the flat/shadowless lighting
+            # used during RL.
+            self.scene.set_ambient_light([0.3, 0.3, 0.32])
             self.scene.add_area_light_for_ray_tracing(
-                sapien.Pose(p=[-0.245, -0.5, 1.6]), [10, 10, 9], 0.9, 1.0,
+                sapien.Pose(p=[-0.245, -0.4, 1.0]), [16, 16, 14.4], 0.25, 0.5,
             )
             return
 

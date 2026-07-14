@@ -74,6 +74,12 @@ _WHITE_PLASTIC_BASE_COLORS = [
     (1.0, 1.0, 1.0),                 # 3d_printed, camera_holder_white, camera_mount_white
     (0.901961, 0.901961, 0.901961),  # unnamed light bracket parts
 ]
+
+# The lightbox's own diffusing side panels -- large flat surfaces, matte mica in real
+# life, not small 3D-printed parts, even though they share a base color with some
+# (see `apply_realistic_materials`).
+_LIGHTBOX_PANEL_LINKS = {"part_1", "part_1_1", "part_1_2", "part_1_3"}
+
 _ORANGE_PLASTIC_BASE_COLORS = [
     (0.94, 0.49, 0.06),  # gripper_orange, accent_orange
 ]
@@ -221,18 +227,30 @@ class SO101OnFrame(BaseAgent):
         ``RandomizationConfig.realism_mode`` and ``examples/render_realistic.py``) --
         never called during training. Parts we don't have a texture for (the near-black
         servo casings) are left with their original flat color.
+
+        The lightbox's own diffusing side panels (``_LIGHTBOX_PANEL_LINKS``) happen to
+        share their base color with small 3D-printed plastic parts, but they're large
+        flat surfaces, not small textured prints -- applying the plastic texture's
+        surface grain to them catches light unevenly across the whole panel. They get a
+        plain matte material instead, matching the real panels' diffusing material.
         """
         aluminum = _load_texture_set("aluminum")
         plastic_white = _load_texture_set("plastic_white")
         plastic_orange = _load_texture_set("plastic_orange")
 
         for link in self.robot.links:
+            is_lightbox_panel = link.name in _LIGHTBOX_PANEL_LINKS
             for obj in link._objs:
                 render_body_component = obj.entity.find_component_by_type(RenderBodyComponent)
                 if render_body_component is None:
                     continue
                 for render_shape in render_body_component.render_shapes:
                     for part in render_shape.parts:
+                        if is_lightbox_panel:
+                            part.material.set_roughness(0.9)
+                            part.material.set_metallic(0.0)
+                            continue
+
                         color = part.material.get_base_color()
                         if _base_color_matches(color, _ALUMINUM_BASE_COLORS):
                             textures = aluminum
