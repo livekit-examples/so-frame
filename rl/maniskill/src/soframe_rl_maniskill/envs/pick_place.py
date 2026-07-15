@@ -512,7 +512,10 @@ class PickPlaceBin(DefaultCameraEnv):
         reward[info["success"]] = 20
 
         reward -= 3 * info["robot_touching_bin"].float()
-        reward -= 1 * (~info["item_lifted"]).float()
+        # Penalize leaving the bar sitting on the work surface, not being low per se: a
+        # bar resting inside the bin sits at nearly the same height (1 mm bin floor) and
+        # must not be docked for it.
+        reward -= 1 * (~info["item_lifted"] & ~info["is_item_above_bin"]).float()
 
         return reward
 
