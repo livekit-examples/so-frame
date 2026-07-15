@@ -64,6 +64,19 @@ the below.
 > brackets instead use 6 bolts, or grub/set screws that thread into the extrusion end (no
 > T-nut). Adjust to whatever hardware ships with your brackets.
 
+### Side panels (CNC)
+
+The flat panels that skin the frame (the matte side panels in the renders) are CNC-cut from
+**white mica sheet**. Each DXF below is one cut, so cut one of each except the short side
+panel, which is cut twice.
+
+| Panel            | DXF                                                          | Cuts |
+| ---------------- | ------------------------------------------------------------ | ---- |
+| Top panel        | [top-panel.dxf](components/cnc/top-panel.dxf)                | 1    |
+| Bottom panel     | [bottom-panel.dxf](components/cnc/bottom-panel.dxf)          | 1    |
+| Long side panel  | [long-side-panel.dxf](components/cnc/long-side-panel.dxf)    | 1    |
+| Short side panel | [short-side-panel.dxf](components/cnc/short-side-panel.dxf)  | 2    |
+
 ### LeSlider add-on
 
 The sliding carriage that carries the arm is the [LeSlider][leslider] mechanism (V-wheel
