@@ -78,25 +78,41 @@ success; one that hasn't succeeded gets at least `--fail_seconds` of runway befo
 so failed attempts aren't shown too briefly.
 
 ```bash
-# Fast rasterizer (matches what the policy actually saw during training)
+# Flat shading, fast rasterizer (matches what model_best.pt saw during training)
 uv run python examples/render_chained_eval.py \
     --checkpoint checkpoints/model_best.pt \
     --num_episodes 10 --fail_seconds 5 --out /tmp/rollout.mp4
 
-# Ray-traced shading, real PBR textures, overhead softbox lighting -- for a nicer-looking
-# render, never used for training. Single-env only: ray tracing isn't supported on the
-# gpu-parallelized sensor camera path, so this drops the sim backend to cpu.
+# PBR materials + shadow-casting key light (matches what model_best_raster.pt saw during
+# its fine-tune); still runs on the gpu sim backend.
 uv run python examples/render_chained_eval.py \
-    --checkpoint checkpoints/model_best.pt \
-    --raytraced --render_size 512 \
+    --checkpoint checkpoints/model_best_raster.pt \
+    --visual_fidelity raster --render_size 512 \
+    --num_episodes 8 --fail_seconds 4 --out /tmp/rollout_raster.mp4
+
+# Ray-traced shading, real PBR textures, overhead softbox lighting -- for the
+# nicest-looking render, never used for training. Single-env only: ray tracing isn't
+# supported on the gpu-parallelized sensor camera path, so this drops the sim backend
+# to cpu.
+uv run python examples/render_chained_eval.py \
+    --checkpoint checkpoints/model_best_raster.pt \
+    --visual_fidelity raytraced --render_size 512 \
     --num_episodes 5 --fail_seconds 5 --out /tmp/rollout_realistic.mp4
 ```
 
 **`--target_image_size` must match whatever `--image_size` the checkpoint was actually
-trained with** (`checkpoints/model_best.pt` was trained at the default 32, so the default
-works for it). The shipped checkpoint reaches **0.94 success_at_end** on the strict metric
-(bar settled inside the bin, robot clear and static) with fixed colors and full
-lighting/gripper/camera randomization. The render resolution
+trained with** (both shipped checkpoints were trained at the default 32, so the default
+works for them). Two checkpoints ship in `checkpoints/`:
+
+- **`model_best.pt`** -- trained on the flat (shadowless) look; reaches
+  **0.94 success_at_end** on the strict metric (bar settled inside the bin, robot clear
+  and static) with fixed colors and full lighting/gripper/camera randomization. Render it
+  with the default `--visual_fidelity flat`.
+- **`model_best_raster.pt`** -- `model_best.pt` fine-tuned for a further 1M steps under the
+  `raster` fidelity (PBR materials plus a shadow-casting key light); reaches
+  **0.81 success_at_end** in that domain. Render it with `--visual_fidelity raster`.
+
+The render resolution
 (`--render_size`) is independent of this -- `DeployAgent` downsamples internally before
 feeding the policy, so you can render at high resolution for visual quality while the policy
 still sees exactly what it was trained on.
@@ -220,6 +236,15 @@ default (`domain_randomization=False`; `train_squint.py` turns it on via
   `SPAWN_HALF_SIZE` in `pick_place.py`) is tuned for this physical rig's lightbox surface.
   Worth reverifying the bar and bin actually land on that surface, in reach, in the viewer,
   if the URDF geometry ever changes.
+- **Batched-physics dependence.** Policies trained in the GPU-batched sim measurably
+  degrade when rolled out in a lone environment: the same v24 checkpoint that evaluates
+  at 0.94 across 16-env batches drops to roughly 0.5-0.6 in `num_envs=1` rollouts (same
+  code, same GPU backend, seed-reproducible), with imprecise placements that knock the
+  bin over as the dominant failure. Contact dynamics evidently resolve slightly
+  differently in a single-scene solver, and the policy's placement precision is tuned to
+  the batched behavior. `render_chained_eval.py` therefore steps a 16-env batch and films
+  only env 0 (`--sim_envs`). Keep this in mind for real deployment: a physical robot is
+  also a single "env" whose contacts match neither solver mode.
 - **No real-robot deployment script yet.** Squint's own `deploy.py` and `deploy_utils/`
   (camera calibration, hardware interface) weren't ported; this folder covers simulation
   training only so far.

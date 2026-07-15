@@ -154,6 +154,11 @@ manager, and config details.
 
 ### `rl/maniskill/`
 
+<img src="assets/rl-maniskill.gif" alt="Vision-based RL rollouts (wrist + overhead cameras)" width="880">
+
+*Chained rollouts of the shipped `checkpoints/model_best.pt` (wrist camera left, overhead
+camera right), rendered in the flat shading it was trained on.*
+
 Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
 RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
 (SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
