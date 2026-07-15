@@ -69,18 +69,17 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 
     # Noisy joint positions for better sim2real.
     robot_qpos_noise_std: float = np.deg2rad(5)
-    # Item randomization: a flat bar, 8 x 2.5 x 1.5 cm by default. It fits the 10 cm
-    # bin's ~9.6 cm clear interior span at any yaw (footprint diagonal ~8.4 cm) with
-    # ~1.2 cm of slack, and is grasped across its 2.5 cm width like the old cube.
-    item_half_size_x_range: Sequence[float] = (0.04, 0.04)
+    # Item randomization: a flat bar matching the real object, 75 x 25 x 15 mm. Its
+    # footprint diagonal (~79 mm) fits the real bin's ~84 mm clear interior at any yaw,
+    # and it's grasped across its 25 mm width.
+    item_half_size_x_range: Sequence[float] = (0.0375, 0.0375)
     item_half_size_y_range: Sequence[float] = (0.0125, 0.0125)
     item_half_size_z_range: Sequence[float] = (0.0075, 0.0075)
-    # Bin randomization (half sizes; defaults match rl/mjlab's fixed 10 cm interior /
-    # 5 cm wall height bin -- note rl/mjlab's BIN_RIM_HEIGHT=0.05 is a *full* height, so
-    # the z half-size here is half of that (0.025), not 0.05.
-    bin_half_size_x_range: Sequence[float] = (0.05, 0.05)
-    bin_half_size_y_range: Sequence[float] = (0.05, 0.05)
-    bin_half_size_z_range: Sequence[float] = (0.025, 0.025)
+    # Bin randomization (half sizes), matching the real bin: 85 x 85 mm footprint,
+    # 35 mm walls, 1 mm wall thickness.
+    bin_half_size_x_range: Sequence[float] = (0.0425, 0.0425)
+    bin_half_size_y_range: Sequence[float] = (0.0425, 0.0425)
+    bin_half_size_z_range: Sequence[float] = (0.0175, 0.0175)
 
     item_friction_range: Sequence[float] = (0.5, 1.0)
     item_density_range: Sequence[float] = (400, 400)  # ~12 g for the default bar.
@@ -245,7 +244,12 @@ class PickPlaceBin(DefaultCameraEnv):
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
-        thickness = 0.004
+        # Real bin walls are 1 mm. That's too thin for reliable contact at the 10 ms
+        # physics step (a bar at 0.5 m/s crosses 5 mm per step), so walls keep an honest
+        # 1 mm visual and get a thicker collision box extended outward, inner faces
+        # aligned -- the interior clearance stays true to the real bin.
+        thickness = 0.001
+        wall_collision_thickness = 0.004
         self.bin_thickness = thickness
 
         bin_half_sizes_x = sample_range(cfg.bin_half_size_x_range)
@@ -274,17 +278,29 @@ class PickPlaceBin(DefaultCameraEnv):
             builder.add_box_collision(pose=bin_center_pose, half_size=bin_center_half_size)
             builder.add_box_visual(pose=bin_center_pose, half_size=bin_center_half_size, material=bin_color)
 
+            # Collision walls sit outward of the visual walls with inner faces aligned
+            # (see wall_collision_thickness above).
+            col_off_x = bin_half_size[0] - thickness / 2 + wall_collision_thickness / 2
+            col_off_y = bin_half_size[1] - thickness / 2 + wall_collision_thickness / 2
             for j in [-1, 1]:
-                y = j * bin_center_half_size[1]
-                wall_pose = sapien.Pose([0, y, bin_half_size[2]])
-                wall_half_size = [bin_half_size[0], thickness / 2, bin_half_size[2]]
-                builder.add_box_collision(pose=wall_pose, half_size=wall_half_size)
-                builder.add_box_visual(pose=wall_pose, half_size=wall_half_size, material=bin_color)
-                x = j * bin_center_half_size[0]
-                wall_pose = sapien.Pose([x, 0, bin_half_size[2]])
-                wall_half_size = [thickness / 2, bin_half_size[1], bin_half_size[2]]
-                builder.add_box_collision(pose=wall_pose, half_size=wall_half_size)
-                builder.add_box_visual(pose=wall_pose, half_size=wall_half_size, material=bin_color)
+                builder.add_box_visual(
+                    pose=sapien.Pose([0, j * bin_center_half_size[1], bin_half_size[2]]),
+                    half_size=[bin_half_size[0], thickness / 2, bin_half_size[2]],
+                    material=bin_color,
+                )
+                builder.add_box_collision(
+                    pose=sapien.Pose([0, j * col_off_y, bin_half_size[2]]),
+                    half_size=[bin_half_size[0], wall_collision_thickness / 2, bin_half_size[2]],
+                )
+                builder.add_box_visual(
+                    pose=sapien.Pose([j * bin_center_half_size[0], 0, bin_half_size[2]]),
+                    half_size=[thickness / 2, bin_half_size[1], bin_half_size[2]],
+                    material=bin_color,
+                )
+                builder.add_box_collision(
+                    pose=sapien.Pose([j * col_off_x, 0, bin_half_size[2]]),
+                    half_size=[wall_collision_thickness / 2, bin_half_size[1], bin_half_size[2]],
+                )
 
             builder.initial_pose = sapien.Pose(p=[-0.2, 0, bin_half_size[2]])
             builder.set_scene_idxs([i])
@@ -412,7 +428,7 @@ class PickPlaceBin(DefaultCameraEnv):
         inside_y = torch.abs(offset[:, 1]) < self.bin_half_sizes_y
         is_item_above_bin = inside_x & inside_y
         # Actually settled at its resting height inside the bin -- not still falling
-        # toward it, and not perched on a wall rim (a rim-rest sits ~4.5 cm higher).
+        # toward it, and not perched on a wall rim (a rim-rest sits ~3 cm higher).
         is_item_in_bin = is_item_above_bin & (offset[:, 2] < 0.01)
 
         item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_heights + 1e-3)
