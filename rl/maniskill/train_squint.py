@@ -90,11 +90,12 @@ class Args:
     evaluate: bool = False
     """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""
     checkpoint: Optional[str] = None
-    reset_alpha: bool = False
+    reset_alpha: bool = True
     """when warm-starting from --checkpoint, keep the default entropy temperature instead
-    of the checkpoint's: a long-trained checkpoint's autotuned alpha can be collapsed to
-    ~1e-4 (near-deterministic collection), leaving the fine-tuning run no exploration to
-    discover new behavior with."""
+    of the checkpoint's (pass --no-reset_alpha to inherit it): a long-trained checkpoint's
+    autotuned alpha collapses to ~1e-4 (near-deterministic collection), leaving the
+    fine-tuning run no exploration to discover new behavior with -- this single effect
+    froze several successive fine-tuning runs at a hover-without-release plateau."""
     """path to a pretrained checkpoint file to start evaluation/training from (if set to "wandb" will attempt downloading from wandb)"""
 
     # Environment specific arguments
@@ -102,6 +103,9 @@ class Args:
     """the id of the environment"""
     env_domain_randomization: bool = True
     """adds domain randomization flag if env supports it"""
+    randomize_colors: bool = False
+    """also randomize the bar and bin colors per scene build (they default to fixed
+    blue/dark-yellow); pair with --reconfiguration_freq so training re-samples them"""
     realism_mode: bool = False
     """for --evaluate rollouts: render eval_envs' wrist/overhead sensor cameras (what gets
     saved to video) with ray-traced shading, shadow-casting lighting, and real PBR textures
@@ -616,6 +620,10 @@ if __name__ == "__main__":
     if args.env_domain_randomization:
         env_kwargs["domain_randomization"] = True
         eval_env_kwargs["domain_randomization"] = True
+    if args.randomize_colors:
+        color_cfg = dict(randomize_item_color=True, randomize_bin_color=True)
+        env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **color_cfg)
+        eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **color_cfg)
     if args.realism_mode:
         # The recorded eval video comes from the wrist/overhead sensor cameras, not the
         # third-person human_render_camera, so the realistic shader needs to go on those.
@@ -623,7 +631,9 @@ if __name__ == "__main__":
         # (only the separate human-render path), so this also drops eval to the cpu sim
         # backend -- fine for a single-env one-off render, never used for training.
         eval_env_kwargs["sensor_configs"]["shader_pack"] = "rt-fast"
-        eval_env_kwargs["domain_randomization_config"] = dict(realism_mode=True)
+        eval_env_kwargs["domain_randomization_config"] = dict(
+            eval_env_kwargs.get("domain_randomization_config", {}), realism_mode=True
+        )
         eval_env_kwargs["sim_backend"] = "cpu"
 
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1,
