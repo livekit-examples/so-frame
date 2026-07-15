@@ -620,16 +620,24 @@ if __name__ == "__main__":
         if dr_cfg:
             kw["domain_randomization_config"] = dr_cfg
     if args.visual_fidelity == "raytraced":
-        # The recorded eval video comes from the wrist/overhead sensor cameras, not the
-        # third-person human_render_camera, so the realistic shader needs to go on those.
-        # Ray-traced shaders aren't supported on the GPU-parallelized sensor camera path
-        # (only the separate human-render path), so this also drops eval to the cpu sim
-        # backend -- fine for a single-env one-off render, never used for training.
-        eval_env_kwargs["sensor_configs"]["shader_pack"] = "rt-fast"
-        eval_env_kwargs["domain_randomization_config"] = dict(
-            eval_env_kwargs.get("domain_randomization_config", {}), visual_fidelity="raytraced"
-        )
-        eval_env_kwargs["sim_backend"] = "cpu"
+        # Ray-traced sensor cameras only exist on the cpu sim backend (single env; the
+        # GPU-parallel camera path is rasterizer-only), so both env pools drop to cpu
+        # with rt-fast sensors. For --evaluate that's the usual one-off render path.
+        # For TRAINING it means slow single-env collection (~190 steps/s at 128 px):
+        # viable for short visual fine-tunes, not from-scratch runs -- and
+        # --num_updates must be scaled down to keep the update-to-data ratio sane
+        # (the default 256 per iteration assumes 1024 env steps per iteration).
+        for kw in (env_kwargs, eval_env_kwargs):
+            kw["sensor_configs"]["shader_pack"] = "rt-fast"
+            kw["domain_randomization_config"] = dict(
+                kw.get("domain_randomization_config", {}), visual_fidelity="raytraced"
+            )
+            kw["sim_backend"] = "cpu"
+        if not args.evaluate:
+            assert args.num_envs == 1 and args.num_eval_envs == 1, (
+                "raytraced training runs on the cpu backend, which supports a single "
+                "env: pass --num_envs=1 --num_eval_envs=1 (and a small --num_updates)"
+            )
 
     envs = gym.make(args.env_id, num_envs=args.num_envs if not args.evaluate else 1,
                     reconfiguration_freq=args.reconfiguration_freq, **env_kwargs)
