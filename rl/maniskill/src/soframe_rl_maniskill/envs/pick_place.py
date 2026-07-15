@@ -83,8 +83,11 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 
     item_friction_range: Sequence[float] = (0.5, 1.0)
     item_density_range: Sequence[float] = (400, 400)  # ~12 g for the default bar.
-    randomize_item_color: bool = True
-    randomize_bin_color: bool = True
+    # Fixed colors (blue bar, dark yellow bin) by default: color randomization is
+    # supported (with the visibility floor below) but costs substantial sample
+    # efficiency, so it's opt-in for a dedicated color-generalization run.
+    randomize_item_color: bool = False
+    randomize_bin_color: bool = False
 
 
 @register_env("SOFramePickPlaceBin-v1", max_episode_steps=200)
