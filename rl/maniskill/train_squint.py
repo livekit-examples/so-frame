@@ -635,13 +635,12 @@ if __name__ == "__main__":
         env_kwargs["action_rate_penalty"] = args.action_rate_penalty
         eval_env_kwargs["action_rate_penalty"] = args.action_rate_penalty
     if args.realistic_visuals:
+        # The memory-optimized "minimal" sensor shader renders shadows and textures just
+        # fine (verified), so no shader change is needed -- the "default" shader's
+        # G-buffers OOM the GPU beyond ~384 envs for no visible benefit here.
         rv_cfg = dict(realistic_visuals=True)
         env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
         eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
-        # Shadows need the full default shader; the memory-optimized "minimal" one the
-        # sensor cameras normally use skips them.
-        env_kwargs["sensor_configs"]["shader_pack"] = "default"
-        eval_env_kwargs["sensor_configs"]["shader_pack"] = "default"
     if args.realism_mode:
         # The recorded eval video comes from the wrist/overhead sensor cameras, not the
         # third-person human_render_camera, so the realistic shader needs to go on those.
