@@ -8,7 +8,7 @@ Run from rl/maniskill/:
     uv run python examples/render_chained_eval.py \
         --checkpoint checkpoints/model_best.pt --num_episodes 10 --out /tmp/chained.mp4
 
-Add --realism_mode for ray-traced shading (see examples/render_realistic.py); this drops
+Add --raytraced for ray-traced shading (see examples/render_realistic.py); this drops
 to the cpu sim backend since ray tracing isn't supported on the gpu-parallelized sensor
 camera path, which is fine for a single-env render.
 """
@@ -38,7 +38,7 @@ parser.add_argument("--fail_seconds", type=float, default=5.0, help="how long an
 parser.add_argument("--render_size", type=int, default=512)
 parser.add_argument("--fps", type=int, default=20)
 parser.add_argument("--target_image_size", type=int, default=32, help="must match the checkpoint's own image_size (32 is the current default; older checkpoints like slider_pickplace_v7 used 16)")
-parser.add_argument("--realism_mode", action="store_true")
+parser.add_argument("--raytraced", action="store_true")
 parser.add_argument("--domain_randomization", action="store_true")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--out", type=str, default="/tmp/chained_eval.mp4")
@@ -60,10 +60,12 @@ env_kwargs = dict(
     render_mode="sensors",
     num_envs=1,
     domain_randomization=args.domain_randomization,
-    domain_randomization_config=dict(realism_mode=args.realism_mode, **steady_cameras),
+    domain_randomization_config=dict(
+        visual_fidelity="raytraced" if args.raytraced else "flat", **steady_cameras
+    ),
     sensor_configs=dict(width=args.render_size, height=args.render_size),
 )
-if args.realism_mode:
+if args.raytraced:
     env_kwargs["sensor_configs"]["shader_pack"] = "rt-fast"
     env_kwargs["sim_backend"] = "cpu"
 else:
@@ -72,7 +74,7 @@ else:
 env = gym.make(args.env_id, **env_kwargs)
 env = FlattenRGBDObservationWrapper(env, rgb=True, depth=False, state=True)
 
-# Policy inference stays on cuda even in realism mode (only the *sim* drops to cpu
+# Policy inference stays on cuda even with --raytraced (only the *sim* drops to cpu
 # there); obs are moved to this device explicitly each step.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

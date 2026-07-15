@@ -1,8 +1,7 @@
-"""Training helper wrappers, vendored unmodified from Squint's `utils.py`
-(https://github.com/aalmuzairee/squint). Robot/task-agnostic: resolution downsampling,
-color jitter on RGB observations, replay-buffer memory sizing."""
+"""Training helper wrappers, vendored from Squint's `utils.py`
+(https://github.com/aalmuzairee/squint). Robot/task-agnostic: resolution downsampling
+and color jitter on RGB observations (upstream's buffer-memory helper was dropped)."""
 
-import numpy as np
 import gymnasium as gym
 import torch
 import torch.nn.functional as F
@@ -90,29 +89,3 @@ class ColorJitterWrapper(gym.ObservationWrapper):
 
         obs['rgb'] = rgb
         return obs
-
-
-# ---------------------------  Extra Utils --------------------------------------#
-
-def calc_buffer_memory(rgb_dim, state_dim, action_dim, max_length, rgb_dtype=np.uint8, store_next_obs=True):
-    """Calculate memory required for buffer in GB and print it.
-
-    Args:
-        rgb_dim: Flattened dimension of rgb observation
-        state_dim: Dimension of state observation
-        action_dim: Dimension of action space
-        max_length: Maximum buffer length
-        rgb_dtype: Data type for rgb storage
-        store_next_obs: Whether buffer stores next_obs separately (2x memory for obs)
-    """
-    obs_multiplier = 2 if store_next_obs else 1
-
-    rgb_bytes = max_length * rgb_dim * np.dtype(rgb_dtype).itemsize * obs_multiplier
-    state_bytes = max_length * state_dim * np.dtype(np.float32).itemsize * obs_multiplier
-    act_bytes = max_length * action_dim * np.dtype(np.float32).itemsize
-    other_bytes = max_length * np.dtype(np.float32).itemsize * 3
-
-    # Total memory in GB
-    total_gb = (rgb_bytes + state_bytes + act_bytes + other_bytes) / (1024**3)
-
-    return total_gb

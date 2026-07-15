@@ -55,9 +55,8 @@ _JOINT_DELTA_LIMITS = {
     "gripper": 0.2,
 }
 
-# PBR texture sets for `apply_realistic_materials` below (visualization only, see
-# `envs/base_random_env.py`'s `RandomizationConfig.realism_mode` and
-# `examples/render_realistic.py`).
+# PBR texture sets for `apply_realistic_materials` below (see
+# `RandomizationConfig.visual_fidelity` in `envs/base_random_env.py`).
 _TEXTURES_ROOT = _REPO_ROOT / "simulation" / "assets" / "textures"
 
 # The URDF (simulation/urdf/so101_on_frame.urdf) only defines flat `<color rgba="...">`
@@ -223,9 +222,9 @@ class SO101OnFrame(BaseAgent):
 
     def apply_realistic_materials(self):
         """Wire real PBR textures (``simulation/assets/textures/``) onto the robot's flat-
-        color URDF materials, for one-off visualization renders only (see
-        ``RandomizationConfig.realism_mode`` and ``examples/render_realistic.py``) --
-        never called during training. Parts we don't have a texture for (the near-black
+        color URDF materials, for the "raster" (trainable) and "raytraced" (render-only)
+        visual-fidelity modes (see ``RandomizationConfig.visual_fidelity`` in
+        ``envs/base_random_env.py``). Parts we don't have a texture for (the near-black
         servo casings) are left with their original flat color.
 
         The lightbox's own diffusing side panels (``_LIGHTBOX_PANEL_LINKS``) happen to

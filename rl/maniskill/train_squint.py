@@ -2,12 +2,16 @@
 
 Vendored from the paper's reference implementation
 (https://github.com/aalmuzairee/squint/blob/main/train_squint.py), Almuzairee & Christensen,
-2026 (arxiv.org/abs/2602.21203). The only changes from the original: the task import
-(`envs` -> `soframe_rl_maniskill.envs`, registering this repo's SO-101-on-frame agent and
-`SOFramePickPlaceBin-v1` task instead of Squint's own bare-tabletop SO-101 task set) and the
-default `env_id`/`wandb_project_name`. The algorithm itself is untouched: the visual SAC
-agent (CNN encoder, distributional C51 critic ensemble, resolution "squinting" via
-`DownsampleObsWrapper`, layer norm throughout, torch.compile + CUDA graphs).
+2026 (arxiv.org/abs/2602.21203). The SAC agent itself is untouched (CNN encoder,
+distributional C51 critic ensemble, resolution "squinting" via `DownsampleObsWrapper`,
+layer norm throughout, torch.compile + CUDA graphs). Local changes on top of upstream:
+
+- registers this repo's SO-101-on-frame agent and `SOFramePickPlaceBin-v1` task, with
+  matching default `env_id`/`wandb_project_name`
+- warm starts: `--checkpoint` runs collect with the loaded policy before learning starts,
+  and `--reset_alpha` (default on) restores exploration
+- env flags: `--randomize_colors`, `--action_rate_penalty`, `--visual_fidelity`
+- tracks the best eval checkpoint (ckpt_best.pt) separately from the latest one
 
 Usage (from rl/maniskill/, after `uv sync`):
     uv run python train_squint.py --env_id=SOFramePickPlaceBin-v1
@@ -25,7 +29,6 @@ warnings.filterwarnings("ignore", message="Using lock_\\(\\) in a compiled graph
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime
 
 import math
 import random
@@ -90,13 +93,11 @@ class Args:
     evaluate: bool = False
     """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""
     checkpoint: Optional[str] = None
+    """path to a pretrained checkpoint file to start evaluation/training from"""
     reset_alpha: bool = True
     """when warm-starting from --checkpoint, keep the default entropy temperature instead
-    of the checkpoint's (pass --no-reset_alpha to inherit it): a long-trained checkpoint's
-    autotuned alpha collapses to ~1e-4 (near-deterministic collection), leaving the
-    fine-tuning run no exploration to discover new behavior with -- this single effect
-    froze several successive fine-tuning runs at a hover-without-release plateau."""
-    """path to a pretrained checkpoint file to start evaluation/training from (if set to "wandb" will attempt downloading from wandb)"""
+    of the checkpoint's collapsed one (~1e-4 after long training, which leaves the
+    fine-tuning run no exploration); pass --no-reset_alpha to inherit it"""
 
     # Environment specific arguments
     env_id: str = "SOFramePickPlaceBin-v1"
@@ -109,16 +110,12 @@ class Args:
     action_rate_penalty: float = 0.0
     """smoothness cost: -k * ||a_t - a_{t-1}||^2 per step (raw reward units). Penalizes
     jerk, not movement. ~0.05 is a reasonable strength for polish runs."""
-    realistic_visuals: bool = False
-    """train on realistic appearance (PBR materials + shadow-casting key light) using the
-    GPU rasterizer's default shader -- the trainable approximation of realism_mode's look,
-    for closing the appearance gap before ray-traced eval or real deployment."""
-    realism_mode: bool = False
-    """for --evaluate rollouts: render eval_envs' wrist/overhead sensor cameras (what gets
-    saved to video) with ray-traced shading, shadow-casting lighting, and real PBR textures
-    (see `RandomizationConfig.realism_mode` in envs/base_random_env.py) instead of the fast
-    rasterizer used for training, and drops the third-person camera from the recorded
-    video. Only affects eval_envs, never the training envs -- combine with
+    visual_fidelity: str = "flat"
+    """rendering fidelity, see `RandomizationConfig.visual_fidelity` in
+    envs/base_random_env.py. "flat" (default) is the standard fast training look;
+    "raster" trains on realistic appearance (PBR materials + shadow-casting key light);
+    "raytraced" applies only to eval_envs, rendering their wrist/overhead sensor cameras
+    with ray tracing on the cpu sim backend -- combine with
     `--evaluate --checkpoint <path> --num_eval_envs 1` for a single high-fidelity rollout."""
     num_envs: int = 1024
     """the number of parallel environments"""
@@ -509,17 +506,8 @@ class DeployAgent(nn.Module):
         self.encoder = CNNEncoder(n_obs, device)
         self.actor = Actor(sim_env, n_obs=self.encoder.repr_dim, n_state=n_state, n_act=n_act, device=self.device)
 
-    def load_checkpoint(self, checkpoint, checkpoint_config=None, version=None):
-        if checkpoint.lower() == "wandb":
-            assert checkpoint_config is not None, "Need checkpoint_config to download from wandb"
-            cc = checkpoint_config
-            artifact_path = f"{cc['wandb_entity']}/{cc['wandb_project_name']}/model_{cc['agent_name']}_{cc['env_id']}_{cc['seed']}:{cc['version']}"
-            print(artifact_path)
-            local_path = Logger().download_checkpoint(artifact_path)
-            local_path = f"{local_path}/ckpt.pt"
-            ckpt = torch.load(local_path, map_location=self.device)
-        else:
-            ckpt = torch.load(checkpoint, map_location=self.device)
+    def load_checkpoint(self, checkpoint):
+        ckpt = torch.load(checkpoint, map_location=self.device)
         self.encoder.load_state_dict(ckpt['encoder'])
         self.actor.load_state_dict(ckpt['actor'])
         print(f"Loaded checkpoint from {checkpoint} at step {ckpt['global_step']}")
@@ -578,15 +566,6 @@ class Logger:
             artifact.wait()
             print(f"Uploaded checkpoint {model_name} to wandb")
 
-    def download_checkpoint(self, artifact_path: str):
-        api = wandb.Api()
-        artifact = api.artifact(artifact_path)
-        artifact_dir = artifact.download()
-        run = artifact.logged_by()
-        local_time = datetime.fromisoformat(run.createdAt.replace('Z', '+00:00')).astimezone()
-        print(f"Downloaded checkpoint at {artifact_dir} from experiment: {run.config['exp_name']} at: {local_time}")
-        return artifact_dir
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Main
@@ -596,6 +575,8 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     args.num_total_iterations = int(args.total_timesteps // args.num_envs)
     assert args.num_updates > 0, "No updates will be made to the model with the current setup"
+    assert args.visual_fidelity in ("flat", "raster", "raytraced"), \
+        f"--visual_fidelity must be flat|raster|raytraced, got {args.visual_fidelity!r}"
 
     if args.exp_name is None:
         args.exp_name = os.path.basename(__file__)[: -len(".py")]
@@ -621,27 +602,24 @@ if __name__ == "__main__":
     eval_env_kwargs = dict(obs_mode=args.obs_mode, render_mode="sensors", sim_backend="gpu",
                            sensor_configs=dict(width=args.render_size, height=args.render_size),
                            human_render_camera_configs=dict(shader_pack="default", width=args.render_size, height=args.render_size))
-    if args.control_mode is not None:
-        env_kwargs["control_mode"] = args.control_mode
-        eval_env_kwargs["control_mode"] = args.control_mode
-    if args.env_domain_randomization:
-        env_kwargs["domain_randomization"] = True
-        eval_env_kwargs["domain_randomization"] = True
-    if args.randomize_colors:
-        color_cfg = dict(randomize_item_color=True, randomize_bin_color=True)
-        env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **color_cfg)
-        eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **color_cfg)
-    if args.action_rate_penalty > 0:
-        env_kwargs["action_rate_penalty"] = args.action_rate_penalty
-        eval_env_kwargs["action_rate_penalty"] = args.action_rate_penalty
-    if args.realistic_visuals:
-        # The memory-optimized "minimal" sensor shader renders shadows and textures just
-        # fine (verified), so no shader change is needed -- the "default" shader's
-        # G-buffers OOM the GPU beyond ~384 envs for no visible benefit here.
-        rv_cfg = dict(realistic_visuals=True)
-        env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
-        eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
-    if args.realism_mode:
+    for kw in (env_kwargs, eval_env_kwargs):
+        if args.control_mode is not None:
+            kw["control_mode"] = args.control_mode
+        if args.env_domain_randomization:
+            kw["domain_randomization"] = True
+        if args.action_rate_penalty > 0:
+            kw["action_rate_penalty"] = args.action_rate_penalty
+        dr_cfg = {}
+        if args.randomize_colors:
+            dr_cfg.update(randomize_item_color=True, randomize_bin_color=True)
+        if args.visual_fidelity == "raster":
+            # No shader change needed: the memory-optimized "minimal" sensor shader
+            # renders shadows and textures just fine (verified), while the "default"
+            # shader's G-buffers OOM the GPU beyond ~384 envs for no visible benefit.
+            dr_cfg["visual_fidelity"] = "raster"
+        if dr_cfg:
+            kw["domain_randomization_config"] = dr_cfg
+    if args.visual_fidelity == "raytraced":
         # The recorded eval video comes from the wrist/overhead sensor cameras, not the
         # third-person human_render_camera, so the realistic shader needs to go on those.
         # Ray-traced shaders aren't supported on the GPU-parallelized sensor camera path
@@ -649,7 +627,7 @@ if __name__ == "__main__":
         # backend -- fine for a single-env one-off render, never used for training.
         eval_env_kwargs["sensor_configs"]["shader_pack"] = "rt-fast"
         eval_env_kwargs["domain_randomization_config"] = dict(
-            eval_env_kwargs.get("domain_randomization_config", {}), realism_mode=True
+            eval_env_kwargs.get("domain_randomization_config", {}), visual_fidelity="raytraced"
         )
         eval_env_kwargs["sim_backend"] = "cpu"
 
@@ -730,14 +708,7 @@ if __name__ == "__main__":
 
     # Load checkpoint
     if args.checkpoint is not None:
-        if args.checkpoint.lower() == "wandb":
-            artifact_path = f"{args.wandb_entity}/{args.wandb_project_name}/model_{args.agent_name}_{args.env_id}_{args.seed}:latest"
-            print(artifact_path)
-            local_path = logger.download_checkpoint(artifact_path)
-            local_path = f"{local_path}/ckpt.pt"
-            ckpt = torch.load(local_path, map_location=device)
-        else:
-            ckpt = torch.load(args.checkpoint, map_location=device)
+        ckpt = torch.load(args.checkpoint, map_location=device)
         encoder.load_state_dict(ckpt['encoder'])
         actor.load_state_dict(ckpt['actor'])
         critic.load_state_dict(ckpt['critic'])
@@ -776,9 +747,9 @@ if __name__ == "__main__":
         return action
 
     def get_eval_action(rgb, state):
-        # realism_mode runs eval_envs on the cpu sim backend (ray-traced sensor cameras
-        # aren't supported on the gpu-parallelized camera path), so obs may not already be
-        # on `device` the way they are for the normal all-gpu case.
+        # --visual_fidelity=raytraced runs eval_envs on the cpu sim backend (ray-traced
+        # sensor cameras aren't supported on the gpu-parallelized camera path), so obs may
+        # not already be on `device` the way they are for the normal all-gpu case.
         rgb_feat = encoder_eval(rgb.to(device))
         return actor_eval.get_eval_action(rgb_feat, state.to(device))
 
@@ -791,14 +762,6 @@ if __name__ == "__main__":
 
     # ── Replay buffer ──────────────────────────────────────────────────────
 
-    # TODO: Buffer stores current and next observations, should only store one
-    buffer_mem = utils.calc_buffer_memory(
-        rgb_dim=np.prod(n_obs),
-        state_dim=n_state,
-        action_dim=n_act,
-        max_length=min(args.buffer_size, args.total_timesteps),
-        rgb_dtype=np.uint8,
-    )
     rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
 
     # ── Print summary ──────────────────────────────────────────────────────
@@ -812,7 +775,6 @@ if __name__ == "__main__":
         print(mod)
     print(f"Task: {args.env_id}, Control mode: {envs.unwrapped._control_mode}")
     print(f"Observations: {n_obs}, State: {n_state}, Actions: {n_act}")
-    print(f"Buffer memory required: {buffer_mem:.2f} GB")
     print(f"Device: {device}")
     print("-----------------------")
 

@@ -26,7 +26,7 @@ robot_path = "/World/so101_on_frame"
 add_reference_to_stage(usd_path=args.usd, prim_path=robot_path)
 
 # Test cube dropped just above the (fixed) floor panel's known surface, matching the same
-# XY used for the URDF/MJCF drop tests (see simulation/urdf/README.md, examples/measure_work_surface.py).
+# XY used for the URDF/MJCF drop tests (see simulation/urdf/README.md).
 test_cube = world.scene.add(
     DynamicCuboid(
         prim_path="/World/test_cube",

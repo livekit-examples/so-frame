@@ -4,7 +4,6 @@ Adapted from [Squint](https://github.com/aalmuzairee/squint)'s ``envs/base_rando
 Handles:
 - Gripper stiffness/damping randomization
 - Lighting randomization
-- Robot color randomization
 - Background overlay (greenscreen) compositing
 - Wrist + overhead cameras that track the URDF's calibrated mounts, with small jitter
 
@@ -18,10 +17,10 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Sequence, Union
 
 import cv2
+import dacite
 import numpy as np
 import sapien
 import torch
-from sapien.render import RenderBodyComponent
 
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
@@ -43,27 +42,23 @@ class RandomizationConfig:
     """Whether to apply background overlay (greenscreen). If False, returns raw simulation images."""
     rgb_overlay_path: Optional[str] = os.path.join(os.path.dirname(__file__), "black_overlay.png")
     """Path to background image. If None and apply_overlay=True, uses black background."""
-    realism_mode: bool = False
-    """Favor visual fidelity over speed, for one-off visualization renders (see
-    ``examples/render_realistic.py``): a shadow-casting 3-point lighting rig instead of the
-    flat ambient + shadowless lights used for training, and slightly rougher (less plasticky)
-    cube/bin materials. Off by default -- zero effect on training throughput or behavior.
-    Combine with ``human_render_camera_configs=dict(shader_pack="rt"|"rt-fast")`` for
-    ray-traced reflections/soft shadows/GI, which this flag alone does not add."""
-    realistic_visuals: bool = False
-    """Train-time realistic appearance on the GPU rasterizer: the same PBR materials as
-    ``realism_mode`` plus a shadow-casting key light, but fully compatible with the
-    GPU-parallel sensor cameras (unlike ray tracing). Pair with sensor
-    ``shader_pack="default"`` so shadows actually reach the observations. Used to
-    fine-tune a policy toward realism_mode's appearance domain."""
+    visual_fidelity: str = "flat"
+    """Rendering fidelity, one of:
+    - "flat" (default): the fast shadowless lighting used for training.
+    - "raster": PBR materials plus a shadow-casting key light, compatible with the
+      GPU-parallel sensor cameras (shadows and textures render fine on their standard
+      memory-optimized "minimal" shader), so it's trainable at full env counts. Used to
+      close the appearance gap toward "raytraced" before real deployment.
+    - "raytraced": the same PBR materials plus an overhead softbox area light matching
+      the real rig. Renders correctly only under the rt/rt-fast shaders, which the
+      GPU-parallel sensor path doesn't support -- for one-off renders and single-env
+      evals (see ``examples/render_realistic.py``), never training."""
 
     # === Common randomization settings (affected by domain_randomization flag) ===
     gripper_stiffness_range: Sequence[float] = (500, 2000)
     """Range for gripper joint stiffness randomization (per-episode)."""
     gripper_damping_range: Sequence[float] = (50, 200)
     """Range for gripper joint damping randomization (per-episode)."""
-    robot_color: Optional[Union[str, Sequence[float]]] = None
-    """Robot color in RGB (0-1). Set to "random" for per-episode randomization."""
     randomize_lighting: bool = True
     """Whether to randomize ambient lighting."""
 
@@ -83,15 +78,21 @@ class RandomizationConfig:
     overhead_camera_fov_noise: float = np.deg2rad(1)
     """Noise scale for camera FOV. Base FOV comes from the URDF camera (`fovy` in the MJCF twin)."""
 
-    def dict(self):
-        return {k: v for k, v in asdict(self).items()}
+    @classmethod
+    def resolve(cls, config: Union["RandomizationConfig", dict]) -> "RandomizationConfig":
+        """Merge a dict of overrides into this class's defaults (instances pass through)."""
+        if isinstance(config, cls):
+            return config
+        merged = asdict(cls())
+        common.dict_merge(merged, config if isinstance(config, dict) else asdict(config))
+        return dacite.from_dict(data_class=cls, data=merged, config=dacite.Config(strict=True))
 
 
 class BaseRandomEnv(BaseEnv):
     """Base environment with domain randomization and overlay support.
 
     Subclasses (e.g. ``pick_place.PickPlaceBin``) add the task-specific scene and
-    call into ``WristCameraEnv`` for the camera.
+    inherit the cameras from ``DualCameraEnv``.
     """
 
     def __init__(
@@ -102,16 +103,7 @@ class BaseRandomEnv(BaseEnv):
         **kwargs,
     ):
         self.domain_randomization = domain_randomization
-
-        self.domain_randomization_config = RandomizationConfig()
-        if isinstance(domain_randomization_config, dict):
-            merged_config = self.domain_randomization_config.dict()
-            common.dict_merge(merged_config, domain_randomization_config)
-            for key, value in merged_config.items():
-                if hasattr(self.domain_randomization_config, key):
-                    setattr(self.domain_randomization_config, key, value)
-        elif isinstance(domain_randomization_config, RandomizationConfig):
-            self.domain_randomization_config = domain_randomization_config
+        self.domain_randomization_config = RandomizationConfig.resolve(domain_randomization_config)
 
         # Overlay state
         self._objects_to_remove_from_greenscreen: list[Union[Actor, Link]] = []
@@ -148,21 +140,12 @@ class BaseRandomEnv(BaseEnv):
         self._objects_to_remove_from_greenscreen = []
 
     def _load_lighting(self, options: dict):
-        if self.domain_randomization_config.realism_mode:
-            # Just one real light: an overhead softbox (area light), matching the real
-            # rig's own single box light (see simulation/usd/README.md) -- for one-off
-            # visualization renders (see examples/render_realistic.py). It only renders
-            # correctly under the ray-traced shader (rt/rt-fast). SAPIEN lights emit
-            # along the +x axis of their pose (see sapien.wrapper.scene, which aligns
-            # [1, 0, 0] with the requested direction for every light type), so the pose
-            # rotates +x straight down; a position-only pose would shine the panel
-            # sideways and leave the floor lit by ambient alone, with half the workspace
-            # in shadow. The panel is centered over the item/bin spawn regions
-            # (x=-0.225, y in [-0.9, -0.05], see pick_place.py) and sized larger than
-            # the workspace so every point sees a wide emitter: shadows wash out to
-            # near-nothing, and the strong ambient fill lifts whatever residual falloff
-            # is left at the box corners. Training never sets realism_mode, so this
-            # branch has no effect on the flat/shadowless lighting used during RL.
+        fidelity = self.domain_randomization_config.visual_fidelity
+        if fidelity == "raytraced":
+            # One overhead softbox (area light), matching the real rig's single box light.
+            # SAPIEN lights emit along +x of their pose, so the pose rotates +x straight
+            # down; the panel is centered over the spawn regions and oversized so shadows
+            # wash out to near-nothing. rt/rt-fast shaders only.
             self.scene.set_ambient_light([0.45, 0.45, 0.48])
             self.scene.add_area_light_for_ray_tracing(
                 sapien.Pose(p=[-0.225, -0.5, 1.0], q=[0.7071068, 0, 0.7071068, 0]),
@@ -177,14 +160,14 @@ class BaseRandomEnv(BaseEnv):
         else:
             self.scene.set_ambient_light([0.3, 0.3, 0.3])
 
-        if self.domain_randomization_config.realistic_visuals:
-            # Rasterizer-compatible core of realism_mode's look, for TRAINING obs on the
-            # GPU-parallel cameras (ray tracing is cpu/render-only): a shadow-casting
-            # near-vertical key light stands in for the softbox, over the same randomized
-            # ambient as standard DR. Pair with sensor shader_pack="default" -- the
-            # memory-optimized "minimal" shader skips shadows.
+        if fidelity == "raster":
+            # Rasterizer stand-in for the softbox: a shadow-casting near-vertical key
+            # light over the usual randomized ambient. Works with the sensor cameras'
+            # standard "minimal" shader (verified: it renders shadows and textures).
+            # shadow_map_size stays small: shadow maps allocate per env (2048^2 across
+            # 1024 envs is ~17 GB of VRAM); 512^2 is plenty for 128 px observations.
             self.scene.add_directional_light(
-                [0.15, 0.1, -1], [1.5, 1.45, 1.4], shadow=True, shadow_scale=2.0, shadow_map_size=2048,
+                [0.15, 0.1, -1], [1.5, 1.45, 1.4], shadow=True, shadow_scale=2.0, shadow_map_size=512,
             )
             self.scene.add_directional_light([-1, -0.3, -0.6], [0.4, 0.4, 0.45])
             return
@@ -203,29 +186,6 @@ class BaseRandomEnv(BaseEnv):
         builder = self.scene.create_actor_builder()
         builder.initial_pose = sapien.Pose()
         self.overhead_camera_mount = builder.build_kinematic("overhead_camera_mount")
-
-    def _randomize_robot_color(self):
-        if self.domain_randomization_config.robot_color is None:
-            return
-
-        for link in self.agent.robot.links:
-            for i, obj in enumerate(link._objs):
-                render_body_component: RenderBodyComponent = obj.entity.find_component_by_type(
-                    RenderBodyComponent
-                )
-                if render_body_component is None:
-                    continue
-
-                for render_shape in render_body_component.render_shapes:
-                    for part in render_shape.parts:
-                        if (
-                            self.domain_randomization
-                            and self.domain_randomization_config.robot_color == "random"
-                        ):
-                            color = self._batched_episode_rng[i].uniform(0.0, 1.0, size=(3,)).tolist()
-                        else:
-                            color = list(self.domain_randomization_config.robot_color)
-                        part.material.set_base_color(color + [1])
 
     def _randomize_gripper_speed(self, env_idx: torch.Tensor):
         stiff_lo, stiff_hi = self.domain_randomization_config.gripper_stiffness_range
@@ -286,23 +246,21 @@ class BaseRandomEnv(BaseEnv):
         else:
             self._segmentation_ids_to_keep = torch.tensor([], dtype=torch.int64)
 
-        if not self._overlay_initialized and self._rgb_overlay_np is not None:
+        if not self._overlay_initialized:
+            # The first non-render sensor camera sets the overlay resolution; with no
+            # overlay image configured, a black one is used.
             for name, sensor in self._sensor_configs.items():
                 if isinstance(sensor, CameraConfig) and name != "render_camera":
-                    resized = cv2.resize(self._rgb_overlay_np, (sensor.width, sensor.height))
-                    self._rgb_overlay_image = common.to_tensor(resized, device=self.device)
+                    if self._rgb_overlay_np is not None:
+                        resized = cv2.resize(self._rgb_overlay_np, (sensor.width, sensor.height))
+                        self._rgb_overlay_image = common.to_tensor(resized, device=self.device)
+                    else:
+                        self._rgb_overlay_image = torch.zeros(
+                            (sensor.height, sensor.width, 3), dtype=torch.uint8, device=self.device
+                        )
                     break
-
             if self._rgb_overlay_image is None and self._rgb_overlay_np is not None:
                 self._rgb_overlay_image = common.to_tensor(self._rgb_overlay_np, device=self.device)
-
-        if not self._overlay_initialized and self._rgb_overlay_image is None:
-            for name, sensor in self._sensor_configs.items():
-                if isinstance(sensor, CameraConfig) and name != "render_camera":
-                    self._rgb_overlay_image = torch.zeros(
-                        (sensor.height, sensor.width, 3), dtype=torch.uint8, device=self.device
-                    )
-                    break
 
         self._overlay_initialized = True
         self._objects_to_remove_from_greenscreen = []
@@ -414,7 +372,7 @@ def _sample_jitter_pose(num_envs: int, pos_noise, rot_noise, enabled: bool, devi
 
 class DualCameraEnv(BaseRandomEnv):
     """Wrist camera (follows the gripper) plus a static overhead camera for localizing the
-    cube and bin. `FlattenRGBDObservationWrapper` concatenates both cameras' RGB along the
+    bar and bin. `FlattenRGBDObservationWrapper` concatenates both cameras' RGB along the
     channel axis (`rgb` becomes H x W x 6); `utils.ColorJitterWrapper` jitters each camera's
     3 channels independently since `torchvision.transforms.ColorJitter` requires exactly 3.
 
@@ -495,7 +453,3 @@ class DualCameraEnv(BaseRandomEnv):
         self._update_camera_poses()
         if self.gpu_sim_enabled:
             self.scene._gpu_apply_all()
-
-
-DefaultCameraEnv = DualCameraEnv
-DefaultRandomizationConfig = RandomizationConfig

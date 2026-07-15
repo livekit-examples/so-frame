@@ -1,7 +1,7 @@
 """Import simulation/mjcf/so101_on_frame.xml via Isaac Sim's real MJCF importer, producing
 a physics-correct USD (rigid bodies, joints, collision, articulation) -- using the MJCF
-already validated with real MuJoCo drop tests (see examples/measure_work_surface.py and
-this repo's rl/mjlab), instead of hand-authoring UsdPhysics schemas from scratch.
+already validated with real MuJoCo drop tests (see simulation/urdf/README.md and this
+repo's rl/mjlab), instead of hand-authoring UsdPhysics schemas from scratch.
 
 Also sets joint drive stiffness/damping: the importer doesn't resolve MuJoCo's
 `<default class="X"><position kp="..."/>` inheritance into its own gain/bias format, so it

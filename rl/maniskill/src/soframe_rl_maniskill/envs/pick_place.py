@@ -1,35 +1,23 @@
 """SO-101-on-frame pick-and-place task: pick a flat bar, place it in a bin.
 
 The ManiSkill3 + vision counterpart to ``rl/mjlab``'s task, adapted from
-[Squint](https://github.com/aalmuzairee/squint)'s ``envs/place.py``. Differences from
-Squint's version:
+[Squint](https://github.com/aalmuzairee/squint)'s ``envs/place.py``: this repo's
+frame-mounted ``so101_on_frame`` agent (rail + arm + calibrated cameras, see
+``robot/so101_on_frame.py``) replaces Squint's bare tabletop SO-101, and there's no
+``TableSceneBuilder`` -- the frame with its lightbox work surface is part of the robot's
+own URDF, so the scene is just the frame/arm, the bar, the bin, and a ground plane far
+below as a safety catch-all. Observations are vision + proprioception only; privileged
+ground-truth state exists solely behind an explicit "+state" obs_mode (see
+``_get_obs_extra``).
 
-- Robot: this repo's frame-mounted ``so101_on_frame`` agent (rail + arm + calibrated
-  wrist camera) instead of Squint's bare tabletop SO-101. See ``robot/so101_on_frame.py``.
-- Scene: no ``TableSceneBuilder``. The frame (with its lightbox work surface) *is* the
-  robot's own URDF, so the scene is just a ground plane plus the frame/arm.
-- The item is a flat bar (8 x 2.5 x 1.5 cm) sized to fit the 10 cm bin (matching
-  ``rl/mjlab``'s bin) with a little slack at any yaw; grasped across its 2.5 cm width.
-- Observations default to vision + proprioception only (no ground-truth object poses,
-  see ``_get_obs_extra`` below). This is Squint's own default too: its
-  ``obs_mode="rgb+segmentation"`` has no privileged "state" component, which already
-  satisfies "no state-based observations" for the policy. The privileged block is only
-  populated if a caller explicitly asks for an obs_mode including "+state", useful for
-  debugging/eval, never for training.
-
-The URDF's root joint lifts the whole rig so the work surface sits at ``WORK_SURFACE_Z = 0``
-(``rl/mjlab`` uses the same convention with its own lift amount). The lightbox's four panel
-links have box collision matching their mesh bounds. See ``examples/measure_work_surface.py``
-for how the geometry was measured.
-
-``_load_scene`` puts the ground plane well below the work surface: it's a safety catch-all
-for anything that rolls off, not the resting surface itself.
+The URDF's root joint lifts the rig so the lightbox work surface sits at
+``WORK_SURFACE_Z = 0``, measured from the loaded articulation plus the panel STL's bounds
+(``rl/mjlab`` uses the same convention with its own lift amount).
 """
 
 from dataclasses import dataclass
 from typing import Any, Sequence, Union
 
-import dacite
 import numpy as np
 import sapien
 import sapien.render
@@ -42,29 +30,24 @@ from mani_skill.utils.registration import register_env
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 
-from .base_random_env import DefaultCameraEnv, DefaultRandomizationConfig
+from .base_random_env import DualCameraEnv, RandomizationConfig
 from ..robot.so101_on_frame import SO101OnFrame
 
 # The URDF's root joint already lifts the rig so this is 0 -- see the module docstring.
 WORK_SURFACE_Z = 0.0
 
 # Item and bin spawn from separate regions along the rail's travel axis (world -Y), far
-# enough apart that the arm alone can't reach both without sliding: dof_slider moves the
-# tcp along world Y across a 0.82 m range (y in [-0.878, -0.058] at the rest qpos), and
-# these two regions sit on opposite ends of that range with margin to spare.
-#
-# The small item gets the far region (y=-0.70): it sits dead-center in the overhead
-# camera's frame there, where the near region (y=-0.30) is at the frame's edge and partly
-# occluded by the arm -- measured at 0-16 px (128px render) for a 2.5 cm object, with
-# ~16% of spawns having zero pixels. The 10 cm bin is much larger, so it stays clearly
-# visible even in the edge region.
+# enough apart that the arm alone can't reach both without sliding (dof_slider covers
+# y in [-0.878, -0.058] at the rest qpos). The small bar gets the far region, dead-center
+# in the overhead camera's frame; in the near region it can shrink to zero visible pixels
+# behind the arm. The much larger bin stays visible in either.
 ITEM_SPAWN_CENTER = (-0.225, -0.70)
 BIN_SPAWN_CENTER = (-0.225, -0.30)
 SPAWN_HALF_SIZE = 0.1
 
 
 @dataclass
-class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
+class PickPlaceRandomizationConfig(RandomizationConfig):
     """Domain randomization config for the pick-and-place task."""
 
     # Noisy joint positions for better sim2real.
@@ -91,7 +74,7 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 
 
 @register_env("SOFramePickPlaceBin-v1", max_episode_steps=200)
-class PickPlaceBin(DefaultCameraEnv):
+class PickPlaceBin(DualCameraEnv):
     """
     **Task Description:**
     Pick up a flat bar and place it in a bin.
@@ -131,17 +114,9 @@ class PickPlaceBin(DefaultCameraEnv):
         action_rate_penalty=0.0,
         **kwargs,
     ):
-        self.domain_randomization_config = PickPlaceRandomizationConfig()
-        merged = self.domain_randomization_config.dict()
-        if isinstance(domain_randomization_config, dict):
-            common.dict_merge(merged, domain_randomization_config)
-            self.domain_randomization_config = dacite.from_dict(
-                data_class=PickPlaceRandomizationConfig,
-                data=merged,
-                config=dacite.Config(strict=True),
-            )
-        elif isinstance(domain_randomization_config, PickPlaceRandomizationConfig):
-            self.domain_randomization_config = domain_randomization_config
+        self.domain_randomization_config = PickPlaceRandomizationConfig.resolve(
+            domain_randomization_config
+        )
 
         self.item_spawn_center = item_spawn_center
         self.bin_spawn_center = bin_spawn_center
@@ -162,14 +137,7 @@ class PickPlaceBin(DefaultCameraEnv):
         )
 
     def _load_agent(self, options: dict):
-        super()._load_agent(
-            options,
-            sapien.Pose(),
-            build_separate=True
-            if self.domain_randomization
-            and self.domain_randomization_config.robot_color == "random"
-            else False,
-        )
+        super()._load_agent(options, sapien.Pose())
 
     def _load_scene(self, options: dict):
         super()._load_scene(options)
@@ -179,6 +147,7 @@ class PickPlaceBin(DefaultCameraEnv):
         self.ground = build_ground(self.scene, altitude=-1.0)
 
         cfg = self.domain_randomization_config
+        realistic = cfg.visual_fidelity != "flat"  # PBR materials for "raster"/"raytraced"
 
         def sample_range(value_range):
             """Per-env uniform sample under domain randomization, midpoint otherwise."""
@@ -236,7 +205,7 @@ class PickPlaceBin(DefaultCameraEnv):
                 half_size=item_half_size, material=material, density=densities[i]
             )
             item_material = sapien.render.RenderMaterial(base_color=colors[i])
-            if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
+            if realistic:
                 item_material.set_roughness(0.6)
                 item_material.set_metallic(0.0)
             builder.add_box_visual(half_size=item_half_size, material=item_material)
@@ -278,7 +247,7 @@ class PickPlaceBin(DefaultCameraEnv):
             builder = self.scene.create_actor_builder()
 
             bin_color = sapien.render.RenderMaterial(base_color=bin_colors[i])
-            if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
+            if realistic:
                 bin_color.set_roughness(0.55)
                 bin_color.set_metallic(0.0)
 
@@ -331,8 +300,7 @@ class PickPlaceBin(DefaultCameraEnv):
         )
 
         self._load_camera_mount()
-        self._randomize_robot_color()
-        if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
+        if realistic:
             self.agent.apply_realistic_materials()
 
         goal_builder = self.scene.create_actor_builder()

@@ -1,8 +1,7 @@
-"""One-off high-fidelity render: ray-traced shading + shadow-casting 3-point lighting,
-just to *look at* the sim. Never used for training -- training always keeps the fast
-rasterizer and flat lighting (see ``RandomizationConfig.realism_mode`` in
-``envs/base_random_env.py``), since ray tracing is far too slow for thousands of
-parallel envs.
+"""One-off high-fidelity render: ray-traced shading + softbox lighting, just to *look at*
+the sim. Never used for training -- training keeps the fast rasterizer (see
+``RandomizationConfig.visual_fidelity`` in ``envs/base_random_env.py``), since ray
+tracing is far too slow for thousands of parallel envs.
 
 Run from rl/maniskill/:
     uv run python examples/render_realistic.py --shader rt-fast --out /tmp/realistic.png
@@ -47,7 +46,7 @@ env = gym.make(
     obs_mode="state",
     render_mode="rgb_array",
     domain_randomization=args.domain_randomization,
-    domain_randomization_config=dict(realism_mode=True),
+    domain_randomization_config=dict(visual_fidelity="raytraced"),
     sim_backend="gpu",
     human_render_camera_configs=dict(shader_pack=args.shader, width=args.width, height=args.height),
 )
