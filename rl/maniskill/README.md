@@ -89,8 +89,10 @@ uv run python examples/render_chained_eval.py \
 ```
 
 **`--target_image_size` must match whatever `--image_size` the checkpoint was actually
-trained with** (default is 32; `checkpoints/model_best.pt`, i.e. `slider_pickplace_v7`, was
-trained at 16, so pass `--target_image_size 16` for it specifically). The render resolution
+trained with** (`checkpoints/model_best.pt` was trained at the default 32, so the default
+works for it). The shipped checkpoint reaches **0.94 success_at_end** on the strict metric
+(bar settled inside the bin, robot clear and static) with fixed colors and full
+lighting/gripper/camera randomization. The render resolution
 (`--render_size`) is independent of this -- `DeployAgent` downsamples internally before
 feeding the policy, so you can render at high resolution for visual quality while the policy
 still sees exactly what it was trained on.
