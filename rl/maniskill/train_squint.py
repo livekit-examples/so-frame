@@ -750,8 +750,10 @@ if __name__ == "__main__":
     # ── Inference functions ────────────────────────────────────────────────
 
     def get_rollout_action(rgb, state):
-        rgb_feat = encoder_detach(rgb)
-        action, _, _ = actor_detach.get_action(rgb_feat, state)
+        # obs arrive on the sim's device, which is cpu under --visual_fidelity=raytraced
+        # (single-env cpu backend) while the networks live on `device`.
+        rgb_feat = encoder_detach(rgb.to(device))
+        action, _, _ = actor_detach.get_action(rgb_feat, state.to(device))
         return action
 
     def get_eval_action(rgb, state):
@@ -889,6 +891,8 @@ if __name__ == "__main__":
     eval_envs.reset(seed=args.seed)
 
     global_step = 0
+    # Where the sim expects actions to live (cpu backend under raytraced training).
+    sim_device = torch.device("cpu") if args.visual_fidelity == "raytraced" else device
     pbar = tqdm.tqdm(total=args.total_timesteps, desc="steps")
     max_ep_ret = -float("inf")
     avg_returns = deque(maxlen=20)
@@ -932,6 +936,8 @@ if __name__ == "__main__":
         else:
             actions = get_rollout_action(obs['rgb'], obs['state'])
 
+        if isinstance(actions, torch.Tensor):
+            actions = actions.to(sim_device)
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         real_next_obs = {'rgb': next_obs['rgb'].clone(), 'state': next_obs['state'].clone()}
 
