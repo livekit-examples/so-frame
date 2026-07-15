@@ -461,6 +461,10 @@ class DualCameraEnv(BaseRandomEnv):
         if self.gpu_sim_enabled:
             self.scene._gpu_apply_all()
             self.scene._gpu_fetch_all()
+        # super().reset() rendered its obs before the camera mounts moved, so re-render:
+        # otherwise every episode's first frame uses the previous episode's camera poses
+        # (and the first-ever frame renders from uninitialized mounts at the origin).
+        obs = self.get_obs(info)
         return obs, info
 
     def _after_control_step(self):

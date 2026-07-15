@@ -53,8 +53,14 @@ WORK_SURFACE_Z = 0.0
 # enough apart that the arm alone can't reach both without sliding: dof_slider moves the
 # tcp along world Y across a 0.82 m range (y in [-0.878, -0.058] at the rest qpos), and
 # these two regions sit on opposite ends of that range with margin to spare.
-ITEM_SPAWN_CENTER = (-0.225, -0.30)
-BIN_SPAWN_CENTER = (-0.225, -0.70)
+#
+# The 2.5 cm cube gets the far region (y=-0.70): it sits dead-center in the overhead
+# camera's frame there, where the near region (y=-0.30) is at the frame's edge and partly
+# occluded by the arm -- measured at 0-16 px (128px render), with ~16% of spawns having
+# zero pixels. The 10 cm bin is 16x the cube's area, so it stays clearly visible even in
+# the edge region.
+ITEM_SPAWN_CENTER = (-0.225, -0.70)
+BIN_SPAWN_CENTER = (-0.225, -0.30)
 SPAWN_HALF_SIZE = 0.1
 
 
@@ -169,6 +175,22 @@ class PickPlaceBin(DefaultCameraEnv):
                 return self._batched_episode_rng.uniform(low=value_range[0], high=value_range[1])
             return np.full(self.num_envs, (value_range[0] + value_range[1]) / 2)
 
+        # The work surface's panels render near-white (base color ~0.9). A random color
+        # whose every channel lands within ~20/255 of that is indistinguishable from the
+        # floor at the squinted training resolution, making the episode unsolvable by
+        # perception -- redraw those (full random hues otherwise preserved).
+        _WORK_SURFACE_RGB = 0.902
+
+        def sample_visible_colors():
+            colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
+            for _ in range(8):
+                too_close = np.abs(colors - _WORK_SURFACE_RGB).max(axis=-1) < 0.08
+                if not too_close.any():
+                    break
+                redraw = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
+                colors[too_close] = redraw[too_close]
+            return colors
+
         half_sizes = sample_range(cfg.cube_half_size_range)
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
@@ -176,7 +198,7 @@ class PickPlaceBin(DefaultCameraEnv):
         colors = np.zeros((self.num_envs, 3))
         colors[:, 2] = 1  # Blue cube.
         if self.domain_randomization and cfg.randomize_item_color:
-            colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
+            colors = sample_visible_colors()
 
         self.item_half_sizes = common.to_tensor(half_sizes, device=self.device)
         self.item_dimensions = torch.stack([self.item_half_sizes] * 3, dim=-1)
@@ -210,7 +232,7 @@ class PickPlaceBin(DefaultCameraEnv):
 
         bin_colors = np.ones((self.num_envs, 3)) * [0.55, 0.45, 0.05]  # dark yellow
         if self.domain_randomization and cfg.randomize_bin_color:
-            bin_colors = self._batched_episode_rng.uniform(low=0, high=1, size=(3,))
+            bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
         thickness = 0.004
         self.bin_thickness = thickness
