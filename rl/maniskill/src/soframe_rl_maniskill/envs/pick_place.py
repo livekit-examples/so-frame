@@ -427,9 +427,14 @@ class PickPlaceBin(DefaultCameraEnv):
         inside_x = torch.abs(offset[:, 0]) < self.bin_half_sizes_x
         inside_y = torch.abs(offset[:, 1]) < self.bin_half_sizes_y
         is_item_above_bin = inside_x & inside_y
-        # Actually settled at its resting height inside the bin -- not still falling
-        # toward it, and not perched on a wall rim (a rim-rest sits ~3 cm higher).
-        is_item_in_bin = is_item_above_bin & (offset[:, 2] < 0.01)
+        # In the bin means part of the bar reaches the bin floor: its lowest corner is
+        # within a tolerance of the floor's top. A tilted bar leaning on a wall counts
+        # (real drops often settle that way); one bridging flat across the rim, or still
+        # falling above the bin, does not.
+        item_rot = self.item.pose.to_transformation_matrix()[..., :3, :3]
+        item_lowest = item_pos[:, 2] - (item_rot[..., 2, :].abs() * self.item_dimensions).sum(-1)
+        touches_bottom = item_lowest <= WORK_SURFACE_Z + self.bin_thickness + 0.005
+        is_item_in_bin = is_item_above_bin & touches_bottom
 
         item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_heights + 1e-3)
 
