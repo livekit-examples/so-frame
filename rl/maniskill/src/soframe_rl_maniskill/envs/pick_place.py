@@ -511,7 +511,15 @@ class PickPlaceBin(DefaultCameraEnv):
 
         reward[info["success"]] = 20
 
-        reward -= 3 * info["robot_touching_bin"].float()
+        # Hovering over the bin while still gripping must not be a comfortable resting
+        # point: a flat tax drops it to roughly carry-stage value, so releasing is the
+        # only way to earn more (release pays ~9, success 20).
+        reward -= 1 * (info["is_item_grasped"] & info["is_item_above_bin"]).float()
+        # Kept mild: placing a 75 mm bar into the 84 mm interior means the gripper
+        # fingers enter the opening, so brushing a wall is part of a good placement,
+        # not something to scare the policy away from (success still requires ending
+        # clear of the bin).
+        reward -= 0.5 * info["robot_touching_bin"].float()
         # Penalize leaving the bar sitting on the work surface, not being low per se: a
         # bar resting inside the bin sits at nearly the same height (1 mm bin floor) and
         # must not be docked for it.
