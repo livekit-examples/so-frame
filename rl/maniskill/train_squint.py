@@ -109,6 +109,10 @@ class Args:
     action_rate_penalty: float = 0.0
     """smoothness cost: -k * ||a_t - a_{t-1}||^2 per step (raw reward units). Penalizes
     jerk, not movement. ~0.05 is a reasonable strength for polish runs."""
+    realistic_visuals: bool = False
+    """train on realistic appearance (PBR materials + shadow-casting key light) using the
+    GPU rasterizer's default shader -- the trainable approximation of realism_mode's look,
+    for closing the appearance gap before ray-traced eval or real deployment."""
     realism_mode: bool = False
     """for --evaluate rollouts: render eval_envs' wrist/overhead sensor cameras (what gets
     saved to video) with ray-traced shading, shadow-casting lighting, and real PBR textures
@@ -630,6 +634,14 @@ if __name__ == "__main__":
     if args.action_rate_penalty > 0:
         env_kwargs["action_rate_penalty"] = args.action_rate_penalty
         eval_env_kwargs["action_rate_penalty"] = args.action_rate_penalty
+    if args.realistic_visuals:
+        rv_cfg = dict(realistic_visuals=True)
+        env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
+        eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **rv_cfg)
+        # Shadows need the full default shader; the memory-optimized "minimal" one the
+        # sensor cameras normally use skips them.
+        env_kwargs["sensor_configs"]["shader_pack"] = "default"
+        eval_env_kwargs["sensor_configs"]["shader_pack"] = "default"
     if args.realism_mode:
         # The recorded eval video comes from the wrist/overhead sensor cameras, not the
         # third-person human_render_camera, so the realistic shader needs to go on those.

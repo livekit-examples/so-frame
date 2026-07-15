@@ -236,7 +236,7 @@ class PickPlaceBin(DefaultCameraEnv):
                 half_size=item_half_size, material=material, density=densities[i]
             )
             item_material = sapien.render.RenderMaterial(base_color=colors[i])
-            if self.domain_randomization_config.realism_mode:
+            if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
                 item_material.set_roughness(0.6)
                 item_material.set_metallic(0.0)
             builder.add_box_visual(half_size=item_half_size, material=item_material)
@@ -278,7 +278,7 @@ class PickPlaceBin(DefaultCameraEnv):
             builder = self.scene.create_actor_builder()
 
             bin_color = sapien.render.RenderMaterial(base_color=bin_colors[i])
-            if self.domain_randomization_config.realism_mode:
+            if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
                 bin_color.set_roughness(0.55)
                 bin_color.set_metallic(0.0)
 
@@ -332,7 +332,7 @@ class PickPlaceBin(DefaultCameraEnv):
 
         self._load_camera_mount()
         self._randomize_robot_color()
-        if self.domain_randomization_config.realism_mode:
+        if self.domain_randomization_config.realism_mode or self.domain_randomization_config.realistic_visuals:
             self.agent.apply_realistic_materials()
 
         goal_builder = self.scene.create_actor_builder()

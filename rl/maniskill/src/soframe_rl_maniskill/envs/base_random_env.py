@@ -50,6 +50,12 @@ class RandomizationConfig:
     cube/bin materials. Off by default -- zero effect on training throughput or behavior.
     Combine with ``human_render_camera_configs=dict(shader_pack="rt"|"rt-fast")`` for
     ray-traced reflections/soft shadows/GI, which this flag alone does not add."""
+    realistic_visuals: bool = False
+    """Train-time realistic appearance on the GPU rasterizer: the same PBR materials as
+    ``realism_mode`` plus a shadow-casting key light, but fully compatible with the
+    GPU-parallel sensor cameras (unlike ray tracing). Pair with sensor
+    ``shader_pack="default"`` so shadows actually reach the observations. Used to
+    fine-tune a policy toward realism_mode's appearance domain."""
 
     # === Common randomization settings (affected by domain_randomization flag) ===
     gripper_stiffness_range: Sequence[float] = (500, 2000)
@@ -145,18 +151,22 @@ class BaseRandomEnv(BaseEnv):
         if self.domain_randomization_config.realism_mode:
             # Just one real light: an overhead softbox (area light), matching the real
             # rig's own single box light (see simulation/usd/README.md) -- for one-off
-            # visualization renders (see examples/render_realistic.py). A directional
-            # "sun" light casts a hard-edged shadow no matter how dim, so this uses a
-            # light with physical size for a soft, diffuse shadow, which needs the
-            # ray-traced shader (rt/rt-fast) to render correctly. The lightbox's vertical
-            # side walls naturally render darker than the floor under a straight-overhead
-            # light (their surface normal faces sideways, away from the light, not up
-            # toward it) -- moderate ambient softens that contrast. Training never sets
-            # realism_mode, so this branch has no effect on the flat/shadowless lighting
-            # used during RL.
-            self.scene.set_ambient_light([0.3, 0.3, 0.32])
+            # visualization renders (see examples/render_realistic.py). It only renders
+            # correctly under the ray-traced shader (rt/rt-fast). SAPIEN lights emit
+            # along the +x axis of their pose (see sapien.wrapper.scene, which aligns
+            # [1, 0, 0] with the requested direction for every light type), so the pose
+            # rotates +x straight down; a position-only pose would shine the panel
+            # sideways and leave the floor lit by ambient alone, with half the workspace
+            # in shadow. The panel is centered over the item/bin spawn regions
+            # (x=-0.225, y in [-0.9, -0.05], see pick_place.py) and sized larger than
+            # the workspace so every point sees a wide emitter: shadows wash out to
+            # near-nothing, and the strong ambient fill lifts whatever residual falloff
+            # is left at the box corners. Training never sets realism_mode, so this
+            # branch has no effect on the flat/shadowless lighting used during RL.
+            self.scene.set_ambient_light([0.45, 0.45, 0.48])
             self.scene.add_area_light_for_ray_tracing(
-                sapien.Pose(p=[-0.245, -0.4, 1.0]), [16, 16, 14.4], 0.25, 0.5,
+                sapien.Pose(p=[-0.225, -0.5, 1.0], q=[0.7071068, 0, 0.7071068, 0]),
+                [2.4, 2.4, 2.2], 0.5, 0.4,
             )
             return
 
@@ -166,6 +176,18 @@ class BaseRandomEnv(BaseEnv):
                 scene.render_system.ambient_light = ambient_colors[i]
         else:
             self.scene.set_ambient_light([0.3, 0.3, 0.3])
+
+        if self.domain_randomization_config.realistic_visuals:
+            # Rasterizer-compatible core of realism_mode's look, for TRAINING obs on the
+            # GPU-parallel cameras (ray tracing is cpu/render-only): a shadow-casting
+            # near-vertical key light stands in for the softbox, over the same randomized
+            # ambient as standard DR. Pair with sensor shader_pack="default" -- the
+            # memory-optimized "minimal" shader skips shadows.
+            self.scene.add_directional_light(
+                [0.15, 0.1, -1], [1.5, 1.45, 1.4], shadow=True, shadow_scale=2.0, shadow_map_size=2048,
+            )
+            self.scene.add_directional_light([-1, -0.3, -0.6], [0.4, 0.4, 0.45])
+            return
 
         self.scene.add_directional_light(
             [1, 1, -1], [1, 1, 1], shadow=False, shadow_scale=5, shadow_map_size=2048
