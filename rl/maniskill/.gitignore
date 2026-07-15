@@ -1,0 +1,14 @@
+# uv-managed virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# training outputs
+runs/
+videos/
+wandb/
+*.pt
+*.onnx
+
+# ... except the released pretrained checkpoint
+!checkpoints/*.pt

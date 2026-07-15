@@ -8,8 +8,9 @@ are first-class, tunable, sim-to-real knobs.
 The model is a *fixed-base* articulated entity (the frame is welded to the world;
 only the rail slider + the arm move). mjlab auto-wraps fixed-base entities in a
 mocap body, which also carries the frame's loose worldbody geoms, so the whole rig
-positions correctly per environment. No structural edits to the XML are required;
-the only edit is the ``grasp_site`` added to ``gripper_link``.
+positions correctly per environment. The only edits to the XML are the ``grasp_site``
+added to ``gripper_link`` and collision boxes added to the lightbox's panel geoms
+(they're otherwise visual-only).
 """
 
 from __future__ import annotations
@@ -25,8 +26,8 @@ from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 # Paths.
 ##
 
-# rl/src/soframe_rl/so101_constants.py -> repo root is parents[3].
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# rl/mjlab/src/soframe_rl/so101_constants.py -> repo root is parents[4].
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 SO101_XML = _REPO_ROOT / "simulation" / "mjcf" / "so101_on_frame.xml"
 assert SO101_XML.exists(), f"SO-101 model not found at {SO101_XML}"
 
@@ -48,36 +49,20 @@ ARM_JOINTS = (
 GRIPPER_JOINT = "gripper"
 
 
-# World-space height (m) of the lightbox bottom panel's top surface. The model's
-# bottom panel (Part_1_1 mesh, centered ~(-0.245, -0.5)) is visual-only (contype 0),
-# so objects fall through it to the ground plane. We add an invisible collision pad
-# coincident with it so the cube/bin rest on the (visible) white panel.
+# World-space height (m) of the lightbox bottom panel's top surface (its collision box,
+# see simulation/mjcf/so101_on_frame.xml, is centered ~(-0.245, -0.5)).
 WORK_SURFACE_Z = 0.083
 
 
 def get_spec() -> mujoco.MjSpec:
-  """Load the SO-101 model, strip its XML actuators, add a collision floor pad.
+  """Load the SO-101 model and strip its XML actuators.
 
   mjlab adds actuators from the ``EntityArticulationInfoCfg`` below; leaving the
-  XML's ``<position>`` actuators in place would double them up. The lightbox's
-  bottom panel is visual-only, so we add an invisible collidable pad at
-  ``WORK_SURFACE_Z`` matching it, giving the arm a surface to place objects on.
+  XML's ``<position>`` actuators in place would double them up.
   """
   spec = mujoco.MjSpec.from_file(str(SO101_XML))
   for actuator in list(spec.actuators):
     spec.delete(actuator)
-
-  # Pad top at WORK_SURFACE_Z (world). The rig is placed at init z (HOME_KEYFRAME),
-  # so convert to model-local z by subtracting that offset.
-  top_local = WORK_SURFACE_Z - HOME_KEYFRAME.pos[2]
-  half_thick = 0.02
-  spec.worldbody.add_geom(
-    name="work_floor_collision",
-    type=mujoco.mjtGeom.mjGEOM_BOX,
-    size=[0.30, 0.32, half_thick],
-    pos=[-0.245, -0.50, top_local - half_thick],
-    rgba=[1.0, 1.0, 1.0, 0.0],  # invisible; the model's white panel is the visual.
-  )
   return spec
 
 
@@ -86,8 +71,8 @@ def get_spec() -> mujoco.MjSpec:
 #
 # NOTE: These are reasonable *starting* PD gains, mirroring the generic values in
 # the XML's <default> classes. They are NOT calibrated STS3215 (arm/gripper) or
-# rail-drive (slider) parameters. Tune them — and randomize them via domain-
-# randomization events — before trusting sim-to-real transfer. See the repo's
+# rail-drive (slider) parameters. Tune them and randomize them via domain-
+# randomization events before trusting sim-to-real transfer. See the repo's
 # MJCF README, which flags the same caveat.
 ##
 

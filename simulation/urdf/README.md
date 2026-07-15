@@ -62,8 +62,8 @@ needs adjusting; nothing else changes.
 
 The model has **two camera frames** (both use the +Z = view direction convention):
 
-- **`frame_wrist_camera`** — eye-in-hand, on the wrist (see below).
-- **`frame_overhead_camera`** — on the frame's `32mm_camera_holder`, looking down at the
+- **`frame_wrist_camera`**: eye-in-hand, on the wrist (see below).
+- **`frame_overhead_camera`**: on the frame's `32mm_camera_holder`, looking down at the
   workspace. This one comes straight from the `so_frame` CAD (an Onshape mate connector) and
   is fixed to the frame.
 
@@ -83,6 +83,21 @@ The mount pose was aligned interactively with `helper/wrist_camera_aligner.html`
 in a browser, drag the gizmo to line the mount's clamp holes up with the gripper's holes,
 and it prints the `wrist_camera_mount_joint` / `frame_wrist_camera_joint` origins to paste
 back into the URDF. To nudge it, edit those two joint origins (or re-run the helper).
+
+## Collision
+
+Most links are **visual only**, with no `<collision>` element, since this model was built for
+rendering, not physics. The exception is the lightbox's 4 panels (`part_1`, `part_1_1`,
+`part_1_2`, `part_1_3`: floor + 3 walls, the "matte mica" side panels in the
+[USD](../usd/README.md) material scheme): each gets a thin invisible box `<collision>` sized
+to its footprint. `part_1_1` is the floor; without its pad, anything resting on the work
+surface falls straight through to whatever ground plane a consuming sim provides. Every other
+part (frame extrusions, brackets, the arm) relies on the consumer to add its own collision.
+See the [MJCF README](../mjcf/README.md#collision) for how the MuJoCo model does that with
+box geoms.
+
+The root `fix_1` joint (`root → 100cm`) carries a small `+0.01 m` origin lift so the lightbox
+floor's collision pad sits at world `z ≈ 0` rather than slightly underground.
 
 ## Colors
 

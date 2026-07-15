@@ -48,6 +48,8 @@
     <mesh name="sts3215_03a_no_horn_v1" content_type="model/stl" file="components/so101_arm/assets/sts3215_03a_no_horn_v1.stl" />
     <mesh name="wrist_roll_pitch_so101_v2" content_type="model/stl" file="components/so101_arm/assets/wrist_roll_pitch_so101_v2.stl" />
     <mesh name="wrist_roll_follower_so101_v1" content_type="model/stl" file="components/so101_arm/assets/wrist_roll_follower_so101_v1.stl" />
+    <mesh name="fixed_jaw_base_convex" content_type="model/obj" file="components/so101_arm/assets/fixed_jaw_base_convex.obj" />
+    <mesh name="fixed_jaw_finger_convex" content_type="model/obj" file="components/so101_arm/assets/fixed_jaw_finger_convex.obj" />
     <mesh name="moving_jaw_so101_v1" content_type="model/stl" file="components/so101_arm/assets/moving_jaw_so101_v1.stl" />
     <mesh name="SO-ARM101_camera_wrist_mount" content_type="model/stl" file="components/wrist_camera/SO-ARM101_camera_wrist_mount.stl" scale="0.001 0.001 0.001" />
   </asset>
@@ -60,6 +62,7 @@
     <geom pos="-0.895 0.0847604 -0.021219" quat="-0.707108 2.23686e-06 0.707106 2.23686e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.5 0.0100032 1.4268e-06" quat="-3.17504e-06 -0.707108 3.17504e-06 -0.707106" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="-0.245005 -0.499999 -0.0120002" quat="0.707104 1.65916e-06 9.38177e-07 -0.70711" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_1" />
+    <geom pos="-0.245005 -0.499999 -0.0110002" quat="0.500001 0.499999 -0.500003 0.499997" type="box" size="0.02 0.255 0.52" density="0" rgba="1 1 1 0" />
     <geom pos="-0.415245 2.14664e-06 0.0212227" quat="0.499997 0.500002 0.499997 -0.500004" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_100cm" />
     <geom pos="-0.500013 -1.01 4.10695e-06" quat="-0.500002 -0.500002 -0.499999 -0.499996" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="0.404988 -0.93525 0.0212218" quat="-0.707105 -9.3818e-07 -0.707108 5.4119e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
@@ -73,13 +76,16 @@
     <geom pos="0.40499 -1.03123 0.594757" quat="-0.500002 -0.500004 -0.499996 -0.499998" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="0.00999041 -1.01 0.520002" quat="0.500003 -0.500003 -0.499999 0.499995" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Inside_Corner_Bracket_3_Way_Hidden_2020" />
     <geom pos="-0.245009 -1.022 0.260001" quat="7.07107e-06 4.47371e-06 0.707105 0.707109" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_2" />
+    <geom pos="-0.245009 -1.021 0.260001" quat="-7.0132e-07 0.707113 0.707101 3.29868e-06" type="box" size="0.02 0.255 0.27" density="0" rgba="1 1 1 0" />
     <geom pos="-0.311569 -1.01 0.566501" quat="-0.707111 3.60506e-07 2.95783e-06 -0.707102" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.1 0.1 0.1 1" mesh="Handle" />
     <geom pos="-0.266234 -0.935198 1.43" quat="1 2.3464e-06 -2.34642e-06 -6.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.24506 -1.00995 0.715002" quat="1 2.3464e-06 -2.34642e-06 -6.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="_32mm_Camera_Holder" />
     <geom pos="-0.502003 -0.499994 0.260003" quat="-0.500002 -0.500004 -0.499996 -0.499998" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1" />
+    <geom pos="-0.501003 -0.499994 0.260003" quat="0.707108 -0.707105 4.24264e-06 -4.24264e-06" type="box" size="0.02 0.27 0.52" density="0" rgba="1 1 1 0" />
     <geom pos="-0.894999 0.0847651 0.498781" quat="0.707108 -7.64876e-06 -0.707106 -3.17504e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_50cm" />
     <geom pos="-0.31156 0.0100021 0.566501" quat="0.707112 -1.29864e-06 5.77241e-06 0.707101" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.1 0.1 0.1 1" mesh="Handle" />
     <geom pos="-0.245001 0.021999 0.260001" quat="0.707109 0.707105 -4.83419e-06 -6.71058e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.901961 0.901961 0.901961 1" mesh="Part_1_2" />
+    <geom pos="-0.245001 0.020999 0.260001" quat="2.93819e-06 0.707101 -0.707113 1.0618e-06" type="box" size="0.02 0.255 0.27" density="0" rgba="1 1 1 0" />
     <geom pos="-0.0090026 -1 0.0299964" quat="-1 -1.76036e-12 -1.32679e-06 1.32679e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Angle_Bracket_2020_Aluminium_Profile_Joiner" />
     <geom pos="-0.0212212 -2.91741e-07 0.114755" quat="-0.707105 -0.707108 0 1.87637e-06" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="_100cm" />
     <geom pos="0.00800005 -5.79609e-08 0.03" quat="-1.32679e-06 -2.65359e-06 3.52081e-12 -1" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Angle_Bracket_2020_Aluminium_Profile_Joiner" />
@@ -171,7 +177,11 @@
                 <geom pos="0.0077 0.0001 -0.0234" quat="0.707105 -0.707108 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1" />
                 <geom pos="0.0077 0.0001 -0.0234" quat="0.707105 -0.707108 0 0" type="mesh" rgba="0.1 0.1 0.1 1" mesh="sts3215_03a_v1" />
                 <geom pos="0 -0.000218214 0.000949706" quat="1.32679e-06 -1 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.94 0.49 0.06 1" mesh="wrist_roll_follower_so101_v1" />
-                <geom pos="0 -0.000218214 0.000949706" quat="1.32679e-06 -1 0 0" type="mesh" rgba="0.94 0.49 0.06 1" mesh="wrist_roll_follower_so101_v1" />
+                <!-- Collision split in two so each convex hull hugs the true surface at the
+                     finger (single-hull collision of this concave part grips with ~7 mm of
+                     daylight); mirrors the same split in the URDF. -->
+                <geom pos="0 -0.000218214 0.000949706" quat="1.32679e-06 -1 0 0" type="mesh" rgba="0.94 0.49 0.06 1" mesh="fixed_jaw_base_convex" />
+                <geom pos="0 -0.000218214 0.000949706" quat="1.32679e-06 -1 0 0" type="mesh" rgba="0.94 0.49 0.06 1" mesh="fixed_jaw_finger_convex" />
                 <geom pos="-0.015 0.024 -0.0315" quat="0.499798 -0.5002 0.499802 -0.5002" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="SO-ARM101_camera_wrist_mount" />
                 <body name="moving_jaw_so101_v1_link" pos="0.0202 0.0188 -0.0234" quat="0.707105 0.707108 -1.85362e-08 1.85363e-08">
                   <inertial pos="-0.00157495 -0.0300244 0.0192755" quat="0.695265 0.717965 -0.0245618 -0.0230097" mass="0.012" diaginertia="6.63582e-06 5.29092e-06 1.86523e-06" />

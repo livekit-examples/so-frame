@@ -1,0 +1,121 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "MuJoCo USD Converter v0.2.0"
+    }
+    defaultPrim = "so101_on_frame"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpguq9v7ua/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dxljwka8/usdex_so101_on_frame/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dxljwka8/temp_so101_on_frame/so101_on_frame.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "so101_on_frame" (
+    prepend references = @./payloads/base.usda@
+    variants = {
+        string Physics = "physx"
+    }
+    append variantSets = "Physics"
+)
+{
+    over "Geometry"
+    {
+        over "tn__20mm_gantry_plate_"
+        {
+            over "shoulder_link"
+            {
+                over "upper_arm_link"
+                {
+                    over "lower_arm_link"
+                    {
+                        over "wrist_link"
+                        {
+                            over "gripper_link"
+                            {
+                                over "moving_jaw_so101_v1_link"
+                                {
+                                    over "gripper"
+                                    {
+                                        float drive:angular:physics:damping = 2
+                                        float drive:angular:physics:stiffness = 20
+                                        uniform token drive:angular:physics:type = "force"
+                                    }
+                                }
+
+                                over "wrist_roll"
+                                {
+                                    float drive:angular:physics:damping = 2
+                                    float drive:angular:physics:stiffness = 20
+                                    uniform token drive:angular:physics:type = "force"
+                                }
+                            }
+
+                            over "wrist_flex"
+                            {
+                                float drive:angular:physics:damping = 2
+                                float drive:angular:physics:stiffness = 20
+                                uniform token drive:angular:physics:type = "force"
+                            }
+                        }
+
+                        over "elbow_flex"
+                        {
+                            float drive:angular:physics:damping = 2
+                            float drive:angular:physics:stiffness = 20
+                            uniform token drive:angular:physics:type = "force"
+                        }
+                    }
+
+                    over "shoulder_lift"
+                    {
+                        float drive:angular:physics:damping = 2
+                        float drive:angular:physics:stiffness = 20
+                        uniform token drive:angular:physics:type = "force"
+                    }
+                }
+
+                over "shoulder_pan"
+                {
+                    float drive:angular:physics:damping = 2
+                    float drive:angular:physics:stiffness = 20
+                    uniform token drive:angular:physics:type = "force"
+                }
+            }
+
+            over "dof_slider"
+            {
+                float drive:linear:physics:damping = 40
+                float drive:linear:physics:stiffness = 400
+                uniform token drive:linear:physics:type = "force"
+            }
+        }
+    }
+    variantSet "Physics" = {
+        "mujoco" (
+            prepend payload = @./payloads/Physics/mujoco.usda@
+        ) {
+
+        }
+        "none" {
+
+        }
+        "physics" (
+            prepend payload = @./payloads/Physics/physics.usda@
+        ) {
+
+        }
+        "physx" (
+            prepend payload = @./payloads/Physics/physx.usda@
+        ) {
+
+        }
+    }
+}
+

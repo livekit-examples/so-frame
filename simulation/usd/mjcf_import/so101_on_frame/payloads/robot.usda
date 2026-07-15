@@ -1,0 +1,131 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "MuJoCo USD Converter v0.2.0"
+    }
+    defaultPrim = "so101_on_frame"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpguq9v7ua/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dxljwka8/usdex_so101_on_frame/so101_on_frame.usdc
+
+
+Generated from Composed Stage of root layer /tmp/mjcf_import_so101_on_frame_dxljwka8/temp_so101_on_frame/so101_on_frame.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "so101_on_frame" (
+    prepend apiSchemas = ["IsaacRobotAPI"]
+)
+{
+    prepend rel isaac:physics:robotJoints = [
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/shoulder_lift>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/shoulder_pan>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/elbow_flex>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/wrist_flex>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link/wrist_roll>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link/moving_jaw_so101_v1_link/gripper>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/dof_slider>,
+        </so101_on_frame/fix_base_joint>,
+    ]
+    prepend rel isaac:physics:robotLinks = [
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_/shoulder_link/upper_arm_link/lower_arm_link/wrist_link/gripper_link/moving_jaw_so101_v1_link>,
+        </so101_on_frame/Geometry/tn__20mm_gantry_plate_>,
+    ]
+    token isaac:robotType = "Default"
+
+    over "Geometry"
+    {
+        over "tn__20mm_gantry_plate_" (
+            prepend apiSchemas = ["IsaacLinkAPI"]
+        )
+        {
+            over "shoulder_link" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "upper_arm_link" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "lower_arm_link" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "wrist_link" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "gripper_link" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "moving_jaw_so101_v1_link" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "gripper" (
+                                        prepend apiSchemas = ["IsaacJointAPI"]
+                                    )
+                                    {
+                                    }
+                                }
+
+                                over "wrist_roll" (
+                                    prepend apiSchemas = ["IsaacJointAPI"]
+                                )
+                                {
+                                }
+                            }
+
+                            over "wrist_flex" (
+                                prepend apiSchemas = ["IsaacJointAPI"]
+                            )
+                            {
+                            }
+                        }
+
+                        over "elbow_flex" (
+                            prepend apiSchemas = ["IsaacJointAPI"]
+                        )
+                        {
+                        }
+                    }
+
+                    over "shoulder_lift" (
+                        prepend apiSchemas = ["IsaacJointAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "shoulder_pan" (
+                    prepend apiSchemas = ["IsaacJointAPI"]
+                )
+                {
+                }
+            }
+
+            over "dof_slider" (
+                prepend apiSchemas = ["IsaacJointAPI"]
+            )
+            {
+            }
+        }
+    }
+
+    over "fix_base_joint" (
+        prepend apiSchemas = ["IsaacJointAPI"]
+    )
+    {
+    }
+}
+

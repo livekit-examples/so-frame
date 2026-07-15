@@ -664,6 +664,12 @@
         <color rgba="0.901961 0.901961 0.901961 1" />
       </material>
     </visual>
+      <collision>
+      <origin xyz="0.52 -0.27 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="1.04 0.54 0.002" />
+      </geometry>
+    </collision>
   </link>
   <link name="part_1_1">
     <inertial>
@@ -680,6 +686,12 @@
         <color rgba="0.901961 0.901961 0.901961 1" />
       </material>
     </visual>
+      <collision>
+      <origin xyz="0.52 0.255 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="1.04 0.51 0.002" />
+      </geometry>
+    </collision>
   </link>
   <link name="part_1_2">
     <inertial>
@@ -696,6 +708,12 @@
         <color rgba="0.901961 0.901961 0.901961 1" />
       </material>
     </visual>
+      <collision>
+      <origin xyz="0.255 -0.27 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.51 0.54 0.002" />
+      </geometry>
+    </collision>
   </link>
   <link name="part_1_3">
     <inertial>
@@ -712,6 +730,12 @@
         <color rgba="0.901961 0.901961 0.901961 1" />
       </material>
     </visual>
+      <collision>
+      <origin xyz="0.255 -0.27 -0.001" rpy="0 0 0" />
+      <geometry>
+        <box size="0.51 0.54 0.002" />
+      </geometry>
+    </collision>
   </link>
   <link name="pcb_chazuo_92">
     <inertial>
@@ -778,7 +802,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -788,7 +811,6 @@
         <mesh filename="components/base_frame/meshes/Solid_V_Wheel.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -798,7 +820,6 @@
         <mesh filename="components/base_frame/meshes/Eccentric_Spacer.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -808,7 +829,6 @@
         <mesh filename="components/base_frame/meshes/_1mm_5mm_shim.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -829,7 +849,6 @@
         <mesh filename="components/base_frame/meshes/Eccentric_Spacer.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -839,7 +858,6 @@
         <mesh filename="components/base_frame/meshes/Solid_V_Wheel.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -849,7 +867,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -859,7 +876,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -880,7 +896,6 @@
         <mesh filename="components/base_frame/meshes/Solid_V_Wheel.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -890,7 +905,6 @@
         <mesh filename="components/base_frame/meshes/_6mm_Spacer.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -900,7 +914,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -910,7 +923,6 @@
         <mesh filename="components/base_frame/meshes/_1mm_5mm_shim.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -931,7 +943,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -941,7 +952,6 @@
         <mesh filename="components/base_frame/meshes/_6mm_Spacer.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -951,7 +961,6 @@
         <mesh filename="components/base_frame/meshes/Solid_V_Wheel.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -961,7 +970,6 @@
         <mesh filename="components/base_frame/meshes/Ball_Bearing_625_2RS_5x16x5.stl" scale="1 1 1" />
       </geometry>
       <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <texture />
         <color rgba="0.74902 0.74902 0.74902 1" />
       </material>
     </visual>
@@ -1056,7 +1064,9 @@
     <child link="sg_ziji_15" />
   </joint>
   <joint name="fix_1" type="fixed">
-    <origin xyz="-3.46945e-18 0 0" rpy="-1.5708 -0 3.14159" />
+    <!-- z lifts the whole rig so the lightbox floor's collision pad sits at world z=0
+         (see README.md's Collision section) instead of underground. -->
+    <origin xyz="-3.46945e-18 0 0.01" rpy="-1.5708 -0 3.14159" />
     <axis xyz="0 0 -1" />
     <parent link="root" />
     <child link="100cm" />
@@ -1242,7 +1252,9 @@
     <child link="50cm_6" />
   </joint>
   <joint name="frame_overhead_camera" type="fixed">
-    <origin xyz="-0.006 0.0339256 -0.0752492" rpy="-2.53073 -0 0" />
+    <!-- rpy converted from the MJCF's calibrated frame_overhead_camera quat via the same
+         fixed axis remap as frame_wrist_camera_joint. -->
+    <origin xyz="-0.006 0.0339256 -0.0752492" rpy="0.0 0.959929 1.570778" />
     <axis xyz="0 0 1" />
     <parent link="32mm_camera_holder" />
     <child link="frame_overhead_camera" />
@@ -1635,10 +1647,20 @@
         <color rgba="0.94 0.49 0.06 1" />
       </material>
     </visual>
+    <!-- Collision is split in two so each convex hull hugs the true surface (a single
+         hull of this concave part stands ~7 mm proud at the finger, gripping objects
+         with visible daylight). Split geometry from Squint's so101.urdf
+         (github.com/aalmuzairee/squint), shipped here as the pieces' convex hulls. -->
     <collision>
       <origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0" />
       <geometry>
-        <mesh filename="components/so101_arm/assets/wrist_roll_follower_so101_v1.stl" />
+        <mesh filename="components/so101_arm/assets/fixed_jaw_base_convex.obj" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0" />
+      <geometry>
+        <mesh filename="components/so101_arm/assets/fixed_jaw_finger_convex.obj" />
       </geometry>
     </collision>
   </link>
@@ -1811,7 +1833,12 @@
     </inertial>
   </link>
   <joint name="frame_wrist_camera_joint" type="fixed">
-    <origin xyz="0.0025 0.0675 -0.0062" rpy="-2.7071 0 3.14159" />
+    <!-- rpy converted from the MJCF's calibrated frame_wrist_camera quat via the fixed
+         axis remap between MuJoCo's camera convention (forward,right,up)=(-Z,X,Y) and
+         SAPIEN's (forward,right,up)=(X,-Y,Z); see sapien_utils.look_at's docstring.
+         The pi roll about the optical axis matches the physical camera's upside-down
+         mounting: it rotates the produced image 180 degrees, nothing else. -->
+    <origin xyz="0.0025 0.0675 -0.0062" rpy="3.141593 1.136305 -1.570797" />
     <parent link="gripper_link" />
     <child link="frame_wrist_camera" />
   </joint>

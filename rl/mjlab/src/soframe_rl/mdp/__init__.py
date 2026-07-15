@@ -1,8 +1,8 @@
 """Task-specific MDP terms for the SO-101 pick-and-place-into-bin task.
 
 Most terms (rewards, observations) are reused directly from mjlab's manipulation
-task; only the command — which randomizes both the cube and the bin and defines
-the goal as "cube inside the bin" — is custom.
+task. Only the command is custom: it randomizes both the cube and the bin and
+defines the goal as "cube inside the bin".
 """
 
 from soframe_rl.mdp.commands import (
