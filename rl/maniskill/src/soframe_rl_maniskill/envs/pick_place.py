@@ -1,4 +1,4 @@
-"""SO-101-on-frame pick-and-place task: pick a cube, place it in a bin.
+"""SO-101-on-frame pick-and-place task: pick a flat bar, place it in a bin.
 
 The ManiSkill3 + vision counterpart to ``rl/mjlab``'s task, adapted from
 [Squint](https://github.com/aalmuzairee/squint)'s ``envs/place.py``. Differences from
@@ -8,9 +8,8 @@ Squint's version:
   wrist camera) instead of Squint's bare tabletop SO-101. See ``robot/so101_on_frame.py``.
 - Scene: no ``TableSceneBuilder``. The frame (with its lightbox work surface) *is* the
   robot's own URDF, so the scene is just a ground plane plus the frame/arm.
-- Cube/bin dimensions default to the same physical sizes already tuned for this rig in
-  ``rl/mjlab/src/soframe_rl/assets.py`` (2.5 cm cube, 10 cm bin) rather than Squint's
-  ranges, for consistency between the two RL backends.
+- The item is a flat bar (8 x 2.5 x 1.5 cm) sized to fit the 10 cm bin (matching
+  ``rl/mjlab``'s bin) with a little slack at any yaw; grasped across its 2.5 cm width.
 - Observations default to vision + proprioception only (no ground-truth object poses,
   see ``_get_obs_extra`` below). This is Squint's own default too: its
   ``obs_mode="rgb+segmentation"`` has no privileged "state" component, which already
@@ -54,11 +53,11 @@ WORK_SURFACE_Z = 0.0
 # tcp along world Y across a 0.82 m range (y in [-0.878, -0.058] at the rest qpos), and
 # these two regions sit on opposite ends of that range with margin to spare.
 #
-# The 2.5 cm cube gets the far region (y=-0.70): it sits dead-center in the overhead
+# The small item gets the far region (y=-0.70): it sits dead-center in the overhead
 # camera's frame there, where the near region (y=-0.30) is at the frame's edge and partly
-# occluded by the arm -- measured at 0-16 px (128px render), with ~16% of spawns having
-# zero pixels. The 10 cm bin is 16x the cube's area, so it stays clearly visible even in
-# the edge region.
+# occluded by the arm -- measured at 0-16 px (128px render) for a 2.5 cm object, with
+# ~16% of spawns having zero pixels. The 10 cm bin is much larger, so it stays clearly
+# visible even in the edge region.
 ITEM_SPAWN_CENTER = (-0.225, -0.70)
 BIN_SPAWN_CENTER = (-0.225, -0.30)
 SPAWN_HALF_SIZE = 0.1
@@ -70,8 +69,12 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 
     # Noisy joint positions for better sim2real.
     robot_qpos_noise_std: float = np.deg2rad(5)
-    # Cube randomization (defaults match rl/mjlab's fixed 2.5 cm cube).
-    cube_half_size_range: Sequence[float] = (0.0125, 0.0125)
+    # Item randomization: a flat bar, 8 x 2.5 x 1.5 cm by default. It fits the 10 cm
+    # bin's ~9.6 cm clear interior span at any yaw (footprint diagonal ~8.4 cm) with
+    # ~1.2 cm of slack, and is grasped across its 2.5 cm width like the old cube.
+    item_half_size_x_range: Sequence[float] = (0.04, 0.04)
+    item_half_size_y_range: Sequence[float] = (0.0125, 0.0125)
+    item_half_size_z_range: Sequence[float] = (0.0075, 0.0075)
     # Bin randomization (half sizes; defaults match rl/mjlab's fixed 10 cm interior /
     # 5 cm wall height bin -- note rl/mjlab's BIN_RIM_HEIGHT=0.05 is a *full* height, so
     # the z half-size here is half of that (0.025), not 0.05.
@@ -80,7 +83,7 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
     bin_half_size_z_range: Sequence[float] = (0.025, 0.025)
 
     item_friction_range: Sequence[float] = (0.5, 1.0)
-    item_density_range: Sequence[float] = (400, 400)  # ~30 g at 2.5 cm cube.
+    item_density_range: Sequence[float] = (400, 400)  # ~12 g for the default bar.
     randomize_item_color: bool = True
     randomize_bin_color: bool = True
 
@@ -89,17 +92,17 @@ class PickPlaceRandomizationConfig(DefaultRandomizationConfig):
 class PickPlaceBin(DefaultCameraEnv):
     """
     **Task Description:**
-    Pick up a cube and place it in a bin.
+    Pick up a flat bar and place it in a bin.
 
     **Randomizations:**
-    - the cube's xy position is randomized within its own region near one end of the rail
+    - the bar's xy position is randomized within its own region near one end of the rail
     - the bin's xy position is randomized within its own region near the other end, far
-      enough from the cube's region that reaching both requires sliding the rail
-    - the cube's z-axis rotation is randomized
+      enough from the bar's region that reaching both requires sliding the rail
+    - the bar's z-axis rotation is randomized
 
     **Success Conditions:**
-    - the cube is within the bin's xy footprint
-    - the robot is not touching the cube or the bin
+    - the bar rests settled inside the bin
+    - the robot is not touching the bar or the bin
     - the robot is (roughly) static
     """
 
@@ -191,17 +194,24 @@ class PickPlaceBin(DefaultCameraEnv):
                 colors[too_close] = redraw[too_close]
             return colors
 
-        half_sizes = sample_range(cfg.cube_half_size_range)
+        half_x = sample_range(cfg.item_half_size_x_range)
+        half_y = sample_range(cfg.item_half_size_y_range)
+        half_z = sample_range(cfg.item_half_size_z_range)
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
         colors = np.zeros((self.num_envs, 3))
-        colors[:, 2] = 1  # Blue cube.
+        colors[:, 2] = 1  # Blue bar.
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
 
-        self.item_half_sizes = common.to_tensor(half_sizes, device=self.device)
-        self.item_dimensions = torch.stack([self.item_half_sizes] * 3, dim=-1)
+        # Vertical half-extent: resting/goal heights and the lifted check key off this.
+        self.item_half_heights = common.to_tensor(half_z, device=self.device)
+        self.item_dimensions = torch.stack(
+            [common.to_tensor(half_x, device=self.device),
+             common.to_tensor(half_y, device=self.device),
+             self.item_half_heights], dim=-1,
+        )
         colors = np.concatenate([colors, np.ones((self.num_envs, 1))], axis=-1)
         self.item_frictions = common.to_tensor(frictions, device=self.device)
         self.item_densities = common.to_tensor(densities, device=self.device)
@@ -213,15 +223,16 @@ class PickPlaceBin(DefaultCameraEnv):
             material = sapien.pysapien.physx.PhysxMaterial(
                 static_friction=friction, dynamic_friction=friction, restitution=0,
             )
+            item_half_size = [half_x[i], half_y[i], half_z[i]]
             builder.add_box_collision(
-                half_size=[half_sizes[i]] * 3, material=material, density=densities[i]
+                half_size=item_half_size, material=material, density=densities[i]
             )
             item_material = sapien.render.RenderMaterial(base_color=colors[i])
             if self.domain_randomization_config.realism_mode:
                 item_material.set_roughness(0.6)
                 item_material.set_metallic(0.0)
-            builder.add_box_visual(half_size=[half_sizes[i]] * 3, material=item_material)
-            builder.initial_pose = sapien.Pose(p=[0.2, 0, half_sizes[i]])
+            builder.add_box_visual(half_size=item_half_size, material=item_material)
+            builder.initial_pose = sapien.Pose(p=[0.2, 0, half_z[i]])
             builder.set_scene_idxs([i])
             item = builder.build(name=f"item-{i}")
             items.append(item)
@@ -334,7 +345,7 @@ class PickPlaceBin(DefaultCameraEnv):
 
             item_xyz = torch.zeros((b, 3))
             item_xyz[:, :2] = item_spawn_center[env_idx, :2] + item_xy_offset
-            item_xyz[:, 2] = WORK_SURFACE_Z + self.item_half_sizes[env_idx]
+            item_xyz[:, 2] = WORK_SURFACE_Z + self.item_half_heights[env_idx]
             qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
             self.item.set_pose(Pose.create_from_pq(item_xyz, qs))
 
@@ -345,7 +356,7 @@ class PickPlaceBin(DefaultCameraEnv):
             self.bin.set_pose(Pose.create_from_pq(bin_xyz, qs))
 
             goal_xyz = bin_xyz.clone()
-            goal_xyz[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_sizes[env_idx]
+            goal_xyz[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_heights[env_idx]
             self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
 
     def _get_obs_agent(self):
@@ -394,7 +405,7 @@ class PickPlaceBin(DefaultCameraEnv):
     def evaluate(self):
         item_pos = self.item.pose.p
         bin_pos = self.bin.pose.p.clone()
-        bin_pos[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_sizes
+        bin_pos[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_heights
 
         offset = item_pos - bin_pos
         inside_x = torch.abs(offset[:, 0]) < self.bin_half_sizes_x
@@ -404,7 +415,7 @@ class PickPlaceBin(DefaultCameraEnv):
         # toward it, and not perched on a wall rim (a rim-rest sits ~4.5 cm higher).
         is_item_in_bin = is_item_above_bin & (offset[:, 2] < 0.01)
 
-        item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_sizes + 1e-3)
+        item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_heights + 1e-3)
 
         item_vel = torch.linalg.norm(self.item.linear_velocity, axis=-1)
         is_item_static = item_vel <= 2e-2
@@ -447,7 +458,7 @@ class PickPlaceBin(DefaultCameraEnv):
         item_pos = self.item.pose.p
         bin_pos = self.bin.pose.p.clone()
         goal_xyz = bin_pos.clone()
-        goal_xyz[..., 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_sizes
+        goal_xyz[..., 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_heights
 
         item_to_goal_dist = torch.linalg.norm(goal_xyz - item_pos, axis=1)
         place_reward_final = 1 - torch.tanh(5.0 * item_to_goal_dist)
