@@ -161,9 +161,12 @@ class BaseRandomEnv(BaseEnv):
             return
 
         if self.domain_randomization and self.domain_randomization_config.randomize_lighting:
-            ambient_colors = self._batched_episode_rng.uniform(0.2, 0.5, size=(3,))
+            # Neutral white-gray light at a random per-env brightness. Intensity varies,
+            # hue never does: object colors stay honest, and the light rig (point/box)
+            # needs no hue management.
+            levels = self._batched_episode_rng.uniform(0.2, 0.5)
             for i, scene in enumerate(self.scene.sub_scenes):
-                scene.render_system.ambient_light = ambient_colors[i]
+                scene.render_system.ambient_light = [levels[i]] * 3
         else:
             self.scene.set_ambient_light([0.3, 0.3, 0.3])
 
