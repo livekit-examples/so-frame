@@ -90,6 +90,11 @@ class Args:
     evaluate: bool = False
     """if toggled, only runs evaluation with the given model checkpoint and saves the evaluation trajectories"""
     checkpoint: Optional[str] = None
+    reset_alpha: bool = False
+    """when warm-starting from --checkpoint, keep the default entropy temperature instead
+    of the checkpoint's: a long-trained checkpoint's autotuned alpha can be collapsed to
+    ~1e-4 (near-deterministic collection), leaving the fine-tuning run no exploration to
+    discover new behavior with."""
     """path to a pretrained checkpoint file to start evaluation/training from (if set to "wandb" will attempt downloading from wandb)"""
 
     # Environment specific arguments
@@ -709,11 +714,12 @@ if __name__ == "__main__":
         encoder.load_state_dict(ckpt['encoder'])
         actor.load_state_dict(ckpt['actor'])
         critic.load_state_dict(ckpt['critic'])
-        if 'log_alpha' in ckpt:
+        if 'log_alpha' in ckpt and not args.reset_alpha:
             with torch.no_grad():
                 log_alpha.copy_(ckpt['log_alpha'])
                 alpha.copy_(log_alpha.exp())
-        print(f"Loaded checkpoint from {args.checkpoint} at step {ckpt['global_step']}")
+        print(f"Loaded checkpoint from {args.checkpoint} at step {ckpt['global_step']}"
+              + (" (log_alpha reset to default for fresh exploration)" if args.reset_alpha else ""))
 
     # ── Inference copies (weight-sharing via from_module) ──────────────────
 
