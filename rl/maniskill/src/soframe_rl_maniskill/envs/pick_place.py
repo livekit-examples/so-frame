@@ -128,6 +128,7 @@ class PickPlaceBin(DefaultCameraEnv):
         item_spawn_center=ITEM_SPAWN_CENTER,
         bin_spawn_center=BIN_SPAWN_CENTER,
         spawn_half_size=SPAWN_HALF_SIZE,
+        action_rate_penalty=0.0,
         **kwargs,
     ):
         self.domain_randomization_config = PickPlaceRandomizationConfig()
@@ -145,6 +146,11 @@ class PickPlaceBin(DefaultCameraEnv):
         self.item_spawn_center = item_spawn_center
         self.bin_spawn_center = bin_spawn_center
         self.spawn_half_size = spawn_half_size
+        # Coefficient for the action-rate (smoothness) penalty: -k * ||a_t - a_{t-1}||^2
+        # per step. Off by default; penalizes jerk, not movement, so the long slider
+        # traverses the task needs stay untaxed.
+        self.action_rate_penalty = action_rate_penalty
+        self._prev_action = None
 
         super().__init__(
             *args,
@@ -339,6 +345,8 @@ class PickPlaceBin(DefaultCameraEnv):
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         super()._initialize_episode(env_idx, options)
+        if self._prev_action is not None:
+            self._prev_action[env_idx] = 0.0
         with torch.device(self.device):
             b = len(env_idx)
 
@@ -534,6 +542,13 @@ class PickPlaceBin(DefaultCameraEnv):
         # bar resting inside the bin sits at nearly the same height (1 mm bin floor) and
         # must not be docked for it.
         reward -= 1 * (~info["item_lifted"] & ~info["is_item_above_bin"]).float()
+
+        if self.action_rate_penalty > 0:
+            action = common.to_tensor(action, device=self.device)
+            if self._prev_action is None or self._prev_action.shape != action.shape:
+                self._prev_action = torch.zeros_like(action)
+            reward -= self.action_rate_penalty * ((action - self._prev_action) ** 2).sum(-1)
+            self._prev_action = action.clone()
 
         return reward
 

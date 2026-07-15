@@ -106,6 +106,9 @@ class Args:
     randomize_colors: bool = False
     """also randomize the bar and bin colors per scene build (they default to fixed
     blue/dark-yellow); pair with --reconfiguration_freq so training re-samples them"""
+    action_rate_penalty: float = 0.0
+    """smoothness cost: -k * ||a_t - a_{t-1}||^2 per step (raw reward units). Penalizes
+    jerk, not movement. ~0.05 is a reasonable strength for polish runs."""
     realism_mode: bool = False
     """for --evaluate rollouts: render eval_envs' wrist/overhead sensor cameras (what gets
     saved to video) with ray-traced shading, shadow-casting lighting, and real PBR textures
@@ -624,6 +627,9 @@ if __name__ == "__main__":
         color_cfg = dict(randomize_item_color=True, randomize_bin_color=True)
         env_kwargs["domain_randomization_config"] = dict(env_kwargs.get("domain_randomization_config", {}), **color_cfg)
         eval_env_kwargs["domain_randomization_config"] = dict(eval_env_kwargs.get("domain_randomization_config", {}), **color_cfg)
+    if args.action_rate_penalty > 0:
+        env_kwargs["action_rate_penalty"] = args.action_rate_penalty
+        eval_env_kwargs["action_rate_penalty"] = args.action_rate_penalty
     if args.realism_mode:
         # The recorded eval video comes from the wrist/overhead sensor cameras, not the
         # third-person human_render_camera, so the realistic shader needs to go on those.
