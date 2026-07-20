@@ -78,13 +78,16 @@ success; one that hasn't succeeded gets at least `--fail_seconds` of runway befo
 so failed attempts aren't shown too briefly.
 
 ```bash
-# Flat shading, fast rasterizer (matches what model_best.pt saw during training)
+# Flat shading, fast rasterizer (matches what the older model_best.pt saw during
+# training; "flat" must be passed explicitly now that "raster" is the default)
 uv run python examples/render_chained_eval.py \
     --checkpoint checkpoints/model_best.pt \
+    --visual_fidelity flat \
     --num_episodes 10 --fail_seconds 5 --out /tmp/rollout.mp4
 
-# PBR materials + shadow-casting key light (matches what model_best_raster.pt saw during
-# its fine-tune); still runs on the gpu sim backend.
+# PBR materials + softbox-like lighting (the training default); still runs on the gpu
+# sim backend. Note: model_best_raster.pt predates the lighting soften (it saw a strong
+# shadow-casting key light), so today's raster look differs slightly from its training.
 uv run python examples/render_chained_eval.py \
     --checkpoint checkpoints/model_best_raster.pt \
     --visual_fidelity raster --render_size 512 \
@@ -107,10 +110,11 @@ works for them). Two checkpoints ship in `checkpoints/`:
 - **`model_best.pt`** -- trained on the flat (shadowless) look; reaches
   **0.94 success_at_end** on the strict metric (bar settled inside the bin, robot clear
   and static) with fixed colors and full lighting/gripper/camera randomization. Render it
-  with the default `--visual_fidelity flat`.
+  with `--visual_fidelity flat` (no longer the default).
 - **`model_best_raster.pt`** -- `model_best.pt` fine-tuned for a further 1M steps under the
-  `raster` fidelity (PBR materials plus a shadow-casting key light); reaches
-  **0.81 success_at_end** in that domain. Render it with `--visual_fidelity raster`.
+  `raster` fidelity as it was then (PBR materials plus a strong shadow-casting key light;
+  the raster lighting has since been softened toward the real rig's diffuse lightbox);
+  reaches **0.81 success_at_end** in that domain. Render it with `--visual_fidelity raster`.
 
 The render resolution
 (`--render_size`) is independent of this -- `DeployAgent` downsamples internally before
@@ -205,7 +209,7 @@ default (`domain_randomization=False`; `train_squint.py` turns it on via
 |---|---|
 | Gripper stiffness / damping | Per-episode, `(500, 2000)` / `(50, 200)` |
 | Ambient lighting | Per-env ambient color in `(0.2, 0.5)` |
-| Bar / bin color | Off by default (fixed blue bar, dark-yellow bin); `--randomize_colors` opts in to per-scene-build random RGB with a visibility floor against the near-white work surface |
+| Bar / bin color | Off by default (fixed purple bar and yellow bin, matched to real camera captures); `--randomize_colors` opts in to per-scene-build random RGB with a visibility floor against the near-white work surface |
 | Wrist + overhead camera pose | Small per-step jitter (±2 mm, ±1°) on top of the URDF's calibrated mount poses |
 | Wrist + overhead camera FOV | ±1° per episode |
 | Initial joint pose | Gaussian noise, configurable std (`initial_qpos_noise_scale`, `robot_qpos_noise_std`) |

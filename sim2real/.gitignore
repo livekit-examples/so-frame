@@ -1,0 +1,9 @@
+# Local virtualenv
+.venv/
+
+# Secrets (keep .env.example committed)
+.env
+
+# Python
+__pycache__/
+*.pyc

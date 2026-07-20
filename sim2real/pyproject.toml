@@ -1,0 +1,35 @@
+[project]
+name = "so-frame-sim2real"
+version = "0.1.0"
+description = "Deploy the sim-trained Squint RL policy onto the SO-101-on-frame rig over LiveKit Portal."
+requires-python = ">=3.12,<3.13"   # livekit-portal ships cp312 wheels only
+dependencies = [
+    "livekit-portal>=0.2.4",
+    "livekit-api>=0.7",
+    # The robot side drives the SO-101 arm + cameras through lerobot; the policy
+    # side needs torch + opencv + numpy for inference and camera rectification.
+    "lerobot[feetech]>=0.6.0",
+    # The rig is a leslider (SO-101 arm on a linear rail): one integrated 7-DOF
+    # follower over a single bus, slider as a real motor. Same package voice-control-demo
+    # uses -- NOT a plain 6-DOF SO101Follower + separate rail.
+    "lerobot_robot_so101_slider_pos",
+    "torch>=2.2",
+    "opencv-python>=4.9",
+    "numpy>=1.24",
+    "python-dotenv>=1",
+]
+
+[tool.uv.sources]
+lerobot_robot_so101_slider_pos = { git = "https://github.com/pham-tuan-binh/leslider", subdirectory = "packages/lerobot_robot_so101_slider_pos", rev = "4c1c85d4f140b1c4704cafa7624f14e844919700" }
+
+[project.scripts]
+robot = "robot.run:cli"
+policy-squint = "policy.run:cli"
+
+[tool.uv]
+# The policy imports the trained network classes (CNNEncoder/Actor) from
+# ../rl/maniskill/train_squint.py at runtime (see policy/agent.py). That module
+# imports mani_skill; on a robot host that can't install the simulator, vendor
+# those two torch classes into policy/agent.py instead -- then this stack needs
+# no mani_skill at all.
+package = false

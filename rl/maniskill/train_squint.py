@@ -36,6 +36,7 @@ import time
 import glob
 from typing import Optional
 
+from mani_skill.utils import common as ms_common
 from mani_skill.utils import gym_utils
 from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper, FlattenRGBDObservationWrapper
 from mani_skill.utils.wrappers.record import RecordEpisode
@@ -106,17 +107,32 @@ class Args:
     """adds domain randomization flag if env supports it"""
     randomize_colors: bool = False
     """also randomize the bar and bin colors per scene build (they default to fixed
-    blue/dark-yellow); pair with --reconfiguration_freq so training re-samples them"""
+    purple/yellow matched to real captures); pair with --reconfiguration_freq so
+    training re-samples them"""
+    overhead_camera_fov: Optional[float] = None
+    """override the overhead camera's base FOV, in DEGREES (default: the URDF-derived
+    value in envs/base_random_env.py). Set to the measured real-camera FOV reported by
+    examples/calibrate_camera.py as fov_deg."""
+    wrist_camera_fov: Optional[float] = None
+    """override the wrist camera's base FOV, in DEGREES; same sourcing as overhead's"""
+    overhead_camera_pos_offset: Optional[tuple[float, float, float]] = None
+    """constant position correction for the overhead camera, meters in the camera link's
+    local frame (+X = view direction). Calibrated against a rectified real frame, see
+    examples/calibrate_camera.py"""
+    overhead_camera_rot_offset: Optional[tuple[float, float, float]] = None
+    """constant rotation correction for the overhead camera, roll/pitch/yaw in DEGREES
+    (camera-local); same sourcing as the position offset"""
     action_rate_penalty: float = 0.0
     """smoothness cost: -k * ||a_t - a_{t-1}||^2 per step (raw reward units). Penalizes
     jerk, not movement. ~0.05 is a reasonable strength for polish runs."""
-    visual_fidelity: str = "flat"
+    visual_fidelity: str = "raster"
     """rendering fidelity, see `RandomizationConfig.visual_fidelity` in
-    envs/base_random_env.py. "flat" (default) is the standard fast training look;
-    "raster" trains on realistic appearance (PBR materials + shadow-casting key light);
-    "raytraced" applies only to eval_envs, rendering their wrist/overhead sensor cameras
-    with ray tracing on the cpu sim backend -- combine with
-    `--evaluate --checkpoint <path> --num_eval_envs 1` for a single high-fidelity rollout."""
+    envs/base_random_env.py. "raster" (default) trains on realistic appearance (PBR
+    materials + softbox-like lighting with a faint shadow); "flat" is the fast
+    shadowless look for cheap ablations; "raytraced" applies only to eval_envs,
+    rendering their wrist/overhead sensor cameras with ray tracing on the cpu sim
+    backend -- combine with `--evaluate --checkpoint <path> --num_eval_envs 1` for a
+    single high-fidelity rollout."""
     num_envs: int = 1024
     """the number of parallel environments"""
     num_eval_envs: int = 32
@@ -137,6 +153,21 @@ class Args:
     """the control mode to use for the environment"""
     obs_mode: Optional[str] = "rgb+segmentation"
     """the observation output mode of the environment"""
+    privileged_critic: bool = True
+    """asymmetric actor-critic: append '+state' to the obs_mode so the env emits its
+    privileged ground truth (_get_obs_extra: item/bin/tcp poses, randomized physics
+    params), split it out of the flattened state, and feed it to the CRITIC only. The
+    actor (and deployed policy) keeps vision + proprio. Speeds up value learning with
+    zero sim2real cost since the critic never runs on the robot."""
+    action_delay_max: Optional[int] = None
+    """override the env's max action delay (control steps). Set 0 to disable the
+    delay-obs augmentation entirely, which keeps the proprio state at its base 14 dims
+    -- needed to cleanly warm-start a pre-delay checkpoint (e.g. model_best_raster.pt).
+    Default None uses the env config's range. (The task is quasi-static, so the deployed
+    recipe leaves delay OFF and relies on the tight 10 Hz control loop instead.)"""
+    arm_speed_scale: float = 1.0
+    """multiplier on arm/rail delta limits (gripper unscaled). 1.0 = calibrated slow arm
+    (0.5 rad/s, 0.12 m/s); 2.0 = old fast v24/v25 speeds. For arm-speed ablations."""
     render_mode: Optional[str] = "all"
     """the rendering mode of the environment, could be rgb or all"""
     render_size: int = 128
@@ -145,6 +176,10 @@ class Args:
     """square size of the input image for actor (HxW) - after downsampling"""
     apply_jitter: bool = True
     """applies color jitter to all input RGB observations (better for sim2real)"""
+    sensor_aug: bool = True
+    """applies camera sensor-realism augmentation (h264/compression proxy, sensor noise,
+    gamma/white-balance) on top of color jitter -- closes the clean-render vs real-camera
+    gap. See utils.SensorAugWrapper."""
 
     # Algorithm specific arguments
     total_timesteps: int = 1_500_000
@@ -575,6 +610,11 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     args.num_total_iterations = int(args.total_timesteps // args.num_envs)
     assert args.num_updates > 0, "No updates will be made to the model with the current setup"
+
+    # Arm-speed ablation knob: set before any env/agent is built so the controller picks
+    # it up when its config is constructed.
+    import soframe_rl_maniskill.robot.so101_on_frame as _robot_mod
+    _robot_mod.ARM_SPEED_SCALE = args.arm_speed_scale
     assert args.visual_fidelity in ("flat", "raster", "raytraced"), \
         f"--visual_fidelity must be flat|raster|raytraced, got {args.visual_fidelity!r}"
 
@@ -595,11 +635,16 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # ── Environment setup ──────────────────────────────────────────────────
-    env_kwargs = dict(obs_mode=args.obs_mode, render_mode=args.render_mode, sim_backend="gpu",
+    obs_mode = args.obs_mode
+    if args.privileged_critic and "state" not in obs_mode.split("+"):
+        # '+state' makes the env emit _get_obs_extra's privileged ground truth, which
+        # SplitPrivilegedStateWrapper below routes to the critic only.
+        obs_mode = obs_mode + "+state"
+    env_kwargs = dict(obs_mode=obs_mode, render_mode=args.render_mode, sim_backend="gpu",
                       sensor_configs=dict(width=args.render_size, height=args.render_size))
     # "sensors" (wrist + overhead only, no third-person camera) for whatever eval_envs
     # records -- both the periodic in-training eval videos and --evaluate rollouts.
-    eval_env_kwargs = dict(obs_mode=args.obs_mode, render_mode="sensors", sim_backend="gpu",
+    eval_env_kwargs = dict(obs_mode=obs_mode, render_mode="sensors", sim_backend="gpu",
                            sensor_configs=dict(width=args.render_size, height=args.render_size),
                            human_render_camera_configs=dict(shader_pack="default", width=args.render_size, height=args.render_size))
     for kw in (env_kwargs, eval_env_kwargs):
@@ -612,11 +657,23 @@ if __name__ == "__main__":
         dr_cfg = {}
         if args.randomize_colors:
             dr_cfg.update(randomize_item_color=True, randomize_bin_color=True)
-        if args.visual_fidelity == "raster":
-            # No shader change needed: the memory-optimized "minimal" sensor shader
-            # renders shadows and textures just fine (verified), while the "default"
-            # shader's G-buffers OOM the GPU beyond ~384 envs for no visible benefit.
-            dr_cfg["visual_fidelity"] = "raster"
+        if args.overhead_camera_fov is not None:
+            dr_cfg["overhead_camera_fov"] = np.deg2rad(args.overhead_camera_fov)
+        if args.wrist_camera_fov is not None:
+            dr_cfg["wrist_camera_fov"] = np.deg2rad(args.wrist_camera_fov)
+        if args.overhead_camera_pos_offset is not None:
+            dr_cfg["overhead_camera_pos_offset"] = list(args.overhead_camera_pos_offset)
+        if args.overhead_camera_rot_offset is not None:
+            dr_cfg["overhead_camera_rot_offset"] = [np.deg2rad(v) for v in args.overhead_camera_rot_offset]
+        if args.action_delay_max is not None:
+            dr_cfg["action_delay_steps_range"] = (0, args.action_delay_max)
+        if args.visual_fidelity in ("flat", "raster"):
+            # Always pass the flag through so --visual_fidelity flat can override the
+            # config's raster default. No shader change needed for raster: the
+            # memory-optimized "minimal" sensor shader renders shadows and textures
+            # just fine (verified), while the "default" shader's G-buffers OOM the GPU
+            # beyond ~384 envs for no visible benefit.
+            dr_cfg["visual_fidelity"] = args.visual_fidelity
         if dr_cfg:
             kw["domain_randomization_config"] = dr_cfg
     if args.visual_fidelity == "raytraced":
@@ -645,8 +702,24 @@ if __name__ == "__main__":
                          reconfiguration_freq=args.eval_reconfiguration_freq, **eval_env_kwargs)
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs)
 
+    # The env's flattened 'state' is [agent_flat | extra_flat] in that order (ManiSkill
+    # builds dict(agent=..., extra=...) then flattens by insertion order). The agent
+    # (proprio) size is the split point between actor-visible proprio and critic-only
+    # privileged state; measure it from _get_obs_agent so it's robust to how the env
+    # packs its obs dict, then derive priv by difference against the merged vector.
+    n_priv = 0
+    if args.privileged_critic:
+        agent_obs = envs.unwrapped._get_obs_agent()
+        n_proprio = int(ms_common.flatten_state_dict(agent_obs, use_torch=True).shape[-1])
+        n_merged = int(envs.unwrapped._init_raw_obs["state"].shape[-1])
+        n_priv = n_merged - n_proprio
+        assert n_priv > 0, f"expected privileged state beyond proprio (merged={n_merged}, proprio={n_proprio})"
+
     envs = FlattenRGBDObservationWrapper(envs, rgb=True, depth=False, state=True)
     eval_envs = FlattenRGBDObservationWrapper(eval_envs, rgb=True, depth=False, state=True)
+    if args.privileged_critic:
+        envs = utils.SplitPrivilegedStateWrapper(envs, n_proprio)
+        eval_envs = utils.SplitPrivilegedStateWrapper(eval_envs, n_proprio)
 
     if args.render_size != args.image_size:
         envs = utils.DownsampleObsWrapper(envs, target_size=args.image_size)
@@ -654,6 +727,12 @@ if __name__ == "__main__":
     if args.apply_jitter:
         envs = utils.ColorJitterWrapper(envs)
         eval_envs = utils.ColorJitterWrapper(eval_envs)
+    if args.sensor_aug:
+        # After ColorJitter: adds compression/noise/exposure realism. Applied to eval
+        # too (like ColorJitter) so the best checkpoint is chosen for robustness, not
+        # clean-image performance -- expect success ~a bit below a no-aug run.
+        envs = utils.SensorAugWrapper(envs)
+        eval_envs = utils.SensorAugWrapper(eval_envs)
     if isinstance(envs.action_space, gym.spaces.Dict):
         envs = FlattenActionSpaceWrapper(envs)
         eval_envs = FlattenActionSpaceWrapper(eval_envs)
@@ -667,10 +746,10 @@ if __name__ == "__main__":
         if args.save_train_video_freq is not None:
             save_video_trigger = lambda x: (x // max_episode_steps) % args.save_train_video_freq == 0
             envs = RecordEpisode(envs, output_dir=f"runs/{run_name}/train_videos", save_trajectory=False,
-                                 save_video_trigger=save_video_trigger, max_steps_per_video=max_episode_steps, video_fps=20)
+                                 save_video_trigger=save_video_trigger, max_steps_per_video=max_episode_steps, video_fps=10)  # 10 Hz control -> real-time playback
         eval_envs = RecordEpisode(eval_envs, output_dir=eval_output_dir, save_trajectory=args.save_trajectory,
                                   save_video=args.capture_video, trajectory_name="trajectory",
-                                  max_steps_per_video=max_episode_steps, video_fps=20)
+                                  max_steps_per_video=max_episode_steps, video_fps=10)  # 10 Hz control -> real-time playback
 
     envs = ManiSkillVectorEnv(envs, args.num_envs, ignore_terminations=not args.partial_reset, record_metrics=True)
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
@@ -679,6 +758,8 @@ if __name__ == "__main__":
     n_channels = envs.unwrapped.single_observation_space['rgb'].shape[2]
     n_obs = (args.image_size, args.image_size, n_channels)
     n_state = math.prod(envs.unwrapped.single_observation_space['state'].shape)
+    # Critic sees proprio + privileged (asymmetric); actor sees proprio only.
+    n_state_critic = n_state + n_priv
     assert isinstance(envs.unwrapped.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     # ── Logger ─────────────────────────────────────────────────────────────
@@ -701,7 +782,7 @@ if __name__ == "__main__":
 
     encoder = CNNEncoder(n_obs=n_obs, device=device)
     actor = Actor(envs, n_obs=encoder.repr_dim, n_state=n_state, n_act=n_act, device=device)
-    critic = Critic(n_obs=encoder.repr_dim, n_state=n_state, n_act=n_act,
+    critic = Critic(n_obs=encoder.repr_dim, n_state=n_state_critic, n_act=n_act,
                     num_atoms=args.num_atoms, v_min=args.v_min, v_max=args.v_max,
                     num_q=args.num_q, device=device)
 
@@ -740,7 +821,7 @@ if __name__ == "__main__":
     from_module(actor).data.to_module(actor_eval)
 
     # Target critic
-    critic_target = Critic(n_obs=encoder.repr_dim, n_state=n_state, n_act=n_act,
+    critic_target = Critic(n_obs=encoder.repr_dim, n_state=n_state_critic, n_act=n_act,
                            num_atoms=args.num_atoms, v_min=args.v_min, v_max=args.v_max,
                            num_q=args.num_q, device=device)
     critic_target.load_state_dict(critic.state_dict())
@@ -790,11 +871,20 @@ if __name__ == "__main__":
 
     # ── Update functions ───────────────────────────────────────────────────
 
+    def _critic_state(obs_dict):
+        # Actor sees proprio ('state'); critic additionally sees privileged 'priv'
+        # (asymmetric actor-critic). Without --privileged_critic there is no 'priv' key
+        # and the critic state is just proprio.
+        state = obs_dict['state']
+        priv = obs_dict.get('priv', None)
+        return state if priv is None else torch.cat([state, priv], dim=-1)
+
     def update_main(data):
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
             with torch.no_grad():
                 next_obs = encoder(data["next_observations"]['rgb'])
                 next_state = data["next_observations"]['state']
+                next_critic_state = _critic_state(data["next_observations"])
                 next_state_actions, next_state_log_pi, _ = actor.get_action(next_obs, next_state)
 
                 bootstrap = (~data["dones"]).float()
@@ -805,15 +895,16 @@ if __name__ == "__main__":
                 rewards_with_entropy = rewards - bootstrap.flatten() * discount * entropy_bonus
 
                 target_distributions = critic_target.categorical(
-                    next_obs, next_state, next_state_actions,
+                    next_obs, next_critic_state, next_state_actions,
                     rewards_with_entropy, bootstrap, discount
                 )
 
             obs = encoder(data["observations"]['rgb'])
             state = data["observations"]['state']
+            critic_state = _critic_state(data["observations"])
 
             # Shape: [num_q, batch, num_atoms]
-            q_outputs = critic(obs, state, data["actions"])
+            q_outputs = critic(obs, critic_state, data["actions"])
             q_log_probs = F.log_softmax(q_outputs, dim=-1)
 
             # Cross-entropy: sum over num_atoms, mean over batch → [num_q]
@@ -856,10 +947,11 @@ if __name__ == "__main__":
     def update_actor(data, encoded_rgb):
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
             state = data["observations"]["state"]
+            critic_state = _critic_state(data["observations"])
             obs = encoded_rgb
 
             pi, log_pi, _ = actor.get_action(obs, state)
-            q_values = critic.get_q_values(obs, state, pi, detach_critic=True)
+            q_values = critic.get_q_values(obs, critic_state, pi, detach_critic=True)
 
             # Mean (No CDQ)
             critic_value = q_values.mean(dim=0)
@@ -940,6 +1032,8 @@ if __name__ == "__main__":
             actions = actions.to(sim_device)
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
         real_next_obs = {'rgb': next_obs['rgb'].clone(), 'state': next_obs['state'].clone()}
+        if 'priv' in next_obs:
+            real_next_obs['priv'] = next_obs['priv'].clone()
 
         # Determine bootstrap behavior
         if args.bootstrap_at_done == 'never':
@@ -955,6 +1049,8 @@ if __name__ == "__main__":
         if "final_info" in infos:
             real_next_obs['rgb'][need_final_obs] = infos["final_observation"]['rgb'][need_final_obs]
             real_next_obs['state'][need_final_obs] = infos["final_observation"]['state'][need_final_obs]
+            if 'priv' in real_next_obs:
+                real_next_obs['priv'][need_final_obs] = infos["final_observation"]['priv'][need_final_obs]
 
         transition = TensorDict(
             observations=obs,

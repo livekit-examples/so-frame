@@ -8,10 +8,11 @@ Run from rl/maniskill/:
     uv run python examples/render_chained_eval.py \
         --checkpoint checkpoints/model_best.pt --num_episodes 10 --out /tmp/chained.mp4
 
---visual_fidelity picks the shading: "flat" (training default), "raster" (PBR materials
-+ shadow-casting key light, stays on the gpu sim backend), or "raytraced" (rt-fast; drops
-to the cpu sim backend since ray tracing isn't supported on the gpu-parallelized sensor
-camera path, which is fine for a single-env render).
+--visual_fidelity picks the shading: "raster" (training default: PBR materials +
+softbox-like lighting with a faint shadow, stays on the gpu sim backend), "flat"
+(shadowless; what the older model_best.pt checkpoint saw), or "raytraced" (rt-fast;
+drops to the cpu sim backend since ray tracing isn't supported on the gpu-parallelized
+sensor camera path, which is fine for a single-env render).
 """
 
 import sys
@@ -37,9 +38,12 @@ parser.add_argument("--env_id", type=str, default="SOFramePickPlaceBin-v1")
 parser.add_argument("--num_episodes", type=int, default=10)
 parser.add_argument("--fail_seconds", type=float, default=5.0, help="how long an episode that hasn't succeeded runs before cutting to a fresh one")
 parser.add_argument("--render_size", type=int, default=512)
-parser.add_argument("--fps", type=int, default=20)
+# 10 fps = the 10 Hz control rate, so the video plays at real time. (It used to default
+# to 20, which played every rollout at 2x and made the arm/rail look twice as fast as
+# they move in sim -- and on the real robot.)
+parser.add_argument("--fps", type=int, default=10)
 parser.add_argument("--target_image_size", type=int, default=32, help="must match the checkpoint's own image_size (32 is the current default; older checkpoints like slider_pickplace_v7 used 16)")
-parser.add_argument("--visual_fidelity", type=str, default="flat", choices=["flat", "raster", "raytraced"])
+parser.add_argument("--visual_fidelity", type=str, default="raster", choices=["flat", "raster", "raytraced"])
 parser.add_argument("--no_overlay", action="store_true", help="skip the greenscreen background overlay for a showcase render; policies are TRAINED with the overlay (background composited to black), so leaving it on is what matches their training obs and success rates")
 parser.add_argument("--sim_envs", type=int, default=16, help="number of parallel sim envs; only env 0 is filmed. Policies trained in batched GPU physics measurably degrade when rolled out in a lone env (contact dynamics resolve differently in a single-scene solver), so render with a training-sized batch. Forced to 1 for raytraced (cpu backend).")
 parser.add_argument("--domain_randomization", action="store_true")

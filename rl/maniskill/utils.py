@@ -10,6 +10,37 @@ import torchvision
 
 # ---------------------------  Wrappers --------------------------------------#
 
+class SplitPrivilegedStateWrapper(gym.ObservationWrapper):
+    """Split FlattenRGBDObservationWrapper's merged 'state' vector into the actor-safe
+    proprio part (`state`, the first n_proprio dims: the env's agent obs) and the
+    privileged remainder (`priv`: everything from `_get_obs_extra` -- ground-truth
+    item/bin/tcp poses, randomized physics params). For asymmetric actor-critic: the
+    critic trains on state+priv, while the actor (and any deployed policy) sees only
+    `state`, so nothing privileged leaks into what must run on the real robot.
+
+    Apply directly after FlattenRGBDObservationWrapper(state=True), whose 'state' is
+    the flattened obs dict in insertion order: agent first, extra second -- that
+    ordering is what makes the fixed split index valid.
+    """
+
+    def __init__(self, env, n_proprio: int):
+        self.base_env = env.unwrapped
+        super().__init__(env)
+        self.n_proprio = n_proprio
+        assert self.base_env._init_raw_obs["state"].shape[-1] > n_proprio, (
+            "state vector has nothing beyond proprio -- was the env created with a "
+            "'+state' obs_mode so _get_obs_extra is populated?"
+        )
+        self.base_env.update_obs_space(self.observation(dict(self.base_env._init_raw_obs)))
+
+    def observation(self, observation: dict):
+        state = observation["state"]
+        observation = dict(observation)
+        observation["state"] = state[..., : self.n_proprio]
+        observation["priv"] = state[..., self.n_proprio :]
+        return observation
+
+
 class DownsampleObsWrapper(gym.ObservationWrapper):
     """Downsamples RGB observations from render_size to target_size using area interpolation.
 
@@ -87,5 +118,68 @@ class ColorJitterWrapper(gym.ObservationWrapper):
         if squeeze:
             rgb = rgb.squeeze(0)
 
+        obs['rgb'] = rgb
+        return obs
+
+
+class SensorAugWrapper(gym.ObservationWrapper):
+    """Camera sensor-realism augmentation, for sim2real. Clean sim renders lack three
+    things the real USB cameras have: h264 compression artifacts (blocking/softening),
+    sensor noise, and auto-exposure/white-balance drift. This adds a blocking proxy,
+    Gaussian noise, gamma, and per-channel gain so the policy stops depending on clean
+    pixels. Complements ColorJitterWrapper (hue/sat/brightness); apply this AFTER it.
+
+    Input (B, H, W, C) uint8, C a multiple of 3 -- each camera's 3 channels are augmented
+    independently (like ColorJitterWrapper). gamma/white-balance/noise are per-image
+    (each env its own); blur/blocking are per-batch (one draw/step) for speed."""
+
+    def __init__(self, env, gamma=(0.7, 1.4), wb=0.1, noise_std=0.04,
+                 blur_prob=0.3, blur_sigma=(0.3, 0.9), block_prob=0.3):
+        super().__init__(env)
+        self.gamma_range = gamma
+        self.wb = wb
+        self.noise_std = noise_std
+        self.blur_prob = blur_prob
+        self.blur_sigma = blur_sigma
+        self.block_prob = block_prob
+
+    @staticmethod
+    def _gauss_kernel(sigma, device, dtype):
+        x = torch.arange(-2, 3, device=device, dtype=dtype)
+        k1 = torch.exp(-(x ** 2) / (2 * sigma * sigma))
+        k1 = k1 / k1.sum()
+        return torch.outer(k1, k1)  # (5, 5)
+
+    def observation(self, obs):
+        rgb = obs['rgb']
+        squeeze = rgb.dim() == 3
+        if squeeze:
+            rgb = rgb.unsqueeze(0)
+        rgb = rgb.permute(0, 3, 1, 2).float() / 255.0  # (B, C, H, W)
+        B, C, H, W = rgb.shape
+        dev, dt = rgb.device, rgb.dtype
+        assert C % 3 == 0, f"expected a multiple of 3 channels, got {C}"
+
+        out = []
+        for c in range(0, C, 3):
+            img = rgb[:, c:c + 3]                                       # (B, 3, H, W)
+            gamma = torch.empty(B, 1, 1, 1, device=dev, dtype=dt).uniform_(*self.gamma_range)
+            img = img.clamp_min(1e-6).pow(gamma)                        # exposure/gamma
+            gain = torch.empty(B, 3, 1, 1, device=dev, dtype=dt).uniform_(1 - self.wb, 1 + self.wb)
+            img = img * gain                                           # per-channel white balance
+            if torch.rand(1, device=dev).item() < self.blur_prob:
+                sigma = float(torch.empty(1, device=dev).uniform_(*self.blur_sigma).item())
+                k = self._gauss_kernel(sigma, dev, dt).expand(3, 1, 5, 5)
+                img = F.conv2d(img, k, padding=2, groups=3)            # soft blur
+            if torch.rand(1, device=dev).item() < self.block_prob:
+                img = F.interpolate(img, size=(max(1, H // 2), max(1, W // 2)), mode='nearest')
+                img = F.interpolate(img, size=(H, W), mode='nearest')  # blocking / compression proxy
+            std = torch.empty(B, 1, 1, 1, device=dev, dtype=dt).uniform_(0, self.noise_std)
+            img = img + torch.randn_like(img) * std                    # sensor noise
+            out.append(img.clamp(0, 1))
+
+        rgb = (torch.cat(out, dim=1) * 255).to(torch.uint8).permute(0, 2, 3, 1)
+        if squeeze:
+            rgb = rgb.squeeze(0)
         obs['rgb'] = rgb
         return obs

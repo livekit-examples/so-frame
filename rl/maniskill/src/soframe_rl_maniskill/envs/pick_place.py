@@ -66,14 +66,18 @@ class PickPlaceRandomizationConfig(RandomizationConfig):
 
     item_friction_range: Sequence[float] = (0.5, 1.0)
     item_density_range: Sequence[float] = (400, 400)  # ~12 g for the default bar.
-    # Fixed colors (blue bar, dark yellow bin) by default: color randomization is
-    # supported (with the visibility floor below) but costs substantial sample
-    # efficiency, so it's opt-in for a dedicated color-generalization run.
+    # Fixed colors (purple bar, yellow bin) by default, matched to real captures
+    # (see the albedo derivation where they're applied in `_load_scene`): color
+    # randomization is supported (with the visibility floor below) but costs
+    # substantial sample efficiency, so it's opt-in for a dedicated
+    # color-generalization run.
     randomize_item_color: bool = False
     randomize_bin_color: bool = False
 
 
-@register_env("SOFramePickPlaceBin-v1", max_episode_steps=200)
+# 300 steps (30 s at 10 Hz): the arm's delta limits were halved toward real servo
+# tracking speeds, so the pick-slide-place cycle needs more runway than the old 200.
+@register_env("SOFramePickPlaceBin-v1", max_episode_steps=300)
 class PickPlaceBin(DualCameraEnv):
     """
     **Task Description:**
@@ -177,8 +181,11 @@ class PickPlaceBin(DualCameraEnv):
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
-        colors = np.zeros((self.num_envs, 3))
-        colors[:, 2] = 1  # Blue bar.
+        # Purple bar, matched to real overhead/wrist captures (2026-07-16 snapshots).
+        # Derivation: the bar's median sRGB reading, decoded to linear and scaled by the
+        # bar-to-work-surface brightness ratio against the surface's 0.902 albedo, so the
+        # match holds under the sim's own lighting rather than the real camera's exposure.
+        colors = np.tile([0.28, 0.19, 0.57], (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
 
@@ -218,7 +225,10 @@ class PickPlaceBin(DualCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        bin_colors = np.ones((self.num_envs, 3)) * [0.55, 0.45, 0.05]  # dark yellow
+        # Yellow bin, matched to real captures the same way as the bar's albedo above.
+        # The real bin reads brighter than the work surface in the red channel, so this
+        # is a near-saturated yellow, not the dark olive used previously.
+        bin_colors = np.ones((self.num_envs, 3)) * [0.90, 0.47, 0.01]
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
@@ -360,6 +370,27 @@ class PickPlaceBin(DualCameraEnv):
             noise = torch.randn_like(qpos) * self.domain_randomization_config.robot_qpos_noise_std
             qpos = qpos + noise
         obs = dict(noisy_qpos=qpos)
+
+        # Delayed-MDP augmentation: with a random action delay (see
+        # RandomizationConfig.action_delay_steps_range) the raw obs is non-Markov -- the
+        # policy's last commands haven't hit the motors yet and it has no way to know.
+        # Exposing the not-yet-applied action history plus the episode's sampled delay
+        # restores the Markov property (standard fix for delayed MDPs). At deploy time,
+        # feed the last `max_delay` actions actually sent to the servos and the
+        # measured loop latency in control steps / max_delay.
+        max_delay = int(self.domain_randomization_config.action_delay_steps_range[1])
+        if max_delay > 0:
+            act_dim = self.agent.controller.action_space.shape[-1]
+            if self._action_queue is not None:
+                pending = self._action_queue[:, :max_delay].reshape(self.num_envs, -1)
+            else:
+                pending = torch.zeros(self.num_envs, max_delay * act_dim, device=self.device)
+            if self._action_delay is not None:
+                delay = (self._action_delay.float() / max_delay).unsqueeze(-1)
+            else:
+                delay = torch.zeros(self.num_envs, 1, device=self.device)
+            obs.update(pending_actions=pending, action_delay=delay)
+
         controller_state = self.agent.controller.get_state()
         if len(controller_state) > 0:
             obs.update(controller=controller_state)

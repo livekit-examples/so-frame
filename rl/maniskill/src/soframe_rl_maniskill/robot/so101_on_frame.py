@@ -45,15 +45,29 @@ GRASP_SITE_OFFSET = sapien.Pose(p=[0.012, 0.0, -0.07])
 # Per-joint delta-position step limits (rad for revolute joints, m for the rail).
 # Keyed by name (not position) so the controller config below is robust regardless of
 # the joint order SAPIEN's URDF loader assigns to `robot.active_joints`.
+# Arm limits cap the commanded target rate at 0.5 rad/s (0.05 rad/step at 10 Hz
+# control) and the rail at 0.07 m/s (0.007 m/step): the old 1.0 rad/s / 0.2 m/s let sim
+# policies whip the arm at speeds the real loaded servos can't track, a motion profile
+# that doesn't transfer. The rail rate is matched to the real carriage's MEASURED max
+# (debug_policy --control: ~8.9 of its 0..100 range/s, i.e. ~7 cm/s -- slower than the
+# earlier 10-15 cm/s estimate). The arm servos measured ~29-34 deg/s, so 0.05 rad/step
+# is realistic and kept. The gripper keeps its faster limit; its real speed envelope is
+# covered separately by the stiffness/damping randomization.
 _JOINT_DELTA_LIMITS = {
-    "dof_slider": 0.02,
-    "shoulder_pan": 0.1,
-    "shoulder_lift": 0.1,
-    "elbow_flex": 0.1,
-    "wrist_flex": 0.1,
-    "wrist_roll": 0.1,
+    "dof_slider": 0.007,
+    "shoulder_pan": 0.05,
+    "shoulder_lift": 0.05,
+    "elbow_flex": 0.05,
+    "wrist_flex": 0.05,
+    "wrist_roll": 0.05,
     "gripper": 0.2,
 }
+
+# Global multiplier on the arm/rail delta limits (NOT the gripper), settable before the
+# agent's controller is built so training can ablate arm speed without editing the dict.
+# 1.0 = the calibrated slow-arm limits above (0.5 rad/s, 0.12 m/s). 2.0 reproduces the
+# old fast v24/v25 speeds (1.0 rad/s, 0.24 m/s). The gripper is never scaled.
+ARM_SPEED_SCALE = 1.0
 
 # PBR texture sets for `apply_realistic_materials` below (see
 # `RandomizationConfig.visual_fidelity` in `envs/base_random_env.py`).
@@ -139,8 +153,12 @@ class SO101OnFrame(BaseAgent):
     @property
     def _controller_configs(self):
         joint_names = self.joint_names
-        delta_lower = [-_JOINT_DELTA_LIMITS[name] for name in joint_names]
-        delta_upper = [_JOINT_DELTA_LIMITS[name] for name in joint_names]
+        # Scale arm/rail limits by ARM_SPEED_SCALE (gripper unscaled) for speed ablations.
+        def _limit(name):
+            lim = _JOINT_DELTA_LIMITS[name]
+            return lim if name == "gripper" else lim * ARM_SPEED_SCALE
+        delta_lower = [-_limit(name) for name in joint_names]
+        delta_upper = [_limit(name) for name in joint_names]
 
         pd_joint_pos = PDJointPosControllerConfig(  # noqa: F405
             joint_names,

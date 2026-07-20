@@ -42,25 +42,72 @@ class RandomizationConfig:
     """Whether to apply background overlay (greenscreen). If False, returns raw simulation images."""
     rgb_overlay_path: Optional[str] = os.path.join(os.path.dirname(__file__), "black_overlay.png")
     """Path to background image. If None and apply_overlay=True, uses black background."""
-    visual_fidelity: str = "flat"
+    visual_fidelity: str = "raster"
     """Rendering fidelity, one of:
-    - "flat" (default): the fast shadowless lighting used for training.
-    - "raster": PBR materials plus a shadow-casting key light, compatible with the
-      GPU-parallel sensor cameras (shadows and textures render fine on their standard
-      memory-optimized "minimal" shader), so it's trainable at full env counts. Used to
-      close the appearance gap toward "raytraced" before real deployment.
+    - "flat": the fast shadowless lighting, kept for cheap ablations.
+    - "raster" (default): PBR materials under softbox-like lighting (dominant shadowless
+      near-vertical light plus a faint shadow-casting key, approximating the real rig's
+      diffuse lightbox and the "raytraced" area light). Compatible with the GPU-parallel
+      sensor cameras (shadows and textures render fine on their standard memory-optimized
+      "minimal" shader), so it's trainable at full env counts.
     - "raytraced": the same PBR materials plus an overhead softbox area light matching
       the real rig. Renders correctly only under the rt/rt-fast shaders, which the
       GPU-parallel sensor path doesn't support -- for one-off renders and single-env
       evals (see ``examples/render_realistic.py``), never training."""
 
     # === Common randomization settings (affected by domain_randomization flag) ===
+    action_delay_steps_range: Sequence[int] = (0, 1)
+    """Per-episode action delay in control steps, sampled uniformly (inclusive ends)
+    under domain randomization; 0 delay when domain_randomization is off. Models the
+    real control loop's camera-capture -> inference -> servo-write latency (measured
+    roughly 0.5-1.5 steps at 10 Hz control, hence (0, 1)): the policy acts on what the
+    world looked like `delay` steps ago. A wider (0, 2) spread was tried in v26/v27 and
+    made contact timing needlessly uncertain during grasping. Delayed slots start as
+    zero actions (= hold, under the delta target controller) at episode start."""
     gripper_stiffness_range: Sequence[float] = (500, 2000)
     """Range for gripper joint stiffness randomization (per-episode)."""
     gripper_damping_range: Sequence[float] = (50, 200)
     """Range for gripper joint damping randomization (per-episode)."""
+    binary_gripper: bool = True
+    """Near-binary gripper: threshold the gripper action to its sign each step so it only
+    ever drives fully open or fully closed (the arm/rail stay continuous delta control).
+    Makes 'release' unambiguously fully-open -- robust to the sim-vs-real gripper opening
+    gap that left a real bar gripped -- and needs only two calibrated gripper endpoints.
+    The action space stays continuous (SAC unchanged); only the sign matters."""
+    arm_stiffness_range: Sequence[float] = (600, 1400)
+    """Per-episode stiffness range for the arm + rail joints (nominal 1e3). The real
+    STS3215 servos run their own controller; a fixed sim PD overfits its exact response,
+    so vary it +-40% for sim2real robustness. Set (1000, 1000) to disable."""
+    arm_damping_range: Sequence[float] = (60, 140)
+    """Per-episode damping range for the arm + rail joints (nominal 1e2). See above."""
     randomize_lighting: bool = True
     """Whether to randomize ambient lighting."""
+
+    # === Camera FOV (base value; per-episode fov_noise below jitters around it) ===
+    wrist_camera_fov: float = np.deg2rad(58)
+    """Base vertical FOV of the wrist camera. Default comes from the MJCF twin's `fovy`;
+    override with the measured real-camera value (the deploy mapping saved by
+    ``examples/calibrate_real_camera.py`` reports it as ``fov_deg``)."""
+    overhead_camera_fov: float = np.deg2rad(38)
+    """Base vertical FOV of the overhead camera. Calibrated against the real rig
+    (2026-07: interactive alignment via examples/move_sim_camera.py with the URDF pose
+    held fixed; the deploy-side counterpart lives in overhead_camera_mapping.json). The
+    URDF/MJCF twin's fovy said 60, which does not reproduce the real camera's view."""
+
+    # === Camera pose correction (constant, on top of the URDF link pose) ===
+    # The URDF camera links place the printed holders (CAD mate connectors); the actual
+    # lens can sit closer/tilted relative to that. These offsets are expressed in the
+    # camera link's local frame (+X = view direction) and are applied before jitter.
+    # Calibrate by comparing a sim render against a rectified real frame
+    # (examples/calibrate_real_camera.py) and nudging until they align.
+    wrist_camera_pos_offset: Sequence[float] = (0.0, 0.0, 0.0)
+    """Constant position offset (meters, camera-local: +X forward along the view)."""
+    wrist_camera_rot_offset: Sequence[float] = (0.0, 0.0, 0.0)
+    """Constant rotation offset (roll, pitch, yaw in radians, camera-local)."""
+    overhead_camera_pos_offset: Sequence[float] = (0.0, 0.0, 0.0)
+    """Constant position offset (meters, camera-local: +X forward along the view)."""
+    overhead_camera_rot_offset: Sequence[float] = (0.0, 0.0, 0.0)
+    """Constant rotation offset (roll, pitch, yaw in radians, camera-local)."""
 
     # === Wrist camera jitter (on top of the URDF-calibrated base pose) ===
     wrist_camera_pos_noise: Sequence[float] = (0.002, 0.002, 0.002)
@@ -104,6 +151,10 @@ class BaseRandomEnv(BaseEnv):
     ):
         self.domain_randomization = domain_randomization
         self.domain_randomization_config = RandomizationConfig.resolve(domain_randomization_config)
+
+        # Action-delay state (see RandomizationConfig.action_delay_steps_range)
+        self._action_delay: Optional[torch.Tensor] = None
+        self._action_queue: Optional[torch.Tensor] = None
 
         # Overlay state
         self._objects_to_remove_from_greenscreen: list[Union[Actor, Link]] = []
@@ -155,21 +206,34 @@ class BaseRandomEnv(BaseEnv):
 
         if self.domain_randomization and self.domain_randomization_config.randomize_lighting:
             ambient_colors = self._batched_episode_rng.uniform(0.2, 0.5, size=(3,))
-            for i, scene in enumerate(self.scene.sub_scenes):
-                scene.render_system.ambient_light = ambient_colors[i]
         else:
-            self.scene.set_ambient_light([0.3, 0.3, 0.3])
+            ambient_colors = np.full((self.num_envs, 3), 0.3)
+        if fidelity == "raster":
+            # The lightbox is a diffuse source surrounding the workspace: light arrives
+            # from everywhere, which in a rasterizer is ambient, not directional. The
+            # boost keeps the arm's VERTICAL surfaces lit (a straight-down directional
+            # light leaves them dark; their normals never face it).
+            ambient_colors = ambient_colors + 0.25
+        for i, scene in enumerate(self.scene.sub_scenes):
+            scene.render_system.ambient_light = ambient_colors[i]
 
         if fidelity == "raster":
-            # Rasterizer stand-in for the softbox: a shadow-casting near-vertical key
-            # light over the usual randomized ambient. Works with the sensor cameras'
-            # standard "minimal" shader (verified: it renders shadows and textures).
+            # Rasterizer stand-in for the softbox. The real lightbox leaves the
+            # workspace essentially shadow-free (verified against real captures and the
+            # "raytraced" area-light render). Directional shadow maps can only cast
+            # hard-edged shadows, so softness is approximated by ratio instead: most
+            # illumination is the boosted omnidirectional ambient above plus a modest
+            # shadowless vertical fill, and the single shadow-casting key is faint,
+            # leaving just a subtle darkening where the arm blocks it (shadowed:lit is
+            # roughly 0.75:1 on the surface, versus about 0.3:1 with the old strong key
+            # light, which cast a heavy shadow blob the real rig never shows).
             # shadow_map_size stays small: shadow maps allocate per env (2048^2 across
             # 1024 envs is ~17 GB of VRAM); 512^2 is plenty for 128 px observations.
             self.scene.add_directional_light(
-                [0.15, 0.1, -1], [1.5, 1.45, 1.4], shadow=True, shadow_scale=2.0, shadow_map_size=512,
+                [0.15, 0.1, -1], [0.4, 0.39, 0.38], shadow=True, shadow_scale=2.0, shadow_map_size=512,
             )
-            self.scene.add_directional_light([-1, -0.3, -0.6], [0.4, 0.4, 0.45])
+            self.scene.add_directional_light([0, 0, -1], [0.4, 0.39, 0.38])
+            self.scene.add_directional_light([-1, -0.3, -0.6], [0.25, 0.25, 0.28])
             return
 
         self.scene.add_directional_light(
@@ -210,6 +274,24 @@ class BaseRandomEnv(BaseEnv):
             gripper_joint._objs[idx].set_drive_properties(stiffnesses[i], dampings[i], force_limit=100)
             self._gripper_stiffness[idx] = stiffnesses[i]
             self._gripper_damping[idx] = dampings[i]
+
+    def _randomize_arm_gains(self, env_idx: torch.Tensor):
+        """Per-episode stiffness/damping on the arm + rail joints (everything but the
+        gripper, which has its own randomization). Models the real servos' varying
+        response so the policy doesn't overfit sim's fixed PD."""
+        stiff_lo, stiff_hi = self.domain_randomization_config.arm_stiffness_range
+        damp_lo, damp_hi = self.domain_randomization_config.arm_damping_range
+        if not self.domain_randomization:
+            return
+        if stiff_lo == stiff_hi and damp_lo == damp_hi:
+            return
+        arm_joints = [self.agent.robot.joints_map[n]
+                      for n in self.agent.joint_names if n != "gripper"]
+        stiffnesses = self._batched_episode_rng[env_idx].uniform(stiff_lo, stiff_hi)
+        dampings = self._batched_episode_rng[env_idx].uniform(damp_lo, damp_hi)
+        for i, idx in enumerate(env_idx.tolist()):
+            for joint in arm_joints:
+                joint._objs[idx].set_drive_properties(stiffnesses[i], dampings[i], force_limit=100)
 
     def get_gripper_params(self) -> dict[str, torch.Tensor]:
         stiff_lo, stiff_hi = self.domain_randomization_config.gripper_stiffness_range
@@ -335,6 +417,48 @@ class BaseRandomEnv(BaseEnv):
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._randomize_gripper_speed(env_idx)
+        self._randomize_arm_gains(env_idx)
+        self._randomize_action_delay(env_idx)
+
+    def _randomize_action_delay(self, env_idx: torch.Tensor):
+        lo, hi = self.domain_randomization_config.action_delay_steps_range
+        if self._action_delay is None:
+            self._action_delay = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if self.domain_randomization and hi > 0:
+            self._action_delay[env_idx] = torch.randint(
+                int(lo), int(hi) + 1, (len(env_idx),), device=self.device
+            )
+        else:
+            self._action_delay[env_idx] = 0
+        if self._action_queue is not None:
+            self._action_queue[env_idx] = 0.0
+
+    def step(self, action):
+        """Near-binary gripper (threshold to sign) + action delay (apply the action from
+        `delay` steps ago per-env, see RandomizationConfig)."""
+        cfg = self.domain_randomization_config
+        if cfg.binary_gripper:
+            gi = self.agent.joint_names.index("gripper")
+            act = common.to_tensor(action, device=self.device).clone().float()
+            act[..., gi] = torch.where(act[..., gi] > 0, 1.0, -1.0)
+            action = act
+        max_delay = int(self.domain_randomization_config.action_delay_steps_range[1])
+        if self.domain_randomization and max_delay > 0 and self._action_delay is not None:
+            act = common.to_tensor(action, device=self.device).float()
+            squeeze = act.ndim == 1
+            if squeeze:
+                act = act.unsqueeze(0)
+            if self._action_queue is None or self._action_queue.shape[-1] != act.shape[-1]:
+                self._action_queue = torch.zeros(
+                    (self.num_envs, max_delay + 1, act.shape[-1]), device=self.device
+                )
+            self._action_queue = torch.roll(self._action_queue, shifts=1, dims=1)
+            self._action_queue[:, 0] = act
+            applied = self._action_queue[
+                torch.arange(self.num_envs, device=self.device), self._action_delay
+            ]
+            action = applied.squeeze(0) if squeeze else applied
+        return super().step(action)
 
 
 def _sample_jitter_pose(num_envs: int, pos_noise, rot_noise, enabled: bool, device) -> Pose:
@@ -381,10 +505,6 @@ class DualCameraEnv(BaseRandomEnv):
     robustness.
     """
 
-    # Base FOV of the URDF cameras (see simulation/mjcf/so101_on_frame.xml `fovy`, its twin).
-    WRIST_CAMERA_FOV = np.deg2rad(58)
-    OVERHEAD_CAMERA_FOV = np.deg2rad(60)
-
     @property
     def _default_sensor_configs(self):
         config = self.domain_randomization_config
@@ -400,7 +520,7 @@ class DualCameraEnv(BaseRandomEnv):
                 pose=sapien.Pose(),
                 width=128,
                 height=128,
-                fov=self.WRIST_CAMERA_FOV + fov_noise(config.wrist_camera_fov_noise),
+                fov=config.wrist_camera_fov + fov_noise(config.wrist_camera_fov_noise),
                 near=0.01,
                 far=100,
                 mount=self.wrist_camera_mount,
@@ -410,28 +530,38 @@ class DualCameraEnv(BaseRandomEnv):
                 pose=sapien.Pose(),
                 width=128,
                 height=128,
-                fov=self.OVERHEAD_CAMERA_FOV + fov_noise(config.overhead_camera_fov_noise),
+                fov=config.overhead_camera_fov + fov_noise(config.overhead_camera_fov_noise),
                 near=0.01,
                 far=100,
                 mount=self.overhead_camera_mount,
             ),
         ]
 
+    @staticmethod
+    def _offset_pose(pos_offset, rot_offset) -> sapien.Pose:
+        """Constant local-frame correction pose from (xyz, rpy) config values."""
+        from transforms3d.euler import euler2quat
+
+        return sapien.Pose(p=list(pos_offset), q=euler2quat(*rot_offset))
+
     def _update_camera_poses(self):
-        """Follow the URDF-calibrated camera links, plus small jitter on each."""
+        """Follow the URDF-calibrated camera links, plus a constant calibration offset
+        and small per-episode jitter on each."""
         config = self.domain_randomization_config
 
+        wrist_offset = self._offset_pose(config.wrist_camera_pos_offset, config.wrist_camera_rot_offset)
         wrist_jitter = _sample_jitter_pose(
             self.num_envs, config.wrist_camera_pos_noise, config.wrist_camera_rot_noise,
             self.domain_randomization, self.device,
         )
-        self.wrist_camera_mount.set_pose(self.agent.wrist_camera_link.pose * wrist_jitter)
+        self.wrist_camera_mount.set_pose(self.agent.wrist_camera_link.pose * wrist_offset * wrist_jitter)
 
+        overhead_offset = self._offset_pose(config.overhead_camera_pos_offset, config.overhead_camera_rot_offset)
         overhead_jitter = _sample_jitter_pose(
             self.num_envs, config.overhead_camera_pos_noise, config.overhead_camera_rot_noise,
             self.domain_randomization, self.device,
         )
-        self.overhead_camera_mount.set_pose(self.agent.overhead_camera_link.pose * overhead_jitter)
+        self.overhead_camera_mount.set_pose(self.agent.overhead_camera_link.pose * overhead_offset * overhead_jitter)
 
     def reset(self, *args, **kwargs):
         obs, info = super().reset(*args, **kwargs)
