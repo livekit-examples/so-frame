@@ -208,8 +208,9 @@ class Args:
     # Algorithm specific arguments
     total_timesteps: int = 1_500_000
     """total timesteps of the experiments"""
-    buffer_size: int = 200_000
-    """the replay memory buffer size (dino: lowered from 1M; 112px images are ~75 KB each)"""
+    buffer_size: int = 100_000
+    """the replay memory buffer size (dino v2: stores DINOv2 tokens ~98 KB each in bf16, so
+    ~20 GB for obs+next_obs at 100k; fits the 96 GB box)"""
     batch_size: int = 256
     """the batch size of sample from the replay memory (dino: lowered from 512 for the ViT forward)"""
     num_updates: int = 32
@@ -376,80 +377,52 @@ def _load_dino_backbone(device):
     return _DINO_BACKBONE[key]
 
 
-class DinoEncoder(nn.Module):
-    """Frozen DINOv2 ViT-S/14 (registers) backbone + an ATTENTION-POOLING head.
+class DinoHead(nn.Module):
+    """Trainable attention-pooling head over CACHED, frozen DINOv2 patch tokens.
 
-    Drop-in for CNNEncoder (`__init__(n_obs, device)`, `.repr_dim`,
-    `forward(rgb_uint8[B,H,W,C]) -> [B, repr_dim]`), but it treats DINOv2's output as a
-    SET OF TOKENS rather than a feature image:
-      - each camera's 3 channels -> DINOv2 patch tokens, [B, grid*grid, EMBED];
-      - a learned per-camera embedding is added, and the cameras' token sets are
-        concatenated into one sequence, [B, num_cams*grid*grid, EMBED];
-      - K learned query tokens cross-attend that sequence (nn.MultiheadAttention), so the
-        head LEARNS WHERE TO LOOK (bar / bin / gripper) instead of conv-crushing the grid;
-      - the K pooled vectors are projected to repr_dim (512).
-    This keeps the spatial selectivity a conv-collapse throws away, and repr_dim is wide
-    (512) so the downstream Projection no longer strangles the visual features (see below).
+    The frozen ViT lives in utils.DinoTokenWrapper (runs once per env-step at the env
+    boundary; the replay buffer stores tokens), so this head only ever sees tokens, never
+    images, and never runs inside the gradient update, that's the caching win, and it
+    leaves the update small/compilable.
 
-    The frozen backbone is kept OUT of parameters()/state_dict() (object.__setattr__), so
-    only the head (camera embeddings, queries, attention, projection) trains, checkpoints
-    stay small, and the from_module weight-sharing across encoder copies shares just the head.
+    Input: [B, n_tok, EMBED] tokens, concatenated camera-major (cam 0's tokens, then cam
+    1's). A learned per-camera embedding is added to each camera's block; K learned query
+    tokens cross-attend the sequence (attention pooling), learning where to look (bar /
+    bin / gripper); the K pooled vectors project to repr_dim (512).
+
+    Drop-in for the loop's `encoder`: `.repr_dim`, `forward(tokens) -> [B, repr_dim]`.
     """
 
-    PATCH = 14
-    EMBED = 384  # DINOv2 ViT-S
-
-    def __init__(self, n_obs, device=None, n_queries=8, n_heads=6, repr_dim=512):
+    def __init__(self, n_tok, num_cams, embed=384, device=None, n_queries=8, n_heads=6, repr_dim=512):
         super().__init__()
-        assert len(n_obs) == 3 and n_obs[0] == n_obs[1], "square obs expected"
-        assert n_obs[2] % 3 == 0, "expects stacked 3-channel cameras"
-        self.image_size = n_obs[0]
-        self.num_cams = n_obs[2] // 3
-        # DINOv2 needs a side that is a multiple of the 14px patch.
-        self.dino_res = max(2 * self.PATCH, (self.image_size // self.PATCH) * self.PATCH)
-        self.grid = self.dino_res // self.PATCH
-        self.tokens_per_cam = self.grid * self.grid
+        assert n_tok % num_cams == 0, "n_tok must split evenly across cameras"
+        self.EMBED = embed
+        self.n_tok = n_tok
+        self.num_cams = num_cams
+        self.tokens_per_cam = n_tok // num_cams
         self.repr_dim = repr_dim
 
-        object.__setattr__(self, "_dino", _load_dino_backbone(device))
-        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1))
-        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1))
-
-        # Trainable head: camera-id embeddings + learned query tokens + cross-attention.
-        self.cam_embed = nn.Parameter(torch.zeros(self.num_cams, self.EMBED, device=device))
-        self.queries = nn.Parameter(torch.zeros(n_queries, self.EMBED, device=device))
-        self.ln_kv = nn.LayerNorm(self.EMBED, device=device)
-        self.ln_q = nn.LayerNorm(self.EMBED, device=device)
-        self.attn = nn.MultiheadAttention(self.EMBED, n_heads, batch_first=True, device=device)
+        self.cam_embed = nn.Parameter(torch.zeros(num_cams, embed, device=device))
+        self.queries = nn.Parameter(torch.zeros(n_queries, embed, device=device))
+        self.ln_kv = nn.LayerNorm(embed, device=device)
+        self.ln_q = nn.LayerNorm(embed, device=device)
+        self.attn = nn.MultiheadAttention(embed, n_heads, batch_first=True, device=device)
         self.out = nn.Sequential(
-            nn.Linear(n_queries * self.EMBED, repr_dim, device=device),
+            nn.Linear(n_queries * embed, repr_dim, device=device),
             nn.LayerNorm(repr_dim, device=device), nn.ReLU(),
         )
         self.apply(weight_init)
-        # Raw Parameters are untouched by weight_init (it only hits Linear/Conv) -- init them here.
+        # Raw Parameters are untouched by weight_init (it only hits Linear/Conv) -- init here.
         nn.init.normal_(self.queries, std=0.02)
         nn.init.zeros_(self.cam_embed)
 
-    def _patch_tokens(self, img3):
-        # img3: [B, 3, dino_res, dino_res] normalized -> [B, tokens_per_cam, EMBED]
-        return self._dino.forward_features(img3)["x_norm_patchtokens"]
-
-    def forward(self, obs):
-        # obs: [B, H, W, C] uint8, C = 3 * num_cams
-        x = obs.permute(0, 3, 1, 2).float() / 255.0
-        with torch.no_grad():  # frozen backbone: no graph, no grad
-            toks = []
-            for c in range(self.num_cams):
-                cam = x[:, 3 * c: 3 * c + 3]
-                if cam.shape[-1] != self.dino_res:
-                    cam = F.interpolate(cam, size=(self.dino_res, self.dino_res),
-                                        mode="bilinear", align_corners=False)
-                cam = (cam - self.mean) / self.std
-                toks.append(self._patch_tokens(cam))
-        # Trainable head (gradients flow here, not into the backbone).
-        toks = [t + self.cam_embed[c] for c, t in enumerate(toks)]   # tag each token's camera
-        kv = self.ln_kv(torch.cat(toks, dim=1))                      # [B, n_tok, EMBED]
-        b = kv.shape[0]
+    def forward(self, tokens):
+        # tokens: [B, n_tok, EMBED], bf16 from the wrapper. Cast so eager (no-autocast)
+        # rollout matches the fp32 head weights (under autocast it re-casts anyway).
+        tokens = tokens.float()
+        b, tpc = tokens.shape[0], self.tokens_per_cam
+        parts = [tokens[:, c * tpc:(c + 1) * tpc] + self.cam_embed[c] for c in range(self.num_cams)]
+        kv = self.ln_kv(torch.cat(parts, dim=1))                     # [B, n_tok, EMBED]
         q = self.ln_q(self.queries).unsqueeze(0).expand(b, -1, -1)   # [B, K, EMBED]
         pooled, _ = self.attn(q, kv, kv, need_weights=False)         # [B, K, EMBED]
         return self.out(pooled.reshape(b, -1))                       # [B, repr_dim]
@@ -859,6 +832,15 @@ if __name__ == "__main__":
         # clean-image performance -- expect success ~a bit below a no-aug run.
         envs = utils.SensorAugWrapper(envs)
         eval_envs = utils.SensorAugWrapper(eval_envs)
+
+    # DINOv2 feature caching: LAST obs wrapper -- replace the rgb image with frozen ViT
+    # tokens at the env boundary, so the buffer stores tokens and the ViT runs once per
+    # env-step here rather than on every gradient batch. `dino_num_cams` captured before
+    # the swap (afterwards 'rgb' is [n_tok, EMBED] tokens, not an image).
+    dino_num_cams = envs.observation_space['rgb'].shape[-1] // 3
+    envs = utils.DinoTokenWrapper(envs, device=device)
+    eval_envs = utils.DinoTokenWrapper(eval_envs, device=device)
+
     if isinstance(envs.action_space, gym.spaces.Dict):
         envs = FlattenActionSpaceWrapper(envs)
         eval_envs = FlattenActionSpaceWrapper(eval_envs)
@@ -881,8 +863,13 @@ if __name__ == "__main__":
     eval_envs = ManiSkillVectorEnv(eval_envs, args.num_eval_envs, ignore_terminations=not args.eval_partial_reset, record_metrics=True)
 
     n_act = math.prod(envs.unwrapped.single_action_space.shape)
-    n_channels = envs.unwrapped.single_observation_space['rgb'].shape[2]
-    n_obs = (args.image_size, args.image_size, n_channels)
+    # rgb obs is now DINOv2 tokens [n_tok, EMBED] (see DinoTokenWrapper), not an image.
+    # Compute the token dims directly (envs.unwrapped bypasses the wrapper, so its obs
+    # space still reports the pre-token image shape): EMBED is the ViT-S token dim, and
+    # each camera yields (image_size/14)^2 patch tokens.
+    dino_embed = utils.DinoTokenWrapper.EMBED
+    dino_n_tok = dino_num_cams * (args.image_size // utils.DinoTokenWrapper.PATCH) ** 2
+    n_obs = (dino_n_tok, dino_embed)
     n_state = math.prod(envs.unwrapped.single_observation_space['state'].shape)
     # Critic sees proprio + privileged (asymmetric); actor sees proprio only.
     n_state_critic = n_state + n_priv
@@ -906,7 +893,7 @@ if __name__ == "__main__":
 
     # ── Instantiate modules ────────────────────────────────────────────────
 
-    encoder = DinoEncoder(n_obs=n_obs, device=device)
+    encoder = DinoHead(n_tok=dino_n_tok, num_cams=dino_num_cams, embed=dino_embed, device=device)
     actor = Actor(envs, n_obs=encoder.repr_dim, n_state=n_state, n_act=n_act, device=device)
     critic = Critic(n_obs=encoder.repr_dim, n_state=n_state_critic, n_act=n_act,
                     num_atoms=args.num_atoms, v_min=args.v_min, v_max=args.v_max,
@@ -936,8 +923,8 @@ if __name__ == "__main__":
 
     # ── Inference copies (weight-sharing via from_module) ──────────────────
 
-    encoder_detach = DinoEncoder(n_obs=n_obs, device=device)
-    encoder_eval = DinoEncoder(n_obs=n_obs, device=device).eval()
+    encoder_detach = DinoHead(n_tok=dino_n_tok, num_cams=dino_num_cams, embed=dino_embed, device=device)
+    encoder_eval = DinoHead(n_tok=dino_n_tok, num_cams=dino_num_cams, embed=dino_embed, device=device).eval()
     from_module(encoder).data.to_module(encoder_detach)
     from_module(encoder).data.to_module(encoder_eval)
 

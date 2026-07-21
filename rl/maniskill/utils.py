@@ -183,3 +183,80 @@ class SensorAugWrapper(gym.ObservationWrapper):
             rgb = rgb.squeeze(0)
         obs['rgb'] = rgb
         return obs
+
+
+# --- DINOv2 feature caching --------------------------------------------------#
+_DINO_BACKBONE = {}
+
+
+def load_dino_backbone(device):
+    """Frozen DINOv2 ViT-S/14 (registers), loaded once per device and shared."""
+    key = str(device)
+    if key not in _DINO_BACKBONE:
+        m = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14_reg")
+        m = m.to(device).eval()
+        for p in m.parameters():
+            p.requires_grad_(False)
+        _DINO_BACKBONE[key] = m
+    return _DINO_BACKBONE[key]
+
+
+class DinoTokenWrapper(gym.ObservationWrapper):
+    """Replace the RGB image obs with FROZEN DINOv2 patch tokens (feature caching).
+
+    Runs the ViT once per env-step HERE, at the env boundary, so the replay buffer stores
+    tokens and the trainable policy consumes cached tokens, the ViT never runs inside the
+    gradient update (that's the whole speed win, and it lets the update stay compilable).
+
+    Input obs['rgb']: (B, H, W, C) uint8, C = 3*num_cams (H a multiple of 14).
+    Output obs['rgb']: (B, n_tok, EMBED) bf16 tokens, n_tok = num_cams*(H/14)^2, EMBED=384.
+    Each camera's 3 channels run through DINOv2 forward_features separately; the per-camera
+    token grids are concatenated. Apply this LAST in the obs pipeline (after downsample /
+    jitter / sensor-aug, which need images). The trainable DinoHead consumes these tokens.
+    """
+    PATCH = 14
+    EMBED = 384
+
+    def __init__(self, env, device=None):
+        super().__init__(env)
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._dino = load_dino_backbone(self.device)
+        shp = self.observation_space['rgb'].shape  # (H, W, C)
+        H, C = shp[-2], shp[-1]
+        assert C % 3 == 0, f"expected 3*num_cams channels, got {C}"
+        self.num_cams = C // 3
+        self.dino_res = max(2 * self.PATCH, (H // self.PATCH) * self.PATCH)
+        self.grid = self.dino_res // self.PATCH
+        self.n_tok = self.num_cams * self.grid * self.grid
+        self.register_buffer_tensors()
+        self.observation_space['rgb'] = gym.spaces.Box(
+            low=-3.4e38, high=3.4e38, shape=(self.n_tok, self.EMBED), dtype="float32"
+        )
+
+    def register_buffer_tensors(self):
+        self._mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
+        self._std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
+
+    @torch.no_grad()
+    def observation(self, obs):
+        rgb = obs['rgb']
+        squeeze = rgb.dim() == 3
+        if squeeze:
+            rgb = rgb.unsqueeze(0)
+        x = rgb.permute(0, 3, 1, 2).float() / 255.0  # (B, C, H, W)
+        mean, std = self._mean.to(x.device), self._std.to(x.device)
+        toks = []
+        amp = torch.autocast("cuda", dtype=torch.bfloat16) if x.is_cuda else torch.autocast("cpu", dtype=torch.bfloat16)
+        with amp:
+            for c in range(self.num_cams):
+                cam = x[:, 3 * c: 3 * c + 3]
+                if cam.shape[-1] != self.dino_res:
+                    cam = F.interpolate(cam, size=(self.dino_res, self.dino_res),
+                                        mode="bilinear", align_corners=False)
+                cam = (cam - mean) / std
+                toks.append(self._dino.forward_features(cam)["x_norm_patchtokens"])
+        tokens = torch.cat(toks, dim=1).to(torch.bfloat16)  # (B, n_tok, EMBED)
+        if squeeze:
+            tokens = tokens.squeeze(0)
+        obs['rgb'] = tokens
+        return obs
