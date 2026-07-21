@@ -489,13 +489,17 @@ class PickPlaceBin(DualCameraEnv):
         item_pos = self.item.pose.p
         bin_pos = self.bin.pose.p.clone()
         goal_xyz = bin_pos.clone()
-        # The carry target is a DROP height just above the bin's rim, not the resting
-        # height on its floor: inside the bin the moving jaw has no room to swing open
-        # (84 mm interior), so a policy shaped to insert at depth ends up physically
-        # unable to release. From rim + 1 cm the jaw opens freely and gravity finishes
-        # the placement. Success itself still requires the bar settled inside the bin.
+        # The carry target is a DROP height above the bin's rim, not the resting height
+        # on its floor: inside the bin the moving jaw has no room to swing open (84 mm
+        # interior), so a policy shaped to insert at depth ends up physically unable to
+        # release. The clearance is 5 cm above the rim (was 1 cm): on the real arm 1 cm
+        # left no margin for its imprecision, so it clipped the rim instead of clearing
+        # it and never got the bar over the bin. Carrying higher clears the rim reliably;
+        # the jaw opens freely and gravity finishes the placement. Success itself still
+        # requires the bar settled inside the bin.
+        GOAL_CLEARANCE = 0.05
         goal_xyz[..., 2] = (
-            WORK_SURFACE_Z + self.bin_dimensions[:, 2] * 2 + self.item_half_heights + 0.01
+            WORK_SURFACE_Z + self.bin_dimensions[:, 2] * 2 + self.item_half_heights + GOAL_CLEARANCE
         )
 
         item_to_goal_dist = torch.linalg.norm(goal_xyz - item_pos, axis=1)
