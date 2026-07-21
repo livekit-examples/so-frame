@@ -91,7 +91,7 @@ class RandomizationConfig:
     overhead_camera_fov: float = np.deg2rad(38)
     """Base vertical FOV of the overhead camera. Calibrated against the real rig
     (2026-07: interactive alignment via examples/move_sim_camera.py with the URDF pose
-    held fixed; the deploy-side counterpart lives in overhead_camera_mapping.json). The
+    held fixed; the deploy-side counterpart lives in camera_mappings/overhead_camera_mapping.json). The
     URDF/MJCF twin's fovy said 60, which does not reproduce the real camera's view."""
 
     # === Camera pose correction (constant, on top of the URDF link pose) ===

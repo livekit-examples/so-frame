@@ -58,6 +58,8 @@ CAMERA_STACK = (
     ("arm_camera", "arm_camera_mapping.json"),        # -> sim wrist_camera
     ("overhead_camera", "overhead_camera_mapping.json"),  # -> sim overhead_camera
 )
+# Calibrated rectification JSONs live here (one per camera in CAMERA_STACK).
+MAPPINGS_DIR = _HERE / "camera_mappings"
 
 
 def load_mappings() -> dict[str, dict | None]:
@@ -66,7 +68,7 @@ def load_mappings() -> dict[str, dict | None]:
     rollout)."""
     out: dict[str, dict | None] = {}
     for track, fname in CAMERA_STACK:
-        path = _HERE / fname
+        path = MAPPINGS_DIR / fname
         if path.exists():
             out[track] = load_mapping(path)
             print(f"[policy-{NAME}] {track}: using mapping {fname}")

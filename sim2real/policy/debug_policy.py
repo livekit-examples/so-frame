@@ -52,6 +52,8 @@ CAMERA_STACK = (
     ("arm_camera", "arm_camera_mapping.json"),          # -> sim wrist_camera (channels 0:3)
     ("overhead_camera", "overhead_camera_mapping.json"),  # -> sim overhead_camera (3:6)
 )
+# Calibrated rectification JSONs live here (matches run.py.MAPPINGS_DIR).
+MAPPINGS_DIR = _HERE / "camera_mappings"
 SIM_SENSOR_SIZE = 128
 SQUINT_SIZE = 32
 
@@ -62,7 +64,7 @@ SQUINT_SIZE = 32
 
 def _mapping_for(track: str) -> dict | None:
     fname = dict(CAMERA_STACK)[track]
-    path = _HERE / fname
+    path = MAPPINGS_DIR / fname
     if path.exists():
         return load_mapping(path)
     print(f"[debug] {track}: NO mapping ({fname} missing) -- using a plain 128px "

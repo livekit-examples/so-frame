@@ -28,8 +28,8 @@ Three things must match the training setup exactly, or the policy sees
 out-of-distribution input:
 
 1. **camera mapping** -- `apply_mapping` reconstructs the sim FOV/undistortion.
-   `overhead_camera_mapping.json` is calibrated; add `arm_camera_mapping.json`
-   for the wrist camera (calibrate with
+   `camera_mappings/overhead_camera_mapping.json` is calibrated; add
+   `camera_mappings/arm_camera_mapping.json` for the wrist camera (calibrate with
    `rl/maniskill/examples/calibrate_real_camera.py`). A missing mapping falls
    back to a plain resize and is logged loudly.
 2. **channel order** -- wrist first, overhead second (`CAMERA_STACK`), matching
@@ -41,9 +41,10 @@ out-of-distribution input:
 
 ## Files
 
-- `agent.py` -- loads `CNNEncoder`+`Actor` from the checkpoint. Imports those
-  two classes from `rl/maniskill/train_squint.py`; for a sim-free robot host,
-  vendor them into `agent.py` (they are plain torch modules).
+- `agent.py` -- loads `CNNEncoder`+`Actor` from the checkpoint. Those two
+  classes are vendored (plain torch, no mani_skill) into `nets.py`, copied from
+  `rl/maniskill/train_squint.py`; re-copy them if the training nets change.
+- `nets.py` -- the vendored `CNNEncoder`/`Actor` network definitions.
 - `bridge.py` -- sim<->real unit/coordinate bridge. **`NEEDS-CALIBRATION`**: the
   offsets default to zero (real zero assumed == sim zero). Measure per joint.
 - `camera_mapping.py` -- vendored `apply_mapping`/`load_mapping` (kept in sync

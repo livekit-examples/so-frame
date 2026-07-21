@@ -18,14 +18,16 @@ sim2real/
 ├── common.py            # env / LiveKit token / fps pacer (trimmed from vla_demo.common)
 ├── pyproject.toml       # deploy deps + console scripts (own uv project)
 ├── robot/
-│   ├── run.py           # robot runtime: SO-101 arm + rail, publishes state + RAW video
-│   └── slider.py        # rail (dof_slider) actuator interface + stub  [NEEDS-HARDWARE]
+│   └── run.py           # robot runtime: SO-101 arm + rail, publishes state + RAW video
 └── policy/
     ├── run.py           # the Squint policy operator (camera-mapping -> inference -> action)
     ├── agent.py         # loads the trained encoder+actor from a checkpoint (sim-free)
+    ├── nets.py          # vendored CNNEncoder/Actor (plain torch, sim-free)
     ├── bridge.py        # sim<->real unit/coordinate bridge          [NEEDS-CALIBRATION]
     ├── camera_mapping.py            # vendored apply_mapping/load_mapping
-    └── overhead_camera_mapping.json # calibrated overhead rectification (from the sim work)
+    ├── debug_policy.py              # wiring debug harness (no policy / no motion by default)
+    └── camera_mappings/             # calibrated rectification JSONs (one per camera)
+        └── overhead_camera_mapping.json  # calibrated overhead view (from the sim work)
 ```
 
 ## The camera-mapping wiring (the point of this stack)
@@ -34,7 +36,7 @@ The policy was trained on a *narrow, undistorted, cropped* camera view (sim
 overhead FOV 38 deg). The real cameras are wide-FOV (innoMaker 120 deg DFOV).
 The **robot publishes RAW frames**; the **policy operator reconstructs the sim
 view** before every inference by replaying the saved mapping
-(`policy/*_camera_mapping.json`) through `apply_mapping`. So the policy always
+(`policy/camera_mappings/*_camera_mapping.json`) through `apply_mapping`. So the policy always
 sees exactly what it saw in sim, and the web-ui still gets the true wide stream.
 
 Per tick, in `policy/run.py`:
@@ -45,7 +47,8 @@ integrate into a running joint target -> `bridge.sim_to_real` -> send.
 The mappings are produced once per camera with
 `rl/maniskill/examples/calibrate_real_camera.py`. The overhead mapping is
 already calibrated and copied here; **the arm/wrist mapping still needs
-calibrating** (drop `arm_camera_mapping.json` next to the overhead one).
+calibrating** (drop `arm_camera_mapping.json` into `policy/camera_mappings/`
+next to the overhead one).
 
 ## Quick start
 
@@ -68,10 +71,10 @@ it directly) before the arm moves. `reset_to_zero_position` parks the rig.
    unit conversion (rad<->deg, m<->mm) with zero offset, i.e. they assume the
    real joint zero == the sim joint zero. Measure each joint's real `.pos` at the
    sim zero pose and set `OFFSET_REAL` (and `SIGN` if a direction is reversed).
-2. **`robot/slider.py`** -- swap `StubSlider` for the real rail driver.
-3. **`robot/run.py` rest pose** -- set `REST_POSE_DEFAULTS` to the rig's real
+2. **`robot/run.py` rest pose** -- set `REST_POSE_DEFAULTS` to the rig's real
    parked pose.
-4. **arm/wrist camera mapping** -- calibrate and add `arm_camera_mapping.json`.
+3. **arm/wrist camera mapping** -- calibrate and add
+   `policy/camera_mappings/arm_camera_mapping.json`.
 
-Until 1-3 are done the stack runs but must not command the real arm unsupervised;
-bring it up first with the stub slider and a slow supervised check.
+Until 1-2 are done the stack runs but must not command the real arm unsupervised;
+bring it up first with a slow supervised check.

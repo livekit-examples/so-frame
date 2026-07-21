@@ -219,9 +219,11 @@ def main():
                 focal_px=focal, zoom=1.0,
                 crop_cx=w // 2, crop_cy=h // 2, crop_size=crop, out_size=128,
             )
-            with open(f"{args.camera}_camera_mapping.json", "w") as f:
+            os.makedirs("camera_mappings", exist_ok=True)
+            mapping_path = f"camera_mappings/{args.camera}_camera_mapping.json"
+            with open(mapping_path, "w") as f:
                 json.dump(mapping, f, indent=2)
-            print(f"\nsaved {out_prefix}_preview.png and {args.camera}_camera_mapping.json")
+            print(f"\nsaved {out_prefix}_preview.png and {mapping_path}")
             print("train with:")
             flags = ""
             if args.unlock_pose:
