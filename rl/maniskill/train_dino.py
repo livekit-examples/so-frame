@@ -7,9 +7,9 @@ Identical to `train_squint.py` except the vision encoder is a FROZEN DINOv2 ViT-
 Why: the 16x16 squint run failed to bloom (too coarse for the thin bar); pretrained
 DINOv2 features are more transfer-robust and keep spatial detail at higher resolution.
 Tradeoff: the ViT is far heavier than the tiny CNN, so this file lowers `num_envs`,
-`num_updates`, `buffer_size`, `batch_size`, and turns OFF compile/cudagraphs (a torch.hub
-ViT breaks cudagraph capture). It also renders/keeps 112px obs (a multiple of the 14px
-patch) instead of 32.
+`num_updates`, `buffer_size`, `batch_size`. `torch.compile` stays ON (it tolerates the ViT's
+graph breaks), but `cudagraphs` is OFF (it needs static shapes the ViT's positional-embedding
+interpolation breaks). It also renders/keeps 112px obs (a multiple of the 14px patch) instead of 32.
 
 SPEED CAVEAT: v1 runs the frozen ViT on every replay batch (no feature caching), which
 dominates the step. The right optimization is to cache the backbone's patch grid in the
@@ -242,10 +242,12 @@ class Args:
     """maximum value for distributional RL support"""
 
     # Optimizations
-    compile: bool = False
-    """whether to use torch.compile. (dino: OFF; the torch.hub ViT's dynamic ops break clean capture)"""
+    compile: bool = True
+    """whether to use torch.compile. (dino: ON; tolerant of the ViT's graph breaks, falls back to eager
+    around them, so it still speeds up the MLP actor/C51 critic)"""
     cudagraphs: bool = False
-    """whether to use cudagraphs on top of compile. (dino: OFF, see compile)"""
+    """whether to use cudagraphs on top of compile. (dino: OFF; unlike compile it needs static shapes /
+    no dynamic control flow, which the torch.hub ViT's positional-embedding interpolation breaks)"""
 
     # to be filled in runtime
     num_total_iterations: int = 0
