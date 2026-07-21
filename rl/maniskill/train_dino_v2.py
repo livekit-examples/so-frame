@@ -93,7 +93,7 @@ torch.backends.cudnn.allow_tf32 = True
 class Args:
     exp_name: Optional[str] = "baseline"
     """the name of this experiment"""
-    agent_name: Optional[str] = "squint"
+    agent_name: Optional[str] = "dino_v2"
     """for logging and tracking"""
     seed: int = 1
     """seed of the experiment"""
@@ -107,7 +107,7 @@ class Args:
     """the entity (team) of wandb's project"""
     wandb_project_name: str = "so-frame-maniskill"
     """the wandb's project name"""
-    wandb_group: str = "SQUINT"
+    wandb_group: str = "DINO"
     """the group of the run for wandb"""
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
