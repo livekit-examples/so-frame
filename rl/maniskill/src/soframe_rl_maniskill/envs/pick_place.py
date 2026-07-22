@@ -482,8 +482,19 @@ class PickPlaceBin(DualCameraEnv):
         return (self.agent.robot.get_qpos()[:, idx] - gripper_min) / (gripper_max - gripper_min)
 
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
-        tcp_to_item_dist = torch.linalg.norm(self.agent.tcp_pos - self.item.pose.p, axis=1)
-        reaching_reward = 2 * (1 - torch.tanh(5 * tcp_to_item_dist))
+        # Top-down reaching: reward horizontal (xy) alignment over the bar first; the
+        # vertical (z) term only pays out once aligned in xy (over the bar), so the tool
+        # descends onto the bar from ABOVE instead of scooping it from the side or
+        # underneath (which wrecked the grasp on the real rig). Same max magnitude (2) as
+        # the old 3D reach, so the downstream reward stages are unchanged.
+        tcp = self.agent.tcp_pos
+        item_p = self.item.pose.p
+        reach_d_xy = torch.linalg.norm(tcp[:, :2] - item_p[:, :2], axis=1)
+        reach_d_z = torch.abs(tcp[:, 2] - item_p[:, 2])
+        aligned_xy = reach_d_xy < 0.03  # over the bar (~its half-length) before descending
+        reaching_reward = (1 - torch.tanh(5 * reach_d_xy)) + torch.where(
+            aligned_xy, 1 - torch.tanh(10 * reach_d_z), torch.zeros_like(reach_d_z)
+        )
         reward = reaching_reward
 
         item_pos = self.item.pose.p
@@ -545,6 +556,11 @@ class PickPlaceBin(DualCameraEnv):
         # bar resting inside the bin sits at nearly the same height (1 mm bin floor) and
         # must not be docked for it.
         reward -= 1 * (~info["item_lifted"] & ~info["is_item_above_bin"]).float()
+        # Penalty for the tool dropping to / under the work surface. On the real rig the
+        # policy learned to scoop the bar from underneath, hitting the lightbox. The tcp
+        # only goes below the surface (the bar's resting bottom) on an under-approach; a
+        # clean top-down grasp keeps it at ~bar-center height, above the surface.
+        reward -= 1 * (self.agent.tcp_pos[:, 2] < WORK_SURFACE_Z).float()
 
         if self.action_rate_penalty > 0:
             action = common.to_tensor(action, device=self.device)
