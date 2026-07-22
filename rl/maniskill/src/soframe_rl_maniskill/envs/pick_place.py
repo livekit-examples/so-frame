@@ -556,11 +556,6 @@ class PickPlaceBin(DualCameraEnv):
         # bar resting inside the bin sits at nearly the same height (1 mm bin floor) and
         # must not be docked for it.
         reward -= 1 * (~info["item_lifted"] & ~info["is_item_above_bin"]).float()
-        # Penalty for the tool dropping to / under the work surface. On the real rig the
-        # policy learned to scoop the bar from underneath, hitting the lightbox. The tcp
-        # only goes below the surface (the bar's resting bottom) on an under-approach; a
-        # clean top-down grasp keeps it at ~bar-center height, above the surface.
-        reward -= 1 * (self.agent.tcp_pos[:, 2] < WORK_SURFACE_Z).float()
 
         if self.action_rate_penalty > 0:
             action = common.to_tensor(action, device=self.device)
