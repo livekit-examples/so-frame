@@ -76,3 +76,53 @@ def _box(low: float, high: float, shape):
         high=np.full(shape, high, dtype=np.float32),
         shape=tuple(shape),
     )
+
+
+# DINOv2-v2 deploy geometry (train_dino_v2): each camera -> DINOv2 at 112px (multiple of
+# the 14px patch) -> an 8x8=64 token grid; 2 cameras -> 128 tokens of 384 dims.
+DINO_RES = 112
+DINO_NUM_CAMS = N_CHANNELS // 3
+DINO_N_TOK = DINO_NUM_CAMS * (DINO_RES // 14) ** 2
+DINO_EMBED = 384
+
+
+class DinoPolicy:
+    """Inference wrapper for the DINOv2-v2 policy (train_dino_v2): frozen DINOv2 backbone
+    + attention-pool head + actor, all vendored in nets_dino so deploy is sim-free.
+
+    Same interface as SquintPolicy -- act(rgb6, state14): HxWx6 uint8 (wrist|overhead,
+    rectified) + 14-dim sim-unit proprio -> 7-dim normalized action in [-1, 1]. Each
+    camera is resized to 112, run through the frozen ViT to patch tokens, attention-pooled,
+    and fed to the actor. The frozen backbone downloads from torch.hub on first use.
+    """
+
+    def __init__(self, checkpoint: str | pathlib.Path, device: str | None = None):
+        import nets_dino
+        self._nd = nets_dino
+        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.backbone = nets_dino.load_dino_backbone(self.device)
+        env_stub = SimpleNamespace(unwrapped=SimpleNamespace(
+            single_action_space=_box(-1.0, 1.0, (N_ACT,))
+        ))
+        self.head = nets_dino.DinoHead(n_tok=DINO_N_TOK, num_cams=DINO_NUM_CAMS,
+                                       embed=DINO_EMBED, device=self.device)
+        self.actor = nets_dino.Actor(env_stub, n_obs=self.head.repr_dim, n_state=N_STATE,
+                                     n_act=N_ACT, device=self.device)
+        ckpt = torch.load(str(checkpoint), map_location=self.device)
+        self.head.load_state_dict(ckpt["encoder"])   # 'encoder' == the DinoHead in training
+        self.actor.load_state_dict(ckpt["actor"])
+        self.head.eval()
+        self.actor.eval()
+        step = ckpt.get("global_step", "?")
+        print(f"[policy] loaded DINOv2-v2 checkpoint {checkpoint} (step {step}) on {self.device}")
+
+    @torch.no_grad()
+    def act(self, rgb6: np.ndarray, state14: np.ndarray) -> np.ndarray:
+        rgb = torch.from_numpy(np.ascontiguousarray(rgb6)).to(self.device)
+        if rgb.dim() == 3:
+            rgb = rgb.unsqueeze(0)  # (1, H, W, 6)
+        tokens = self._nd.image_to_tokens(rgb, self.backbone, DINO_NUM_CAMS, DINO_RES, self.device)
+        feats = self.head(tokens)
+        state = torch.as_tensor(state14, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action = self.actor.get_eval_action(feats, state)
+        return action.squeeze(0).detach().cpu().numpy()

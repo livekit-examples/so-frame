@@ -18,6 +18,14 @@ Per-tick data flow (the sim2real wiring):
 Channel order (wrist 0:3 | overhead 3:6) and sim-unit proprio must match
 training. State is qpos(7) + controller target(7) = 14: qpos is the measured
 joints; the target is this loop's running integrated target.
+
+Debug keys while driving (terminal, and the --viz window):
+    r   reset: ramp the rig to the rest pose (slider at mid-rail), wait for the
+        measured pose to settle, then hold PAUSED so the scene can be staged --
+        press p to start the policy (matches training: episodes begin at rest
+        with the scene already set)
+    p   pause / resume (hold pose, no inference while paused)
+    q   quit
 """
 from __future__ import annotations
 
@@ -45,7 +53,7 @@ from common import env, load_env, mint_token, pace  # noqa: E402
 _HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import bridge  # noqa: E402
-from agent import SquintPolicy  # noqa: E402
+from agent import SquintPolicy, DinoPolicy  # noqa: E402
 from camera_mapping import apply_mapping, load_mapping  # noqa: E402
 
 CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "portal.yaml"
@@ -109,7 +117,7 @@ def build_state14(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> n
 
 
 async def main(auto_claim: bool = False, max_lag: float | None = None,
-               binary_gripper: bool = True, viz: bool = False) -> None:
+               binary_gripper: bool = True, viz: bool = False, arch: str = "squint") -> None:
     load_env(_HERE)
     gripper_idx = bridge.JOINT_KEYS.index("gripper.pos")
     url = env("LIVEKIT_URL", required=True)
@@ -119,12 +127,24 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
                      str(_HERE.parents[1] / "rl" / "maniskill" / "runs"
                          / "v31_clean_recipe" / "ckpt_best.pt"))
 
-    policy = SquintPolicy(checkpoint, device=env("POLICY_DEVICE", "") or None)
+    PolicyCls = DinoPolicy if arch == "dino" else SquintPolicy
+    policy = PolicyCls(checkpoint, device=env("POLICY_DEVICE", "") or None)
     mappings = load_mappings()
 
     op = Operator(OperatorConfig.from_yaml_file(CONFIG_PATH, room))
     latest_obs: Observation | None = None
     control = {"enabled": False}
+    # Debug keys (terminal or --viz window): r = ramp to the rest pose (slider at
+    # mid-rail), wait for the measured pose to settle, then hold paused until p;
+    # p = pause/resume (hold pose, no inference); q/esc = quit.
+    mode = {"state": "run"}  # run | paused | resetting
+    reset_wait = {"ticks": 0, "deadline": 0.0}
+    # Settle tolerance in DELTA_LIMIT units: 1.5 * 0.05 rad ~ 4.3 deg per arm
+    # joint, close to training's initial qpos noise (0.02 rad std) -- episodes
+    # never start far from rest, so neither should a deploy reset.
+    SETTLE_TOL = 1.5
+    SETTLE_SECS = 1.0   # measured pose must hold within tolerance this long
+    SETTLE_TIMEOUT = 5.0  # give up waiting and pause anyway (e.g. gripper blocked)
     # Running integrated target (sim units) the delta controller tracks. Seeded
     # from the first measured qpos on claim so the first action is a no-jump delta.
     sim_target: dict[str, float] | None = None
@@ -144,6 +164,27 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
     op.on_observation(on_observation)
     op.on_active_operator_changed(on_active_operator_changed)
 
+    def apply_key(ch: str) -> bool:
+        """Handle one debug key; returns False to quit the run loop."""
+        nonlocal sim_target
+        ch = ch.lower()
+        if ch == "q":  # NOT esc: arrow keys in cbreak stdin start with \x1b
+            return False
+        if ch == "p":
+            if mode["state"] == "paused":
+                mode["state"] = "run"
+                sim_target = None  # reseed from the current pose so resume is a no-jump
+                print(f"[policy-{NAME}] resumed")
+            else:
+                mode["state"] = "paused"
+                print(f"[policy-{NAME}] PAUSED -- holding pose (p to resume, r to reset)")
+        elif ch == "r":
+            mode["state"] = "resetting"
+            reset_wait["ticks"], reset_wait["deadline"] = 0, 0.0
+            print(f"[policy-{NAME}] RESET -- ramping to the rest pose (slider mid), "
+                  "will hold PAUSED once settled (stage the scene, then p to run)")
+        return True
+
     attrs = {
         "vla_demo.kind": "policy",
         "vla_demo.title": TITLE,
@@ -155,6 +196,7 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
     async def run_policy(data: RpcInvocationData) -> str:
         nonlocal sim_target
         sim_target = None
+        mode["state"] = "run"
         control["enabled"] = True
         me = op.local_identity()
         await op.set_active_operator(me)
@@ -183,6 +225,23 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
         print(f"[policy-{NAME}] connected @ {fps} fps; idle until run_policy_{NAME} "
               "(or pass --claim to drive immediately)")
 
+    # Raw single-key capture from the terminal (works with or without --viz; the
+    # viz window feeds the same handler). cbreak = no Enter needed; restored on exit.
+    keys: asyncio.Queue[str] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    stdin_fd, old_termios = None, None
+    if sys.stdin.isatty():
+        import termios
+        import tty
+        stdin_fd = sys.stdin.fileno()
+        old_termios = termios.tcgetattr(stdin_fd)
+        tty.setcbreak(stdin_fd)
+        loop.add_reader(
+            stdin_fd,
+            lambda: keys.put_nowait(os.read(stdin_fd, 1).decode(errors="ignore")),
+        )
+        print(f"[policy-{NAME}] keys: r=reset-to-rest+restart  p=pause/resume  q=quit")
+
     empty = 0
     if viz:
         import cv2
@@ -190,6 +249,12 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
         print(f"[policy-{NAME}] --viz: showing the two rectified camera views (press q to close)")
     try:
         async for _ in pace(fps):
+            quit_requested = False
+            while not keys.empty():
+                if not apply_key(keys.get_nowait()):
+                    quit_requested = True
+            if quit_requested:
+                break
             if not control["enabled"]:
                 continue
             obs = latest_obs
@@ -202,8 +267,6 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
             empty = 0
 
             sim_qpos = bridge.real_to_sim(dict(obs.state))
-            if sim_target is None:  # seed target from the current pose on (re)claim
-                sim_target = dict(sim_qpos)
 
             rgb6 = build_rgb6(obs, mappings)
             if rgb6 is None:
@@ -226,8 +289,59 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
                     np.hstack([_tile(wrist_sq, "wrist 32"), _tile(overhead_sq, "overhead 32")]),
                 ])
                 cv2.imshow(f"policy-{NAME} view", grid)
-                if (cv2.waitKey(1) & 0xFF) in (ord("q"), 27):
+                k = cv2.waitKey(1) & 0xFF
+                if k != 255 and not apply_key("q" if k == 27 else chr(k)):
                     break
+
+            # Seed the target from the current pose on (re)claim / resume. Must sit
+            # AFTER the viz-window key handling: a resume key there clears
+            # sim_target mid-tick, and reseeding earlier would leave it None when
+            # build_state14 runs.
+            if sim_target is None:
+                sim_target = dict(sim_qpos)
+
+            if mode["state"] == "paused":
+                continue  # no inference, no action sent; the servos hold the last target
+
+            if mode["state"] == "resetting":
+                # Ramp the target to the rest pose at the trained per-tick speed.
+                for k in bridge.JOINT_KEYS:
+                    step = bridge.DELTA_LIMIT[k]
+                    d = bridge.SIM_REST[k] - sim_target[k]
+                    sim_target[k] = (bridge.SIM_REST[k] if abs(d) <= step
+                                     else sim_target[k] + (step if d > 0 else -step))
+                sim_target = bridge.clamp_sim(sim_target)
+                op.send_action(
+                    bridge.sim_to_real(sim_target),
+                    timestamp_us=int(time.time() * 1_000_000),
+                    in_reply_to_ts_us=obs.timestamp_us,
+                )
+                ramped = all(abs(bridge.SIM_REST[k] - sim_target[k]) < 1e-9
+                             for k in bridge.JOINT_KEYS)
+                if ramped:
+                    if reset_wait["deadline"] == 0.0:
+                        reset_wait["deadline"] = time.perf_counter() + SETTLE_TIMEOUT
+                    settled = all(
+                        abs(sim_qpos[k] - bridge.SIM_REST[k]) < SETTLE_TOL * bridge.DELTA_LIMIT[k]
+                        for k in bridge.JOINT_KEYS if k in sim_qpos)
+                    reset_wait["ticks"] = reset_wait["ticks"] + 1 if settled else 0
+                    if reset_wait["ticks"] >= int(SETTLE_SECS * fps):
+                        why = "settled"
+                    elif time.perf_counter() > reset_wait["deadline"]:
+                        why = "settle timeout (a joint never reached rest)"
+                    else:
+                        continue
+                    sim_target = None  # reseed from the settled pose on the next tick
+                    mode["state"] = "paused"
+                    # Per-joint residual from rest (sim units): how far off the
+                    # pose the policy will actually start from is.
+                    resid = ", ".join(
+                        f"{k.split('.')[0]}={sim_qpos[k] - bridge.SIM_REST[k]:+.3f}"
+                        for k in bridge.JOINT_KEYS if k in sim_qpos)
+                    print(f"[policy-{NAME}] reset {why} -- residual from rest: {resid}")
+                    print(f"[policy-{NAME}] holding PAUSED -- stage the scene, "
+                          "then p to start the policy")
+                continue
 
             state14 = build_state14(sim_qpos, sim_target)
             try:
@@ -269,6 +383,10 @@ async def main(auto_claim: bool = False, max_lag: float | None = None,
     except KeyboardInterrupt:
         print(f"\n[policy-{NAME}] stopping ...")
     finally:
+        if stdin_fd is not None and old_termios is not None:
+            import termios
+            loop.remove_reader(stdin_fd)
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_termios)
         if viz:
             import cv2
             cv2.destroyAllWindows()
@@ -298,11 +416,15 @@ def cli() -> None:
     parser.add_argument("--viz", action="store_true",
                         help="show the two rectified camera views (what the policy sees) in an "
                              "OpenCV window while driving; press q to close")
+    parser.add_argument("--arch", choices=["squint", "dino"], default="squint",
+                        help="policy architecture: 'squint' (CNN, 32px squint; v31/v35/v38) or "
+                             "'dino' (frozen DINOv2 + attention-pool head; v39/train_dino_v2). "
+                             "Must match the checkpoint.")
     args = parser.parse_args()
     if args.checkpoint:
         os.environ["SQUINT_CHECKPOINT"] = args.checkpoint
     asyncio.run(main(auto_claim=args.claim, max_lag=args.max_lag,
-                     binary_gripper=args.binary_gripper, viz=args.viz))
+                     binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 
 if __name__ == "__main__":
