@@ -25,50 +25,34 @@ from ..robot.so101_on_frame import SO101OnFrame
 
 WORK_SURFACE_Z = 0.0
 
-# Real-rig hazard: pressing down on the lightbox lifts the gantry off its rail and jams the
-# slider. In sim the rail is a rigid prismatic joint, so we penalize arm/panel contact force
-# instead. Panel links (floor + diffusing side panels); self-collision against them is on,
-# so the gripper is blocked at the surface rather than phasing through it.
-_PANEL_LINKS = ("part_1", "part_1_1", "part_1_2", "part_1_3")
-# Arm links low/near enough to reach and press the panels.
-_ARM_CONTACT_LINKS = ("wrist_link", "gripper_link", "moving_jaw_so101_v1_link")
-# Penalty ignores force under THRESH and ramps to full over SCALE, so it taxes sustained
-# pressing without punishing the brief low-force brush of a clean top-down grasp.
-SURFACE_FORCE_THRESH = 5.0
-SURFACE_FORCE_SCALE = 15.0
-# Set to outweigh the max reach reward (2) so pressing low is never a net-positive shortcut.
-SURFACE_PENALTY = 2.0
-
-# Reward shaping: a MONOTONIC STAGE LADDER (see compute_dense_reward). Each stage is a fixed
-# base plus bounded shaping, spaced so a lower stage's max stays below the next stage's base;
-# progress is monotone and regressions fall to a lower rung automatically (no anti-regression
-# penalty needed). Ladder: reach [0,2] < grasped [4,5] < holding [6,8] < released [9,12] < success 20.
-REWARD_SUCCESS = 20.0     # terminal: bar settled in bin, arm + bar static, gripper clear
-RUNG_RELEASED = 9.0       # bar over the bin, released -- must dominate holding
-RUNG_HOLDING = 6.0        # bar over the bin, still gripped (leave it by opening the jaw)
-RUNG_GRASPED = 4.0        # bar grasped, carried toward the drop point (not yet over the bin)
+# Reward: a MONOTONIC STAGE LADDER (see compute_dense_reward), deliberately kept small.
+#
+# Each stage is a fixed rung plus at most 1.0 of bounded shaping, and each rung sits above the
+# previous stage's maximum. That spacing is what does the work: progress is strictly monotone,
+# a regression drops to a lower rung on its own, and there is nothing to trade off against.
+# No penalty terms -- motion limits are enforced structurally instead (the delta action space
+# caps per-step speed at the measured real servo rate, and the 3 N.m force limits cap torque
+# at the STS3215 stall value), so there is no smoothness or effort term left to tune.
+#
+#   reach [0,1] < grasped [2,3] < holding [4,5] < released 6 < success 10
+#
+REWARD_SUCCESS = 10.0     # terminal: bar settled in bin, arm + bar static, gripper clear
+RUNG_RELEASED = 6.0       # bar over the bin, released -- must dominate holding
+RUNG_HOLDING = 4.0        # bar over the bin, still gripped (leave it by opening the jaw)
+RUNG_GRASPED = 2.0        # bar grasped, carried toward the drop point (not yet over the bin)
 #                           reach stage base is 0 (shaping only)
-SHAPE_REACH_XY = 1.0      # reach: horizontal alignment over the bar
-SHAPE_REACH_Z = 1.0       # reach: descent, only once aligned in xy (top-down)
-SHAPE_CARRY = 1.0         # grasped: progress carrying the bar toward the drop point
-# holding: how far opening the jaw over the bin pays BEFORE contact breaks. This is what makes
-# releasing a gradient instead of a leap of faith -- it was a flat plateau, and the policy just
-# sat on it holding the bar. Kept under (RUNG_RELEASED - RUNG_HOLDING) so an actual release
-# still strictly dominates the most-open still-holding pose.
-SHAPE_HOLD_OPEN = 2.0
-SHAPE_RELEASE_SETTLE = 1.0  # released: bar settling to the drop height
-SHAPE_RELEASE_OPEN = 1.0    # released: gripper opened
-SHAPE_RELEASE_STILL = 1.0   # released: arm held still so the bar settles cleanly
-SHARP_REACH_XY = 5.0      # tanh sharpness (~1/length-scale, m^-1) for each shaping term
-SHARP_REACH_Z = 10.0
-SHARP_CARRY = 5.0
-SHARP_RELEASE_SETTLE = 10.0
-SHARP_STILL = 10.0        # velocity sharpness (s/rad) for the "arm still" term
+
+# The one shaping term worth keeping past the rungs: how far opening the jaw over the bin pays
+# BEFORE contact breaks. Without it the holding rung is a flat plateau and the policy sits on
+# it holding the bar, because releasing is a blind leap to the next rung. Stays at 1.0 so the
+# most-open still-holding pose (5.0) is still strictly worse than an actual release (6.0).
+SHAPE_HOLD_OPEN = 1.0
+
+SHARP = 5.0               # single tanh sharpness (~1/length-scale, m^-1) for every distance term
 REACH_XY_ALIGNED = 0.03   # tcp within this xy of the bar is "aligned" and may descend
 # Drop point height above the bin RIM (not floor): the jaw can't open at depth in the 84 mm
 # interior. Carry here, open, let gravity finish; success still requires the bar settled IN the bin.
 GOAL_CLEARANCE = 0.05
-PENALTY_BIN_TOUCH = 0.5   # mild: brushing the bin during placement is expected, bashing isn't
 
 # Item and bin spawn in separate regions along the rail, far enough apart that reaching both
 # requires sliding. The small bar gets the far region (dead-center in the overhead frame; it
@@ -127,10 +111,6 @@ class PickPlaceBin(DualCameraEnv):
         item_spawn_center=ITEM_SPAWN_CENTER,
         bin_spawn_center=BIN_SPAWN_CENTER,
         spawn_half_size=SPAWN_HALF_SIZE,
-        action_rate_penalty=0.0,
-        surface_penalty_weight=SURFACE_PENALTY,
-        surface_penalty_gated=False,
-        reach_align_thresh=REACH_XY_ALIGNED,
         **kwargs,
     ):
         self.domain_randomization_config = PickPlaceRandomizationConfig.resolve(
@@ -140,17 +120,6 @@ class PickPlaceBin(DualCameraEnv):
         self.item_spawn_center = item_spawn_center
         self.bin_spawn_center = bin_spawn_center
         self.spawn_half_size = spawn_half_size
-        # Action-rate (smoothness) penalty -k*||a_t - a_{t-1}||^2. Off by default; penalizes
-        # jerk, not movement, so the long slider traverses stay untaxed.
-        self.action_rate_penalty = action_rate_penalty
-        # Surface-press penalty knobs. weight=0 disables; when `gated`, it only fires while the
-        # gripper is NOT over the bar, so a legitimate top-down grasp is never taxed.
-        self.surface_penalty_weight = surface_penalty_weight
-        self.surface_penalty_gated = surface_penalty_gated
-        # xy distance under which the top-down reward starts paying the descend (z) term.
-        # Default 3 cm suits fine CNN localization; loosen (~8 cm) for coarse frozen DINOv2.
-        self.reach_align_thresh = reach_align_thresh
-        self._prev_action = None
 
         super().__init__(
             *args,
@@ -333,8 +302,6 @@ class PickPlaceBin(DualCameraEnv):
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         super()._initialize_episode(env_idx, options)
-        if self._prev_action is not None:
-            self._prev_action[env_idx] = 0.0
         with torch.device(self.device):
             b = len(env_idx)
 
@@ -470,38 +437,27 @@ class PickPlaceBin(DualCameraEnv):
         gripper_min, gripper_max = self.agent.robot.get_qlimits()[0, idx, :]
         return (self.agent.robot.get_qpos()[:, idx] - gripper_min) / (gripper_max - gripper_min)
 
-    def _panel_contact_force(self):
-        """Peak contact-force magnitude (N) between the arm/gripper and any lightbox panel, per env."""
-        if getattr(self, "_panel_link_objs", None) is None:
-            lm = self.agent.robot.links_map
-            self._panel_link_objs = [lm[n] for n in _PANEL_LINKS if n in lm]
-            self._arm_link_objs = [lm[n] for n in _ARM_CONTACT_LINKS if n in lm]
-        force = torch.zeros(self.num_envs, device=self.device)
-        for arm in self._arm_link_objs:
-            for panel in self._panel_link_objs:
-                f = self.scene.get_pairwise_contact_forces(arm, panel)
-                force = torch.maximum(force, torch.linalg.norm(f, axis=1))
-        return force
-
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
-        # Monotonic stage ladder (see the RUNG_*/SHAPE_* constants); stages mutually exclusive.
+        """Monotonic stage ladder, no penalties. Stages are mutually exclusive, and each rung
+        sits above the previous stage's maximum, so progress is monotone and a regression falls
+        to a lower rung without needing an explicit anti-regression term."""
         tcp = self.agent.tcp_pos
         item_p = self.item.pose.p
 
-        # Drop point: above the bin rim (GOAL_CLEARANCE). Both carry and release shape to it.
+        # Drop point: above the bin rim (GOAL_CLEARANCE). The carry term shapes toward it.
         goal_xyz = self.bin.pose.p.clone()
         goal_xyz[..., 2] = (
             WORK_SURFACE_Z + self.bin_dimensions[:, 2] * 2 + self.item_half_heights + GOAL_CLEARANCE
         )
 
-        # Stage 0 (base): top-down reach. xy alignment first; the z term only pays once aligned,
+        # Stage 0 [0, 1]: top-down reach. xy alignment first; the z term only pays once aligned,
         # so the tool descends from ABOVE rather than scooping from the side (which wrecked grasps).
         reach_d_xy = torch.linalg.norm(tcp[:, :2] - item_p[:, :2], axis=1)
         reach_d_z = torch.abs(tcp[:, 2] - item_p[:, 2])
-        aligned_xy = reach_d_xy < self.reach_align_thresh
-        reward = SHAPE_REACH_XY * (1 - torch.tanh(SHARP_REACH_XY * reach_d_xy)) + torch.where(
+        aligned_xy = reach_d_xy < REACH_XY_ALIGNED
+        reward = 0.5 * (1 - torch.tanh(SHARP * reach_d_xy)) + torch.where(
             aligned_xy,
-            SHAPE_REACH_Z * (1 - torch.tanh(SHARP_REACH_Z * reach_d_z)),
+            0.5 * (1 - torch.tanh(SHARP * reach_d_z)),
             torch.zeros_like(reach_d_z),
         )
 
@@ -512,57 +468,24 @@ class PickPlaceBin(DualCameraEnv):
         holding_above = above_bin & holding
         released_above = above_bin & ~holding
 
-        # Stage 1: grasped, carrying toward the drop point (single 3D-distance term; the drop
+        # Stage 1 [2, 3]: grasped, carrying toward the drop point (single 3D distance; the drop
         # point's 5 cm rim clearance already shapes the over-the-top approach).
         item_to_goal = torch.linalg.norm(goal_xyz - item_p, axis=1)
-        carry = RUNG_GRASPED + SHAPE_CARRY * (1 - torch.tanh(SHARP_CARRY * item_to_goal))
+        carry = RUNG_GRASPED + (1 - torch.tanh(SHARP * item_to_goal))
         reward = torch.where(grasped_only, carry, reward)
 
-        # Stage 2: holding over the bin -- rises with how far the jaw is opened, so unclamping is
-        # a continuous climb (6 -> 8) instead of a blind jump to the released rung at 9. Openness
-        # pays HERE and in stage 3 only, never while carrying, so opening early (and dropping the
-        # bar short of the bin) is still worth strictly less than carrying on.
+        # Stage 2 [4, 5]: holding over the bin -- rises with how far the jaw is opened, so
+        # unclamping is a continuous climb instead of a blind jump to the released rung.
+        # Openness pays HERE only, never while carrying, so opening early (and dropping the bar
+        # short of the bin) is still worth strictly less than carrying on.
         openness = self._gripper_qpos_openness()
         reward = torch.where(holding_above, RUNG_HOLDING + SHAPE_HOLD_OPEN * openness, reward)
 
-        # Stage 3: released over the bin -- reward settling to the drop height, gripper open, arm still.
-        settle = 1 - torch.tanh(SHARP_RELEASE_SETTLE * torch.abs(goal_xyz[:, 2] - item_p[:, 2]))
-        arm_idx = [i for i, n in enumerate(self.agent.joint_names) if n != "gripper"]
-        robot_v = torch.linalg.norm(self.agent.robot.get_qvel()[:, arm_idx], axis=1)
-        still = 1 - torch.tanh(SHARP_STILL * robot_v)
-        released = (
-            RUNG_RELEASED
-            + SHAPE_RELEASE_SETTLE * settle
-            + SHAPE_RELEASE_OPEN * openness
-            + SHAPE_RELEASE_STILL * still
-        )
-        reward = torch.where(released_above, released, reward)
+        # Stage 3 [6]: released over the bin. Flat -- success is what pays for a clean settle.
+        reward = torch.where(released_above, torch.full_like(reward, RUNG_RELEASED), reward)
 
-        # Terminal success.
+        # Terminal success (bar settled in the bin, arm + bar static, gripper clear).
         reward = torch.where(info["success"], torch.full_like(reward, REWARD_SUCCESS), reward)
-
-        # Constraint penalties (the ladder handles regressions). Brushing the bin is expected,
-        # so this stays mild: it discourages bashing, not touching.
-        reward = reward - PENALTY_BIN_TOUCH * info["robot_touching_bin"].float()
-
-        # Real-rig safety: tax the arm PRESSING the panels, ramped by force. weight=0 disables;
-        # `gated` restricts it to when the gripper is NOT over the bar (see __init__).
-        if self.surface_penalty_weight > 0:
-            panel_force = self._panel_contact_force()
-            surface_penalty = torch.clamp(
-                (panel_force - SURFACE_FORCE_THRESH) / SURFACE_FORCE_SCALE, 0.0, 1.0
-            )
-            if self.surface_penalty_gated:
-                near_bar = reach_d_xy < 0.08
-                surface_penalty = surface_penalty * (~near_bar).float()
-            reward = reward - self.surface_penalty_weight * surface_penalty
-
-        if self.action_rate_penalty > 0:
-            action = common.to_tensor(action, device=self.device)
-            if self._prev_action is None or self._prev_action.shape != action.shape:
-                self._prev_action = torch.zeros_like(action)
-            reward = reward - self.action_rate_penalty * ((action - self._prev_action) ** 2).sum(-1)
-            self._prev_action = action.clone()
 
         return reward
 
