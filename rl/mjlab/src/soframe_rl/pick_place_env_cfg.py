@@ -10,7 +10,7 @@ bits (entities, action scale, grasp-site name) are filled in by
 from __future__ import annotations
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp.actions import RelativeJointPositionActionCfg
+from .mdp.actions import TargetRelativeJointPositionActionCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
@@ -62,19 +62,22 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     "critic": ObservationGroupCfg({**actor_terms}, enable_corruption=False),
   }
 
-  # -- Actions (TRUE delta joint position; scale set per-robot) ------------
+  # -- Actions (delta from the running TARGET; scale set per-robot) --------
   #
-  # RelativeJointPositionActionCfg gives target = current_joint_pos + action * scale, so `scale`
-  # is a hard per-step motion cap and the real servo's speed is enforced structurally.
+  # target = previous_target + action * scale, clamped to the soft joint limits, so `scale` is a
+  # hard per-step motion cap and the real servo's speed is enforced structurally.
   #
-  # This was JointPositionActionCfg(use_default_offset=True), which is target = action * scale +
-  # default_joint_pos -- an ABSOLUTE target measured from the home pose, not a delta. Nothing
-  # bounded per-step motion: one step could command the full +-scale swing from home, and
-  # consecutive steps could cross the whole 2*scale range instantly. The comment here called it
-  # "delta joint position", which is what it was standing in for but never was. The smoothness
-  # penalties in `rewards` below existed to paper over exactly that, and are gone with it.
+  # Integrating from the previous target (not the measured position) is what the maniskill twin's
+  # pd_joint_target_delta_pos and the deploy loop both do. See mdp/actions.py for why that matters
+  # under load: delta-from-current cannot get ahead of a lagging joint, so the target collapses
+  # onto the measured pose and the arm stalls.
+  #
+  # This was JointPositionActionCfg(use_default_offset=True), i.e. target = action * scale +
+  # default_joint_pos -- an ABSOLUTE target from the home pose. Nothing bounded per-step motion:
+  # one step could command the full +-scale swing from home. The comment called it "delta joint
+  # position", which it never was, and the smoothness penalties existed to paper over that.
   actions: dict[str, ActionTermCfg] = {
-    "joint_pos": RelativeJointPositionActionCfg(
+    "joint_pos": TargetRelativeJointPositionActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
       scale=0.05,  # overridden per-robot from SO101_ACTION_SCALE (measured real speed / Hz).

@@ -23,71 +23,33 @@ The mjlab twin has its own copy of the control/effort numbers in
 import numpy as np
 import sapien
 
+from soframe_policy import rig
+
 # =====================================================================================
-# Control rate
+# Joint contract -- SHARED with deploy, defined in soframe_policy.rig
 # =====================================================================================
-# The sim's control frequency, and therefore the rate the deployed policy is driven at. The
-# deploy loop (sim2real, PORTAL_FPS) must match: a policy trained at one rate and stepped at
-# another sees a different amount of world motion per decision.
-CONTROL_HZ = 10.0
+# Joint order, control rate, measured joint speeds, per-step motion caps, joint limits, force
+# limits and the rest pose all live in ``soframe_policy/rig.py``, because the real robot needs
+# the same numbers and cannot import this package. Re-exported here so this file still reads as
+# the whole picture -- but EDIT THEM THERE, so sim and deploy change together.
+CONTROL_HZ = rig.CONTROL_HZ
 SIM_HZ = 100.0   # physics substeps per second; SIM_HZ / CONTROL_HZ substeps per control step
 
+REAL_JOINT_SPEED = rig.REAL_JOINT_SPEED
+JOINT_DELTA_LIMITS = rig.JOINT_DELTA_LIMITS
+JOINT_LIMITS = rig.JOINT_LIMITS
+REST_QPOS = rig.REST_QPOS
 
-# =====================================================================================
-# Motion limits -- the speed half of the sim2real contract
-# =====================================================================================
-# Measured on the real rig: arm joints 29-34 deg/s (0.5 rad/s is 28.6 deg/s, at the low end of
-# the measured band), rail max ~7 cm/s off the control UI. The gripper is deliberately quicker,
-# since the jaw has to open and close within a single reach.
-#
-# This is what actually enforces real speed. The effort limits below bound TORQUE, not
-# velocity: 3 N.m against the servo's damping reaches terminal velocity around 4.9 rad/s
-# (~280 deg/s), an order of magnitude past the real arm. The real arm is slow because the
-# servo's commanded speed profile limits it, so sim has to impose that rate explicitly.
-REAL_JOINT_SPEED = {          # rad/s for revolute joints, m/s for the rail
-    "dof_slider":    0.07,
-    "shoulder_pan":  0.5,
-    "shoulder_lift": 0.5,
-    "elbow_flex":    0.5,
-    "wrist_flex":    0.5,
-    "wrist_roll":    0.5,
-    "gripper":       2.0,
-}
-
-# Per-step position deltas at full command. Derived, so changing CONTROL_HZ keeps real speed.
-JOINT_DELTA_LIMITS = {name: speed / CONTROL_HZ for name, speed in REAL_JOINT_SPEED.items()}
+STS3215_STALL_TORQUE = rig.STS3215_STALL_TORQUE
+RAIL_FORCE_LIMIT = rig.RAIL_FORCE_LIMIT
+JOINT_FORCE_LIMITS = rig.JOINT_FORCE_LIMITS
 
 # Multiplier on the arm/rail deltas (NOT the gripper), for arm-speed ablations only.
 # 1.0 = the measured real speed. Overridden at runtime by --arm_speed_scale.
 ARM_SPEED_SCALE = 1.0
 
-
-# =====================================================================================
-# Effort limits -- the torque half of the sim2real contract
-# =====================================================================================
-# The six arm joints are Feetech STS3215 servos, which stall around 3 N.m (30 kg*cm at 12 V).
-# Capping here stops the policy learning pushes the real arm cannot deliver, which showed up on
-# hardware as the arm stalling mid-lift. Matches simulation/mjcf/sts3215.xml's
-# forcerange="-3.0 3.0" and the URDF's effort="3".
-#
-# NOTE: domain randomization re-writes drive properties per episode and must pass these back
-# through; see BaseRandomEnv._force_limit. Passing a constant there silently overrode this.
-STS3215_STALL_TORQUE = 3.0    # N*m
-
-# The rail is a separate belt drive, not an STS3215; linear force in N, functional not measured.
-RAIL_FORCE_LIMIT = 100.0      # N
-
-JOINT_FORCE_LIMITS = {
-    "dof_slider":    RAIL_FORCE_LIMIT,
-    "shoulder_pan":  STS3215_STALL_TORQUE,
-    "shoulder_lift": STS3215_STALL_TORQUE,
-    "elbow_flex":    STS3215_STALL_TORQUE,
-    "wrist_flex":    STS3215_STALL_TORQUE,
-    "wrist_roll":    STS3215_STALL_TORQUE,
-    "gripper":       STS3215_STALL_TORQUE,
-}
-
-# PD gains for the position controller (nominal; randomized per episode around these).
+# PD gains for the position controller (nominal; randomized per episode around these). Sim-only:
+# the real servos run their own internal loop.
 JOINT_STIFFNESS = 1e3
 JOINT_DAMPING = 1e2
 
@@ -98,12 +60,7 @@ JOINT_DAMPING = 1e2
 # Grasp point between the finger pads, in gripper_link's frame. Matches the `grasp_site` MJCF
 # site added for rl/mjlab (simulation/mjcf/so101_on_frame.xml).
 GRASP_SITE_OFFSET = sapien.Pose(p=[0.012, 0.0, -0.07])
-
-# Rest pose (the "rest" keyframe). The deploy-side reset ramps to this same pose.
-REST_QPOS = {
-    "dof_slider": 0.0, "shoulder_pan": 0.0, "shoulder_lift": -0.5,
-    "elbow_flex": 0.8, "wrist_flex": 0.6, "wrist_roll": 0.0, "gripper": 1.2,
-}
+# (REST_QPOS is part of the shared joint contract above -- soframe_policy.rig.)
 
 
 # =====================================================================================

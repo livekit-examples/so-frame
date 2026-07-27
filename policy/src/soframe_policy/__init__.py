@@ -11,10 +11,10 @@ and training loop stay on the training side, since they never run on the robot.
 from .actor import Actor, Projection, weight_init
 from .encoders import ENCODERS, DinoPatchEncoder, SquintEncoder
 from .proprio import ProprioSpec
-from . import checkpoint, proprio
+from . import checkpoint, proprio, rig
 
 __all__ = [
     "Actor", "Projection", "weight_init",
     "ENCODERS", "SquintEncoder", "DinoPatchEncoder",
-    "ProprioSpec", "checkpoint", "proprio",
+    "ProprioSpec", "checkpoint", "proprio", "rig",
 ]
