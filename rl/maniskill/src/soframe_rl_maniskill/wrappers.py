@@ -7,10 +7,10 @@ These run once per env step, outside the gradient update, which is the whole poi
 expensive parts (the frozen ViT especially) are paid once per collected transition rather than
 once per minibatch, and what lands in the replay buffer is already encoder-ready.
 
-Each wrapper's transform has a deploy counterpart in ``soframe_nets``:
+Each wrapper's transform has a deploy counterpart in ``soframe_policy``:
 
     DownsampleObsWrapper  <->  SquintEncoder.preprocess     (area resize)
-    DinoTokenWrapper      <->  DinoPatchEncoder.preprocess  (both call soframe_nets tokenize)
+    DinoTokenWrapper      <->  DinoPatchEncoder.preprocess  (both call soframe_policy tokenize)
 
 The tokeniser is imported rather than reimplemented, so sim and real cannot drift on resize
 mode, normalisation or camera ordering. The jitter/augmentation wrappers have no deploy
@@ -23,7 +23,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 
-from soframe_nets.encoders import dino_patch
+from soframe_policy.encoders import dino_patch
 
 
 class DownsampleObsWrapper(gym.ObservationWrapper):
@@ -158,7 +158,7 @@ class DinoTokenWrapper(gym.ObservationWrapper):
 
     Input (B, H, W, 3*num_cams) uint8; output (B, n_tok, 384) bf16. Apply LAST in the pipeline
     (after any jitter/augmentation, which need images). Tokenisation itself is
-    ``soframe_nets.encoders.dino_patch.tokenize`` -- the same call the deployed policy makes.
+    ``soframe_policy.encoders.dino_patch.tokenize`` -- the same call the deployed policy makes.
     """
 
     def __init__(self, env, res, device=None):

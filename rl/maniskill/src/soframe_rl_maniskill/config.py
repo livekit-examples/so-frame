@@ -13,7 +13,7 @@ What lives elsewhere, and why:
 - **Domain randomization** -> ``RandomizationConfig`` / ``PickPlaceRandomizationConfig`` in
   ``envs/``. Already dataclasses, already per-instance, and randomization *ranges* are
   conceptually different from the fixed physical constants here.
-- **Network architecture** -> ``nets/`` (the shared ``soframe_nets`` package). Changing those
+- **Network architecture** -> ``policy/`` (the shared ``soframe_policy`` package). Changing those
   invalidates existing checkpoints, so they are pinned by tests rather than exposed as knobs.
 
 The mjlab twin has its own copy of the control/effort numbers in

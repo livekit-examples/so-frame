@@ -23,7 +23,7 @@ from mani_skill.utils.wrappers.flatten import (
 )
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
-from soframe_nets import ProprioSpec
+from soframe_policy import ProprioSpec
 
 from .. import wrappers
 

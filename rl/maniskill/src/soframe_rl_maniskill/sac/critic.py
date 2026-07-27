@@ -5,7 +5,7 @@ Vendored unchanged from Squint (https://github.com/aalmuzairee/squint), which us
 ``num_q`` separate ones.
 
 Training-side only, deliberately. The critic never runs on the robot, so it stays out of the
-shared ``soframe_nets`` package -- what deploy needs is only the encoder and actor.
+shared ``soframe_policy`` package -- what deploy needs is only the encoder and actor.
 """
 
 import torch
@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tensordict import from_modules
 
-from soframe_nets.actor import Projection, weight_init
+from soframe_policy.actor import Projection, weight_init
 
 
 class Critic(nn.Module):

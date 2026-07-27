@@ -12,7 +12,7 @@ The golden signatures below are the state_dict key/shape sets of checkpoints alr
 time). Changing an architecture will fail these -- which is the point: existing checkpoints
 would stop loading, so it should be a deliberate edit with a format bump, not a silent one.
 
-    uv run --project nets pytest nets/tests -q
+    uv run --project policy pytest policy/tests -q
 """
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ import numpy as np
 import pytest
 import torch
 
-from soframe_nets import Actor, DinoPatchEncoder, ProprioSpec, SquintEncoder, checkpoint
-from soframe_nets.proprio import QPOS, TARGET_QPOS
+from soframe_policy import Actor, DinoPatchEncoder, ProprioSpec, SquintEncoder, checkpoint
+from soframe_policy.proprio import QPOS, TARGET_QPOS
 
 NUM_CAMS, N_ACT = 2, 7
 

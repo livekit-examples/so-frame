@@ -3,7 +3,7 @@
 Vendored from Squint (https://github.com/aalmuzairee/squint) -- autotuned entropy, distributional
 C51 critic ensemble, torch.compile + CUDA graphs, high update-to-data ratio. The algorithm is
 untouched; what changed is that it is written once here instead of copy-pasted per architecture,
-and the encoder/actor come from ``soframe_nets`` so the deployed policy is the trained one.
+and the encoder/actor come from ``soframe_policy`` so the deployed policy is the trained one.
 
 Local additions kept from the old scripts: warm-start (--checkpoint) with optional --reset_alpha,
 best-checkpoint tracking, and an optional encoder LR group + grad clipping (which the transformer
@@ -11,7 +11,7 @@ head needs and the CNN does not).
 
 Removed with the features they served: the asymmetric privileged critic (the actor and critic now
 see the same proprio) and the per-architecture DeployAgent class, replaced by the recorded
-checkpoint format in soframe_nets.checkpoint.
+checkpoint format in soframe_policy.checkpoint.
 """
 
 import os
@@ -29,9 +29,9 @@ from tensordict import TensorDict, from_module
 from tensordict.nn import CudaGraphModule
 from torchrl.data import LazyTensorStorage, ReplayBuffer
 
-from soframe_nets import Actor
-from soframe_nets import checkpoint as ckpt_io
-from soframe_nets.encoders import ENCODERS
+from soframe_policy import Actor
+from soframe_policy import checkpoint as ckpt_io
+from soframe_policy.encoders import ENCODERS
 
 from .build import make_envs
 from .critic import Critic

@@ -11,7 +11,7 @@ Flags dropped along with the features they configured: --privileged_critic (asym
 from dataclasses import dataclass
 from typing import Optional
 
-from soframe_nets.encoders import ENCODERS
+from soframe_policy.encoders import ENCODERS
 
 # Per-encoder defaults for the two knobs that genuinely differ. `res` means the squinted image
 # size for the CNN and the per-camera DINOv2 input resolution for the patch head; `buffer_size`

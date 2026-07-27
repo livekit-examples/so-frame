@@ -529,7 +529,7 @@ wheels = [
 ]
 
 [[package]]
-name = "soframe-nets"
+name = "soframe-policy"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

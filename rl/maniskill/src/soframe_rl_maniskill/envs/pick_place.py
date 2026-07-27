@@ -382,7 +382,7 @@ class PickPlaceBin(DualCameraEnv):
         This is the deploy contract -- 14 values the real rig can always produce, in this
         order. Anything added here changes what every deployed checkpoint expects, so keep it
         to quantities the robot actually measures or commands. (A previous version inserted
-        action-delay fields here, which silently broke deploy; see nets/README.md.)
+        action-delay fields here, which silently broke deploy; see policy/README.md.)
         """
         qpos = self.agent.robot.get_qpos()
         if self.domain_randomization and self.domain_randomization_config.robot_qpos_noise_std > 0:

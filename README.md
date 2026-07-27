@@ -169,8 +169,8 @@ manager, and config details.
 
 <img src="assets/rl-maniskill.gif" alt="Vision-based RL rollouts (wrist + overhead cameras)" width="880">
 
-*Chained rollouts of the shipped `checkpoints/model_best.pt` (wrist camera left, overhead
-camera right), rendered in the flat shading it was trained on.*
+*Chained rollouts (wrist camera left, overhead camera right), rendered in the flat shading
+they were trained on.*
 
 Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
 RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
@@ -197,8 +197,13 @@ It's a [uv](https://docs.astral.sh/uv/) project. From `rl/maniskill/`:
 ```bash
 uv sync
 uv run python examples/visualize_sim.py
-uv run python train_squint.py --env_id=SOFramePickPlaceBin-v1
+uv run python train.py                      # squint CNN
+uv run python train.py --encoder dino_patch # frozen DINOv2 + patch head
 ```
+
+Task, robot and reward constants live in `rl/maniskill/src/soframe_rl_maniskill/config.py`.
+The encoder, actor and checkpoint format are shared with deploy in
+**[policy/](policy/README.md)**.
 
 Needs a **Linux + NVIDIA GPU** machine (ManiSkill3/SAPIEN + CUDA; macOS can read/edit code but
 not train). See **[rl/maniskill/README.md](rl/maniskill/README.md)** for the task,

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Vision-based RL (pick a cube, place it in a bin) for the SO-101-on-frame robot, built on ManiSkill3, implementing Squint (arxiv.org/abs/2602.21203)."
 requires-python = ">=3.10,<3.13"
 dependencies = [
-  "soframe-nets",
+  "soframe-policy",
   "mani_skill_nightly",
   "gymnasium",
   "torch>=2.6.0",
@@ -31,9 +31,9 @@ dependencies = [
 
 # The encoder/actor definitions and the checkpoint format are shared with the deploy tree
 # (sim2real), so both take the same package as a path dependency. Anything a checkpoint
-# contains is defined once, in nets/, rather than hand-copied per tree.
+# contains is defined once, in policy/, rather than hand-copied per tree.
 [tool.uv.sources]
-soframe-nets = { path = "../../nets", editable = true }
+soframe-policy = { path = "../../policy", editable = true }
 
 [tool.uv.build-backend]
 module-name = "soframe_rl_maniskill"

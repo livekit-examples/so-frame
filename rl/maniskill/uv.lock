@@ -1924,9 +1924,9 @@ wheels = [
 ]
 
 [[package]]
-name = "soframe-nets"
+name = "soframe-policy"
 version = "0.1.0"
-source = { editable = "../../nets" }
+source = { editable = "../../policy" }
 dependencies = [
     { name = "numpy" },
     { name = "torch" },
@@ -1951,7 +1951,7 @@ dependencies = [
     { name = "mani-skill-nightly" },
     { name = "numpy" },
     { name = "opencv-python" },
-    { name = "soframe-nets" },
+    { name = "soframe-policy" },
     { name = "tensordict" },
     { name = "torch" },
     { name = "torchrl" },
@@ -1969,7 +1969,7 @@ requires-dist = [
     { name = "mani-skill-nightly" },
     { name = "numpy" },
     { name = "opencv-python", specifier = "==4.12.0.88" },
-    { name = "soframe-nets", editable = "../../nets" },
+    { name = "soframe-policy", editable = "../../policy" },
     { name = "tensordict", specifier = "==0.7.2" },
     { name = "torch", specifier = ">=2.6.0" },
     { name = "torchrl", specifier = "==0.7.2" },
