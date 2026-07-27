@@ -185,18 +185,36 @@ class SO101OnFrame(BaseAgent):
     def tcp_pose(self):
         return Pose.create_from_pq(self.tcp_pos, self.finger1_link.pose.q)
 
-    def is_touching(self, object: Actor):
-        """Check if either gripper jaw is touching `object`."""
-        l_contact_forces = self.scene.get_pairwise_contact_forces(self.finger1_link, object)
-        r_contact_forces = self.scene.get_pairwise_contact_forces(self.finger2_link, object)
+    def jaw_contact_forces(self, object: Actor):
+        """Per-jaw contact force vectors against `object`, as (fixed_jaw, moving_jaw).
+
+        The two pairwise queries are the expensive part of every contact test below, so callers
+        that need more than one flag for the same object should fetch this once and pass it in
+        rather than calling `is_touching` and `is_grasping` back to back (which issued the same
+        two queries twice)."""
+        return (
+            self.scene.get_pairwise_contact_forces(self.finger1_link, object),
+            self.scene.get_pairwise_contact_forces(self.finger2_link, object),
+        )
+
+    def is_touching(self, object: Actor, forces=None):
+        """Check if either gripper jaw is touching `object`.
+
+        `forces` is an already-fetched `jaw_contact_forces(object)` pair; omit it to fetch."""
+        if forces is None:
+            forces = self.jaw_contact_forces(object)
+        l_contact_forces, r_contact_forces = forces
         lforce = torch.linalg.norm(l_contact_forces, axis=1)
         rforce = torch.linalg.norm(r_contact_forces, axis=1)
         return torch.logical_or(lforce >= 1e-2, rforce >= 1e-2)
 
-    def is_grasping(self, object: Actor, min_force=0.5, max_angle=110):
-        """Check if both gripper jaws are pressing into `object` from opposing sides."""
-        l_contact_forces = self.scene.get_pairwise_contact_forces(self.finger1_link, object)
-        r_contact_forces = self.scene.get_pairwise_contact_forces(self.finger2_link, object)
+    def is_grasping(self, object: Actor, min_force=0.5, max_angle=110, forces=None):
+        """Check if both gripper jaws are pressing into `object` from opposing sides.
+
+        `forces` is an already-fetched `jaw_contact_forces(object)` pair; omit it to fetch."""
+        if forces is None:
+            forces = self.jaw_contact_forces(object)
+        l_contact_forces, r_contact_forces = forces
         lforce = torch.linalg.norm(l_contact_forces, axis=1)
         rforce = torch.linalg.norm(r_contact_forces, axis=1)
 
