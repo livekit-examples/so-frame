@@ -199,6 +199,24 @@ class BaseRandomEnv(BaseEnv):
         builder.initial_pose = sapien.Pose()
         self.overhead_camera_mount = builder.build_kinematic("overhead_camera_mount")
 
+    def _force_limit(self, joint, idx: int) -> float:
+        """The joint's configured drive force limit, snapshotted on first use.
+
+        ``set_drive_properties`` takes stiffness, damping AND force limit together, so the
+        gain randomizers below have to pass a force limit back in. They used to pass a
+        hardcoded 100, which silently overwrote the agent's real per-joint limits (the six
+        STS3215 joints are capped at their ~3 N.m stall torque in
+        ``so101_on_frame._JOINT_FORCE_LIMITS``) every time an episode reset. Training runs
+        therefore had 33x the real servo's torque available while `domain_randomization=False`
+        evals correctly ran at 3 -- the sim2real gap the effort limit exists to close.
+        """
+        if not hasattr(self, "_force_limit_snapshot"):
+            self._force_limit_snapshot = {}
+        key = (joint.name, idx)
+        if key not in self._force_limit_snapshot:
+            self._force_limit_snapshot[key] = float(joint._objs[idx].get_force_limit())
+        return self._force_limit_snapshot[key]
+
     def _randomize_gripper_speed(self, env_idx: torch.Tensor):
         stiff_lo, stiff_hi = self.domain_randomization_config.gripper_stiffness_range
         damp_lo, damp_hi = self.domain_randomization_config.gripper_damping_range
@@ -219,7 +237,9 @@ class BaseRandomEnv(BaseEnv):
         gripper_joint = self.agent.robot.joints_map["gripper"]
 
         for i, idx in enumerate(env_idx.tolist()):
-            gripper_joint._objs[idx].set_drive_properties(stiffnesses[i], dampings[i], force_limit=100)
+            gripper_joint._objs[idx].set_drive_properties(
+                stiffnesses[i], dampings[i], force_limit=self._force_limit(gripper_joint, idx)
+            )
             self._gripper_stiffness[idx] = stiffnesses[i]
             self._gripper_damping[idx] = dampings[i]
 
@@ -238,7 +258,9 @@ class BaseRandomEnv(BaseEnv):
         dampings = self._batched_episode_rng[env_idx].uniform(damp_lo, damp_hi)
         for i, idx in enumerate(env_idx.tolist()):
             for joint in arm_joints:
-                joint._objs[idx].set_drive_properties(stiffnesses[i], dampings[i], force_limit=100)
+                joint._objs[idx].set_drive_properties(
+                    stiffnesses[i], dampings[i], force_limit=self._force_limit(joint, idx)
+                )
 
     def get_gripper_params(self) -> dict[str, torch.Tensor]:
         stiff_lo, stiff_hi = self.domain_randomization_config.gripper_stiffness_range
