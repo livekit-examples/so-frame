@@ -53,7 +53,7 @@ The lightbox's 4 panels (`Part_1`, `Part_1_1`, `Part_1_2` ×2, floor + 3 walls) 
 meshes too, so each also gets an invisible box geom (`rgba="1 1 1 0"`, no group override) as a
 collision pad. `Part_1_1` is the floor: without its pad, anything placed on the work surface
 falls straight through to the ground plane. These pads used to be added at runtime by
-`rl/mjlab` (a `work_floor_collision` geom injected via `mujoco.MjSpec`); they're now baked into
+`rl/environments/mjlab` (a `work_floor_collision` geom injected via `mujoco.MjSpec`); they're now baked into
 this file instead, so every consumer of this model (mjlab, the Isaac Sim MJCF import in
 `../usd/README.md`, etc.) gets a real work surface without needing its own patch.
 

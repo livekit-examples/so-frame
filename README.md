@@ -134,12 +134,20 @@ overhead lighting, for usdview / Blender / Omniverse. See
 
 ## Reinforcement Learning
 
-`rl/` contains two implementations of the same **pick-up-a-cube-and-place-it-in-a-bin**
-task, with the cube and bin randomized each episode. They differ in what the policy
-observes: `rl/mjlab/` is **state-based** (trains on ground-truth object poses), while
-`rl/maniskill/` is **vision-based** (trains on camera pixels only).
+`rl/` holds the training environments, the shared policy definition, and the deploy stack:
 
-### `rl/mjlab/`
+```
+rl/environments/maniskill/   vision-based RL (camera pixels only)  -- feeds deploy
+rl/environments/mjlab/       state-based RL (ground-truth poses)
+rl/policy/                   the encoder, actor and checkpoint format
+rl/deploy/                   run a checkpoint on the physical rig
+```
+
+Both environments implement the same **pick-up-a-cube-and-place-it-in-a-bin** task, with the
+cube and bin randomized each episode; they differ in what the policy observes. See
+**[rl/README.md](rl/README.md)** for how the four fit together.
+
+### `rl/environments/mjlab/`
 
 <img src="assets/rl-endless.gif" alt="Endless RL render in simulation" width="440">
 
@@ -152,7 +160,7 @@ PPO (rsl-rl) across thousands of parallel environments on ground-truth cube/bin 
 > and into the bin rather than grasping and lifting it. It's a fun bit of reward hacking, and
 > the reward shaping is still being tuned to coax out a proper grasp.
 
-It's a [uv](https://docs.astral.sh/uv/) project. From `rl/mjlab/`:
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/environments/mjlab/`:
 
 ```bash
 uv sync
@@ -160,17 +168,17 @@ uv run soframe-train Mjlab-Pick-Place-Bin-SO101
 uv run soframe-play  Mjlab-Pick-Place-Bin-SO101 --checkpoint-file <path>
 ```
 
-Training parameters live in `rl/mjlab/train.toml`. Because it runs on MuJoCo-Warp, training
+Training parameters live in `rl/environments/mjlab/train.toml`. Because it runs on MuJoCo-Warp, training
 needs a **Linux + NVIDIA GPU** machine (macOS can build and CPU smoke-test). See
-**[rl/mjlab/README.md](rl/mjlab/README.md)** for the full environment, reward, curriculum,
+**[rl/environments/mjlab/README.md](rl/environments/mjlab/README.md)** for the full environment, reward, curriculum,
 manager, and config details.
 
-### `rl/maniskill/`
+### `rl/environments/maniskill/`
 
 <img src="assets/rl-maniskill.gif" alt="Vision-based RL rollouts (wrist + overhead cameras)" width="880">
 
-*Chained rollouts of the shipped `checkpoints/model_best.pt` (wrist camera left, overhead
-camera right), rendered in the flat shading it was trained on.*
+*Chained rollouts (wrist camera left, overhead camera right), rendered in the flat shading
+they were trained on.*
 
 Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
 RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
@@ -192,14 +200,19 @@ rotation is the MJCF's rotation converted through this fixed axis remap (a const
 `P` with `R_sapien = R_mujoco @ P`), not a copy of the MJCF's raw quaternion: porting the
 quaternion directly renders the wrong direction in SAPIEN despite the shared calibration.
 
-It's a [uv](https://docs.astral.sh/uv/) project. From `rl/maniskill/`:
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/environments/maniskill/`:
 
 ```bash
 uv sync
 uv run python examples/visualize_sim.py
-uv run python train_squint.py --env_id=SOFramePickPlaceBin-v1
+uv run python train.py                      # squint CNN
+uv run python train.py --encoder dino_patch # frozen DINOv2 + patch head
 ```
 
+Task, robot and reward constants live in `rl/environments/maniskill/src/soframe_rl_maniskill/config.py`.
+The encoder, actor and checkpoint format are shared with deploy in
+**[policy/](policy/README.md)**.
+
 Needs a **Linux + NVIDIA GPU** machine (ManiSkill3/SAPIEN + CUDA; macOS can read/edit code but
-not train). See **[rl/maniskill/README.md](rl/maniskill/README.md)** for the task,
+not train). See **[rl/environments/maniskill/README.md](rl/environments/maniskill/README.md)** for the task,
 observation/reward design, domain randomization, and training details.

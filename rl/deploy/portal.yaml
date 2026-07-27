@@ -1,0 +1,36 @@
+# Wire contract shared by the robot + policy processes.
+# 7 joints (SO-101 arm + rail). Order is load-bearing: matches the sim's
+# active_joints and the policy's positional state/action vectors.
+# Policy sees a rectified crop of the wide (120-deg) cameras -- robot publishes RAW,
+# policy replays the saved camera mapping before inference. See policy/README.md.
+
+version: 1
+# 10 Hz = the policy's training control_freq. Don't raise it: a faster send loop
+# integrates deltas too often and drives the arm above the trained speed.
+fps: 10
+
+# h264 so a browser can render the cameras; the policy still gets decoded RGB.
+videos:
+  - { name: arm_camera, codec: h264 }
+  - { name: overhead_camera, codec: h264 }
+
+# Wire units: arm/gripper degrees; dof_slider normalized 0..100 (0=far, 100=near camera).
+state:
+  - { name: dof_slider.pos, dtype: f32 }
+  - { name: shoulder_pan.pos, dtype: f32 }
+  - { name: shoulder_lift.pos, dtype: f32 }
+  - { name: elbow_flex.pos, dtype: f32 }
+  - { name: wrist_flex.pos, dtype: f32 }
+  - { name: wrist_roll.pos, dtype: f32 }
+  - { name: gripper.pos, dtype: f32 }
+
+# Action mirrors state: absolute position targets (policy integrates its delta
+# actions to absolute + unit-converts before the wire).
+action:
+  - { name: dof_slider.pos, dtype: f32 }
+  - { name: shoulder_pan.pos, dtype: f32 }
+  - { name: shoulder_lift.pos, dtype: f32 }
+  - { name: elbow_flex.pos, dtype: f32 }
+  - { name: wrist_flex.pos, dtype: f32 }
+  - { name: wrist_roll.pos, dtype: f32 }
+  - { name: gripper.pos, dtype: f32 }

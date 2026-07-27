@@ -1,0 +1,17 @@
+# uv-managed virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# training outputs
+runs/
+runs_backup/
+videos/
+wandb/
+train_logs/
+*.pt
+*.onnx
+
+# Reference camera renders for sim2real calibration (regenerate with
+# examples/dump_reference_views.py; the fitted mappings live in sim2real/utils).
+reference_views/

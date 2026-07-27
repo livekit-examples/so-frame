@@ -90,6 +90,18 @@
         <color rgba="0.4 0.4 0.4 1" />
       </material>
     </visual>
+    <!-- Collision box for the linear rail the gantry rides on. The frame's extrusions
+         ship visual-only from the CAD export; the arm otherwise phases straight through
+         this rail in sim, learning motions that would hit the real aluminum. Box matches
+         the 2020 profile's mesh bounds in this link frame (long axis = world travel axis).
+         100cm_4 is the slider joint's parent, so the box is fixed and the arm moves past
+         it. Other extrusions stay visual-only (out of the arm's reach). -->
+    <collision>
+      <origin xyz="-0.008 0.01 -0.5" rpy="0 0 0" />
+      <geometry>
+        <box size="0.02 0.02 1.0" />
+      </geometry>
+    </collision>
   </link>
   <link name="20mm_gantry_plate">
     <inertial>
@@ -1043,7 +1055,10 @@
     <axis xyz="0 1 0" />
     <parent link="100cm_4" />
     <child link="20mm_gantry_plate" />
-    <limit effort="1" velocity="1" lower="-0.40286" upper="0.41714" />
+    <!-- Rail: effort is N (prismatic), and 1 N cannot move the gantry + arm. maniskill's
+         controller overrides this with force_limit=100 so it never bit there, but the model
+         should not carry a value the rig contradicts. -->
+    <limit effort="100" velocity="1" lower="-0.40286" upper="0.41714" />
   </joint>
   <joint name="fastened_1" type="fixed">
     <origin xyz="0.01 0.027 1.38778e-17" rpy="0 -1.5708 7.25017e-17" />
@@ -1706,42 +1721,42 @@
     <parent link="gripper_link" />
     <child link="moving_jaw_so101_v1_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-0.174533" upper="1.74533" />
+    <limit effort="3" velocity="10" lower="-0.174533" upper="1.74533" />
   </joint>
   <joint name="wrist_roll" type="revolute">
     <origin xyz="5.55112e-17 -0.0611 0.0181" rpy="1.5708 0.0486795 3.14159" />
     <parent link="wrist_link" />
     <child link="gripper_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-2.74385" upper="2.84121" />
+    <limit effort="3" velocity="10" lower="-2.74385" upper="2.84121" />
   </joint>
   <joint name="wrist_flex" type="revolute">
     <origin xyz="-0.1349 0.0052 3.62355e-17" rpy="4.02456e-15 8.67362e-16 -1.5708" />
     <parent link="lower_arm_link" />
     <child link="wrist_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.65806" upper="1.65806" />
+    <limit effort="3" velocity="10" lower="-1.65806" upper="1.65806" />
   </joint>
   <joint name="elbow_flex" type="revolute">
     <origin xyz="-0.11257 -0.028 1.73763e-16" rpy="-3.63608e-16 8.74301e-16 1.5708" />
     <parent link="upper_arm_link" />
     <child link="lower_arm_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.69" upper="1.69" />
+    <limit effort="3" velocity="10" lower="-1.69" upper="1.69" />
   </joint>
   <joint name="shoulder_lift" type="revolute">
     <origin xyz="-0.0303992 -0.0182778 -0.0542" rpy="-1.5708 -1.5708 0" />
     <parent link="shoulder_link" />
     <child link="upper_arm_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.74533" upper="1.74533" />
+    <limit effort="3" velocity="10" lower="-1.74533" upper="1.74533" />
   </joint>
   <joint name="shoulder_pan" type="revolute">
     <origin xyz="0.0388353 -8.97657e-09 0.0624" rpy="3.14159 4.18253e-17 -3.14159" />
     <parent link="base_link" />
     <child link="shoulder_link" />
     <axis xyz="0 0 1" />
-    <limit effort="10" velocity="10" lower="-1.91986" upper="1.91986" />
+    <limit effort="3" velocity="10" lower="-1.91986" upper="1.91986" />
   </joint>
   <transmission name="gripper_trans">
     <type>transmission_interface/SimpleTransmission</type>

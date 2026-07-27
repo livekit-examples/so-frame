@@ -1,0 +1,17 @@
+# Local virtualenv
+.venv/
+
+# Secrets (keep .env.example committed)
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Deploy checkpoints: copied off a training run, never committed
+checkpoints/
+*.pt
+
+# Frames pulled off the live robot (utils/pull_frames.py); the calibration captures in
+# utils/captures/ are committed on purpose, everything else is scratch.
+frames/
