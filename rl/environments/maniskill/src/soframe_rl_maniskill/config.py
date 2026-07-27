@@ -250,3 +250,17 @@ COLOR_BY_GROUP = {
 WRIST_CAMERA_FOV = np.deg2rad(58)      # from the MJCF twin's fovy
 OVERHEAD_CAMERA_FOV = np.deg2rad(38)   # calibrated against the real rig
 SENSOR_RESOLUTION = 128                # square render size for both sensor cameras
+
+# Sensor near/far clip. The whole rig fits in ~1.5 m, so a 3 m far plane covers every surface
+# either camera can see and additionally CULLS THE GROUND PLANE (see GROUND_ALTITUDE), which is
+# what lets the policy obs_mode be plain "rgb" with no segmentation pass. Raising this past
+# -GROUND_ALTITUDE puts the ground back in frame.
+SENSOR_NEAR = 0.01
+SENSOR_FAR = 3.0
+
+# The safety catch-all plane, well below the lightbox floor, for anything that rolls off the
+# panels. Sits beyond SENSOR_FAR so neither policy camera renders it: the background is then the
+# renderer's black clear colour, which is exactly what the greenscreen used to paint it (its
+# overlay image is 128x128 of pure black) at the cost of a whole extra segmentation render pass
+# per camera per step. It was at -1.0, inside the far plane, which is why that pass existed.
+GROUND_ALTITUDE = -5.0

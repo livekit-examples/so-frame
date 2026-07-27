@@ -30,8 +30,16 @@ from .. import config
 class RandomizationConfig:
     initial_qpos_noise_scale: float = 0.02
     """Noise scale for initial robot joint positions."""
-    apply_overlay: bool = True
-    """Apply background overlay (greenscreen); if False, returns raw simulation images."""
+    apply_overlay: bool = False
+    """Composite `rgb_overlay_path` in behind the robot and the task objects, per pixel, using a
+    segmentation render. OFF: it costs a whole extra render target and readback per camera per
+    step, plus a mask and two fp32 casts over the RGB batch, and the only background geometry in
+    this scene is the ground plane -- which config.SENSOR_FAR now culls outright, so the
+    background is already the renderer's black clear colour. That is bit-for-bit what the default
+    overlay image painted (`black_overlay.png` is 128x128 of pure zeros).
+
+    Turn this on only to composite a REAL background photo, and then also pass an obs_mode
+    including segmentation (`--obs_mode rgb+segmentation`), which is what feeds the mask."""
     rgb_overlay_path: Optional[str] = os.path.join(os.path.dirname(__file__), "black_overlay.png")
     """Path to background image. If None and apply_overlay=True, uses black background."""
     visual_fidelity: str = "raster"
@@ -465,8 +473,8 @@ class DualCameraEnv(BaseRandomEnv):
                 width=config.SENSOR_RESOLUTION,
                 height=config.SENSOR_RESOLUTION,
                 fov=dr.wrist_camera_fov + fov_noise(dr.wrist_camera_fov_noise),
-                near=0.01,
-                far=100,
+                near=config.SENSOR_NEAR,
+                far=config.SENSOR_FAR,
                 mount=self.agent.wrist_camera_link,
             ),
             CameraConfig(
@@ -478,8 +486,8 @@ class DualCameraEnv(BaseRandomEnv):
                 width=config.SENSOR_RESOLUTION,
                 height=config.SENSOR_RESOLUTION,
                 fov=dr.overhead_camera_fov + fov_noise(dr.overhead_camera_fov_noise),
-                near=0.01,
-                far=100,
+                near=config.SENSOR_NEAR,
+                far=config.SENSOR_FAR,
                 mount=self.agent.overhead_camera_link,
             ),
         ]

@@ -123,7 +123,9 @@ class PickPlaceBin(DualCameraEnv):
     def _load_scene(self, options: dict):
         super()._load_scene(options)
         # Safety catch-all far below the lightbox floor for anything that rolls off the panels.
-        self.ground = build_ground(self.scene, altitude=-1.0)
+        # Deliberately beyond config.SENSOR_FAR so the policy cameras never render it; see
+        # config.GROUND_ALTITUDE for why that matters.
+        self.ground = build_ground(self.scene, altitude=config.GROUND_ALTITUDE)
 
         cfg = self.domain_randomization_config
         realistic = cfg.visual_fidelity != "flat"  # PBR materials for "raster"/"raytraced"
