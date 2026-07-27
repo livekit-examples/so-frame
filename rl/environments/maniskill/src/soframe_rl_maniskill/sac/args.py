@@ -93,8 +93,11 @@ class Args:
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
-    obs_mode: Optional[str] = "rgb+segmentation"
-    """the observation output mode of the environment"""
+    obs_mode: Optional[str] = "rgb"
+    """the observation output mode of the environment. Plain "rgb": the segmentation buffer only
+    ever fed the greenscreen overlay, which is off by default now that the ground plane is culled
+    by the sensor far plane (see RandomizationConfig.apply_overlay). Pass
+    --obs_mode rgb+segmentation if you turn the overlay back on."""
     sim_backend: str = "gpu"
     """physics/render backend. 'gpu' for real training (needs CUDA); 'cpu' supports a single
     env and exists so the loop can be smoke-tested on a machine without a GPU. Forced to 'cpu'

@@ -123,7 +123,9 @@ class PickPlaceBin(DualCameraEnv):
     def _load_scene(self, options: dict):
         super()._load_scene(options)
         # Safety catch-all far below the lightbox floor for anything that rolls off the panels.
-        self.ground = build_ground(self.scene, altitude=-1.0)
+        # Deliberately beyond config.SENSOR_FAR so the policy cameras never render it; see
+        # config.GROUND_ALTITUDE for why that matters.
+        self.ground = build_ground(self.scene, altitude=config.GROUND_ALTITUDE)
 
         cfg = self.domain_randomization_config
         realistic = cfg.visual_fidelity != "flat"  # PBR materials for "raster"/"raytraced"
@@ -267,7 +269,6 @@ class PickPlaceBin(DualCameraEnv):
             SO101OnFrame.keyframes["rest"].qpos.tolist(), device=self.device
         )
 
-        self._load_camera_mount()
         # One pass: colour scheme always, PBR relief maps only when realistic.
         self.agent.apply_materials(realistic=realistic)
 
@@ -445,11 +446,15 @@ class PickPlaceBin(DualCameraEnv):
 
         item_vel = torch.linalg.norm(self.item.linear_velocity, axis=-1)
         is_item_static = item_vel <= 2e-2
-        is_item_grasped = self.agent.is_grasping(self.item)
         is_robot_static = self.agent.is_static()
 
-        robot_touching_bin = self.agent.is_touching(self.bin)
-        robot_touching_item = self.agent.is_touching(self.item)
+        # Two pairwise contact queries per object, fetched once and shared. Asking the agent for
+        # `is_grasping(item)` and `is_touching(item)` separately ran the same two queries twice.
+        item_forces = self.agent.jaw_contact_forces(self.item)
+        bin_forces = self.agent.jaw_contact_forces(self.bin)
+        is_item_grasped = self.agent.is_grasping(self.item, forces=item_forces)
+        robot_touching_item = self.agent.is_touching(self.item, forces=item_forces)
+        robot_touching_bin = self.agent.is_touching(self.bin, forces=bin_forces)
 
         success = (
             is_item_in_bin & is_item_static
