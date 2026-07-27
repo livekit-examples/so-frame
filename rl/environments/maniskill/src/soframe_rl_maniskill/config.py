@@ -81,6 +81,37 @@ FRICTION_EVERY_ITERATION = False
 
 
 # =====================================================================================
+# Render cost
+# =====================================================================================
+# A shadow-casting light costs a whole extra geometry pass per camera per step -- the shadow map
+# is rendered from the light's point of view -- and the render stage is geometry-bound (at 512
+# envs, rendering at 32 px instead of 128 px changes the step by 1.3%, so it is transforming
+# vertices, not filling pixels). Measured: 96.6 -> 67.4 ms/step, a 30% cut, the largest single
+# render lever there is.
+#
+# OFF, because the shadow it cast was the wrong shadow. Measured on the real rig's own overhead
+# capture (rl/deploy/utils/captures/): objects there show soft contact darkening hugging their
+# base -- about -10/255 for the bin, -26/255 for the bar, and some of even that is edge bleed
+# from a 640x480 UVC sensor, since it scales with the object's darkness rather than with lighting
+# geometry. What the real lightbox does NOT produce anywhere in frame is a directional cast
+# shadow displaced from its caster. The sim's key light produced exactly that, and a large moving
+# one: the arm threw a silhouette well to its left across the work surface.
+#
+# So this was a sim-only artifact, and dropping it narrows the sim2real gap rather than widening
+# it. The real rig's contact occlusion is a genuine feature sim does not reproduce, but sim never
+# did -- boosted ambient plus two shadowless fills generate no ambient occlusion -- so that gap
+# is unchanged either way. For scale, the difference this makes to a rendered frame is 4.2/255
+# mean and 17/255 peak, against a jitter/augmentation stack that already swings brightness and
+# contrast by +-30% and gamma over 0.7-1.4 every single step.
+#
+# Set True to get it back; SHADOW_MAP_SIZE only matters then. Note this also makes
+# --visual_fidelity flat nearly pointless as a speed option: flat measured 87.0 ms/step against
+# raster-without-shadow at 87.3, so raster now costs the same and keeps the PBR materials.
+RASTER_SHADOWS = False
+SHADOW_MAP_SIZE = 512
+
+
+# =====================================================================================
 # Robot geometry
 # =====================================================================================
 # Grasp point between the finger pads, in gripper_link's frame. Matches the `grasp_site` MJCF

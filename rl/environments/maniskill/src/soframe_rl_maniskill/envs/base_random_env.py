@@ -211,7 +211,9 @@ class BaseRandomEnv(BaseEnv):
             # shadow-casting key is faint (~0.75:1 shadowed:lit). shadow_map_size stays small
             # (maps allocate per env; 512^2 is plenty for 128px observations).
             self.scene.add_directional_light(
-                [0.15, 0.1, -1], [0.4, 0.39, 0.38], shadow=True, shadow_scale=2.0, shadow_map_size=512,
+                [0.15, 0.1, -1], [0.4, 0.39, 0.38],
+                shadow=config.RASTER_SHADOWS, shadow_scale=2.0,
+                shadow_map_size=config.SHADOW_MAP_SIZE,
             )
             self.scene.add_directional_light([0, 0, -1], [0.4, 0.39, 0.38])
             self.scene.add_directional_light([-1, -0.3, -0.6], [0.25, 0.25, 0.28])
