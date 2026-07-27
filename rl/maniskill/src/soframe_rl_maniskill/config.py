@@ -200,12 +200,28 @@ COLOR_SLIDER = BLACK
 COLOR_GRIPPER = WHITE
 COLOR_ARM = WHITE
 
+# Motor hardware is NOT part of the scheme. Each arm link is a printed plastic shell plus an
+# STS3215 whose case is moulded dark grey, and the carriage carries dark electronics; recolouring
+# a whole link paints the motors too, which made the arm read as one featureless white mass. Only
+# the printed structure takes COLOR_ARM / COLOR_GRIPPER / COLOR_SLIDER; anything matching a motor
+# colour below keeps this instead. The default is the URDF's own value, i.e. unchanged.
+COLOR_MOTOR = (0.1, 0.1, 0.1)
+
+# Baked URDF colours that identify motor hardware. Matched against a part's ORIGINAL colour, so
+# apply_materials must read it before recolouring (it does; it is a single pass).
+MOTOR_BASE_COLORS = (
+    (0.1, 0.1, 0.1),        # STS3215 case on the arm links
+    (0.098, 0.098, 0.098),  # carriage motor + electronics (sg_ziji, xg_ziji, pcb, motor_1723, ...)
+)
+
 # Link-name patterns -> colour group. Matched as substrings against the URDF link names, first
 # match wins. Any link that matches nothing keeps the colour baked into the URDF -- that is
 # deliberate for the lightbox panels (the work surface, near-white) and the camera holders.
 COLOR_GROUPS = (
     # (group name, link-name substrings)
-    ("gripper",   ("gripper_link", "moving_jaw", "pinion", "金属舵盘")),
+    # The metal servo horns (金属舵盘) are deliberately absent: they are hardware, not printed
+    # structure, so they keep the URDF's bright-metal colour.
+    ("gripper",   ("gripper_link", "moving_jaw", "pinion")),
     ("arm",       ("shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link")),
     ("slider",    ("20mm_gantry_plate", "v_wheel", "m5_nylock", "m5x25_low_profile_screw",
                    "handle", "base_mount", "base_link", "sg_ziji", "xg_ziji", "pcb_chazuo",

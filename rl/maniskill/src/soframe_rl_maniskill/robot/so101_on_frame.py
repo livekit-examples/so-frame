@@ -273,6 +273,14 @@ class SO101OnFrame(BaseAgent):
                             continue
 
                         if group is not None:
+                            # A grouped link is printed structure PLUS motor hardware. Only the
+                            # structure takes the scheme colour; the motor keeps its own, and no
+                            # texture, exactly as the URDF had it. Recolouring the whole link
+                            # painted the motors too and the arm read as one white mass.
+                            if _base_color_matches(material.get_base_color(),
+                                                   config.MOTOR_BASE_COLORS):
+                                material.set_base_color([*config.COLOR_MOTOR, 1.0])
+                                continue
                             material.set_base_color([*config.COLOR_BY_GROUP[group], 1.0])
                             if realistic:
                                 relief_only(material, textures[_GROUP_TEXTURE_SET[group]])
