@@ -1055,7 +1055,10 @@
     <axis xyz="0 1 0" />
     <parent link="100cm_4" />
     <child link="20mm_gantry_plate" />
-    <limit effort="1" velocity="1" lower="-0.40286" upper="0.41714" />
+    <!-- Rail: effort is N (prismatic), and 1 N cannot move the gantry + arm. maniskill's
+         controller overrides this with force_limit=100 so it never bit there, but the model
+         should not carry a value the rig contradicts. -->
+    <limit effort="100" velocity="1" lower="-0.40286" upper="0.41714" />
   </joint>
   <joint name="fastened_1" type="fixed">
     <origin xyz="0.01 0.027 1.38778e-17" rpy="0 -1.5708 7.25017e-17" />

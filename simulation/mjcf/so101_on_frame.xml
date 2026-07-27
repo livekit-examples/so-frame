@@ -91,7 +91,11 @@
     <geom pos="0.00800005 -5.79609e-08 0.03" quat="-1.32679e-06 -2.65359e-06 3.52081e-12 -1" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.4 0.4 0.4 1" mesh="Angle_Bracket_2020_Aluminium_Profile_Joiner" />
     <body name="20mm_gantry_plate" pos="-1.22824e-06 -0.49286 0.0399982" quat="3.67321e-06 -1 1.32679e-06 1.32679e-06">
       <inertial pos="-0.0221626 0.0202513 0.00961168" quat="0.421727 0.558686 0.573528 0.425537" mass="0.147157" diaginertia="0.000136613 0.000132236 0.00011349" />
-      <joint name="dof_slider" pos="0 0 0" axis="0 1 0" type="slide" range="-0.40286 0.41714" actuatorfrcrange="-1 1" class="slider" />
+      <!-- actuatorfrcrange is N here (slide joint), not N.m. Was -1 1, which is far too little
+           to accelerate the gantry + arm and, because MuJoCo applies the joint clamp on top of
+           the actuator's own forcerange, silently capped the rail no matter what the actuator
+           was configured for. 100 N matches what the maniskill twin drives the rail at. -->
+      <joint name="dof_slider" pos="0 0 0" axis="0 1 0" type="slide" range="-0.40286 0.41714" actuatorfrcrange="-100 100" class="slider" />
       <geom pos="0 -0.03275 -0.015" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.74902 0.74902 0.74902 1" mesh="_20mm_gantry_plate" />
       <geom pos="0.01985 -0.0327499 -0.015" quat="0.707105 0 0 0.707108" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.94 0.49 0.06 1" mesh="Base_Mount" />
       <geom pos="0.0120998 0.0383243 -0.02856" quat="9.38189e-07 -0.707109 0.707105 -9.38183e-07" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.0980392 0.0980392 0.0980392 1" mesh="SG_ZIJI_15" />

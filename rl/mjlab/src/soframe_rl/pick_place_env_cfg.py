@@ -10,7 +10,7 @@ bits (entities, action scale, grasp-site name) are filled in by
 from __future__ import annotations
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.actions import RelativeJointPositionActionCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
@@ -62,13 +62,22 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     "critic": ObservationGroupCfg({**actor_terms}, enable_corruption=False),
   }
 
-  # -- Actions (delta joint position; scale set per-robot) -----------------
+  # -- Actions (TRUE delta joint position; scale set per-robot) ------------
+  #
+  # RelativeJointPositionActionCfg gives target = current_joint_pos + action * scale, so `scale`
+  # is a hard per-step motion cap and the real servo's speed is enforced structurally.
+  #
+  # This was JointPositionActionCfg(use_default_offset=True), which is target = action * scale +
+  # default_joint_pos -- an ABSOLUTE target measured from the home pose, not a delta. Nothing
+  # bounded per-step motion: one step could command the full +-scale swing from home, and
+  # consecutive steps could cross the whole 2*scale range instantly. The comment here called it
+  # "delta joint position", which is what it was standing in for but never was. The smoothness
+  # penalties in `rewards` below existed to paper over exactly that, and are gone with it.
   actions: dict[str, ActionTermCfg] = {
-    "joint_pos": JointPositionActionCfg(
+    "joint_pos": RelativeJointPositionActionCfg(
       entity_name="robot",
       actuator_names=(".*",),
-      scale=0.3,  # overridden per-robot.
-      use_default_offset=True,
+      scale=0.05,  # overridden per-robot from SO101_ACTION_SCALE (measured real speed / Hz).
     )
   }
 
@@ -150,16 +159,14 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=10.0,
       params={"command_name": "place"},
     ),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.01),
+    # No speed or smoothness penalties. They were standing in for a rate limit the action space
+    # did not have: joint_vel_hinge's max_vel was 0.5, literally the real arm's 0.5 rad/s, and
+    # action_rate_l2 taxed jerk. Both are now enforced structurally by the relative action
+    # space's per-step cap, which needs no weight tuned against the task rewards.
     "joint_pos_limits": RewardTermCfg(
       func=mdp.joint_pos_limits,
       weight=-10.0,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
-    ),
-    "joint_vel_hinge": RewardTermCfg(
-      func=manipulation_mdp.joint_velocity_hinge_penalty,
-      weight=-0.01,
-      params={"max_vel": 0.5, "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
     ),
   }
 
@@ -186,21 +193,12 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         "ema_alpha": 0.01,
       },
     ),
-    # Smoothness penalty: LINEAR ramp, never a step. A discrete 10x jump (even
-    # -0.01 -> -0.1) yanks the reward landscape and can collapse a trained policy;
-    # ramping per-step lets it adapt by slowing down gradually. Capped at -0.05:
-    # measured on this task, success holds to ~-0.05 and erodes fast beyond ~-0.06
-    # (the penalty starts outbidding the task rewards and carrying stops paying).
-    "joint_vel_hinge_weight": CurriculumTermCfg(
-      func=task_mdp.reward_weight_ramp_curriculum,
-      params={
-        "reward_name": "joint_vel_hinge",
-        "milestones": [
-          {"step": 3000 * 24, "weight": -0.01},  # flat until ~iter 3000
-          {"step": 7000 * 24, "weight": -0.05},  # then ramp gently to -0.05
-        ],
-      },
-    ),
+    # The smoothness-penalty ramp that used to live here is gone with the penalty it tuned.
+    # Its own comment was the argument against the approach: the weight had to be ramped
+    # linearly because a step change "yanks the reward landscape and can collapse a trained
+    # policy", and it had to stay under ~-0.06 or "the penalty starts outbidding the task
+    # rewards and carrying stops paying". A per-step cap in the action space has no weight, no
+    # ramp, and no window to fall out of.
   }
 
   return ManagerBasedRlEnvCfg(
@@ -235,6 +233,12 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
         cone="elliptic",
       ),
     ),
-    decimation=4,
-    episode_length_s=10.0,
+    # 0.005 s timestep x 20 = 10 Hz control, matching so101_constants.CONTROL_HZ, the maniskill
+    # twin, and the deploy loop's 10 Hz portal tick. This was decimation=4 (50 Hz): the action
+    # cadence a policy trains at is part of the sim2real contract, and a 50 Hz policy driven at
+    # 10 Hz on hardware sees 5x its trained step size per decision.
+    decimation=20,
+    # 30 s at 10 Hz. The real-servo speeds need this much runway to reach, carry and place;
+    # the maniskill twin uses the same 300-step horizon.
+    episode_length_s=30.0,
   )

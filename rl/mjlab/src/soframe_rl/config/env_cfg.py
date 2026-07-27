@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from mjlab.entity import EntityCfg
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.actions import RelativeJointPositionActionCfg
 
 from soframe_rl.assets import get_bin_spec, get_cube_spec
 from soframe_rl.pick_place_env_cfg import make_pick_place_env_cfg
@@ -28,9 +28,9 @@ def so101_pick_place_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "bin": EntityCfg(spec_fn=get_bin_spec),
   }
 
-  # Per-actuator delta-position action scale.
+  # Per-actuator delta-position action scale (measured real joint speed / CONTROL_HZ).
   joint_pos_action = cfg.actions["joint_pos"]
-  assert isinstance(joint_pos_action, JointPositionActionCfg)
+  assert isinstance(joint_pos_action, RelativeJointPositionActionCfg)
   joint_pos_action.scale = SO101_ACTION_SCALE
 
   # Point the end-effector observation + rewards at the grasp site.
