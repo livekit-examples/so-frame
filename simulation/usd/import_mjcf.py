@@ -1,13 +1,13 @@
 """Import simulation/mjcf/so101_on_frame.xml via Isaac Sim's real MJCF importer, producing
 a physics-correct USD (rigid bodies, joints, collision, articulation) -- using the MJCF
 already validated with real MuJoCo drop tests (see simulation/urdf/README.md and this
-repo's rl/mjlab), instead of hand-authoring UsdPhysics schemas from scratch.
+repo's rl/environments/mjlab), instead of hand-authoring UsdPhysics schemas from scratch.
 
 Also sets joint drive stiffness/damping: the importer doesn't resolve MuJoCo's
 `<default class="X"><position kp="..."/>` inheritance into its own gain/bias format, so it
 applies a DriveAPI to each joint but leaves stiffness/damping at zero, and an undriven arm
 collapses under gravity. Values below start from the MJCF's own `kp` (400 for the rail,
-20 for the arm/gripper, matching sts3215.xml) -- same stance rl/mjlab and rl/maniskill
+20 for the arm/gripper, matching sts3215.xml) -- same stance rl/environments/mjlab and rl/environments/maniskill
 already take on actuator gains: not trusted from the raw asset, re-declared explicitly as
 tunable, sim-to-real parameters.
 
@@ -49,7 +49,7 @@ config = MJCFImporterConfig(
     collision_from_visuals=False, # use our authored collision geoms (box panels), not the thin visual meshes
     collision_type="Convex Hull",
     allow_self_collision=False,
-    fix_base=True,                # fixed-base rig, matching rl/mjlab and rl/maniskill
+    fix_base=True,                # fixed-base rig, matching rl/environments/mjlab and rl/environments/maniskill
     run_asset_transformer=True,
     run_multi_physics_conversion=True,
 )

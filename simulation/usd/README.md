@@ -72,7 +72,7 @@ kp="..."/>` inheritance into its own gain/bias format, so it applies a `DriveAPI
 joint but leaves stiffness/damping at zero (an undriven arm collapses under gravity).
 `import_mjcf.py` sets these explicitly after import, starting from the MJCF's own `kp`
 values (400 for the rail, 20 for the arm/gripper, matching `sts3215.xml`), same as
-`rl/mjlab`'s own stance on actuator gains ("reasonable *starting* values ... not calibrated").
+`rl/environments/mjlab`'s own stance on actuator gains ("reasonable *starting* values ... not calibrated").
 
 **Timestep**: with those gains, the default Isaac Sim physics timestep (1/60 s) is
 numerically unstable (joint positions diverge within ~100 steps). It's ~8x coarser than
@@ -85,4 +85,4 @@ Lab environment actually runs at.
   (aluminium/mica/steel/etc.) authored in `so101_on_frame.usd` above. Transferring those
   onto the physics asset (matching meshes by name/link) is a reasonable next step for
   anyone wanting good-looking Isaac Lab renders.
-- Joint drive gains are untuned starting values, same caveat as `rl/mjlab`'s.
+- Joint drive gains are untuned starting values, same caveat as `rl/environments/mjlab`'s.

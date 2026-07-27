@@ -4,10 +4,10 @@ The 3MF files are the CAD exports (Onshape) and are the source of truth for dime
 does not read 3MF, so this writes the OBJ that the env actually loads. Re-run after replacing a
 3MF and commit both.
 
-    uv run --project ../../../rl/maniskill python convert.py
+    uv run --project ../../../rl/environments/maniskill python convert.py
 
 It also prints the measurements the env needs (outer extents, interior opening, wall and floor
-thickness). Those are mirrored as constants in rl/maniskill/src/soframe_rl_maniskill/config.py,
+thickness). Those are mirrored as constants in rl/environments/maniskill/src/soframe_rl_maniskill/config.py,
 and this script asserts they still match, so editing a 3MF without updating the config fails
 here rather than silently changing the task.
 """
