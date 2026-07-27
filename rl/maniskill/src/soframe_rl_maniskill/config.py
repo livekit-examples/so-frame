@@ -193,8 +193,8 @@ COLOR_CUBE = BLACK
 COLOR_BIN = BLACK
 
 # Rig. "extrusion" is the 2020 aluminium frame and its brackets; "slider" is the gantry carriage
-# the arm rides on plus the arm's base; "gripper" is the jaw assembly; "arm" is the links between
-# base and gripper.
+# the arm rides on, plus the rail drive gear; "arm" is the arm itself INCLUDING its own base;
+# "gripper" is the jaw assembly.
 COLOR_EXTRUSION = BLACK
 COLOR_SLIDER = BLACK
 COLOR_GRIPPER = WHITE
@@ -221,10 +221,15 @@ COLOR_GROUPS = (
     # (group name, link-name substrings)
     # The metal servo horns (金属舵盘) are deliberately absent: they are hardware, not printed
     # structure, so they keep the URDF's bright-metal colour.
-    ("gripper",   ("gripper_link", "moving_jaw", "pinion")),
-    ("arm",       ("shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link")),
-    ("slider",    ("20mm_gantry_plate", "v_wheel", "m5_nylock", "m5x25_low_profile_screw",
-                   "handle", "base_mount", "base_link", "sg_ziji", "xg_ziji", "pcb_chazuo",
+    ("gripper",   ("gripper_link", "moving_jaw")),
+    # `base_link` is the ARM's own base -- the block bolted on top of the carriage -- so it takes
+    # COLOR_ARM. Do NOT add `base_mount` here: despite the name it is the SLIDER BASE, the tray
+    # that rides the rail on the v-wheels and carries the pinion, and it belongs below.
+    ("arm",       ("base_link", "shoulder_link", "upper_arm_link", "lower_arm_link",
+                   "wrist_link")),
+    # The carriage: `base_mount` is its tray, `pinion` its drive gear.
+    ("slider",    ("base_mount", "pinion", "20mm_gantry_plate", "v_wheel", "m5_nylock",
+                   "m5x25_low_profile_screw", "handle", "sg_ziji", "xg_ziji", "pcb_chazuo",
                    "ge_27", "zk_122", "motor_1723")),
     ("extrusion", ("100cm", "50cm", "inside_corner_bracket", "angle_bracket")),
 )
