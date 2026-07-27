@@ -23,6 +23,8 @@ from mani_skill.utils.structs.types import SimConfig
 from mani_skill.utils.structs import Pose
 from mani_skill.utils.visualization.misc import tile_images
 
+from .. import config
+
 
 @dataclass
 class RandomizationConfig:
@@ -56,11 +58,10 @@ class RandomizationConfig:
     randomize_lighting: bool = True
     """Whether to randomize ambient lighting."""
 
-    wrist_camera_fov: float = np.deg2rad(58)
-    """Base vertical FOV of the wrist camera (from the MJCF twin's `fovy`; override with the
-    measured real-camera value)."""
-    overhead_camera_fov: float = np.deg2rad(38)
-    """Base vertical FOV of the overhead camera, calibrated against the real rig."""
+    wrist_camera_fov: float = config.WRIST_CAMERA_FOV
+    """Base vertical FOV of the wrist camera (default in config.py)."""
+    overhead_camera_fov: float = config.OVERHEAD_CAMERA_FOV
+    """Base vertical FOV of the overhead camera, calibrated against the real rig (config.py)."""
 
     # These FOVs define the view the policy trains on. Deploy rectifies each real camera to
     # match, using a mapping fitted in sim2real/utils/ -- nothing in this tree reads or writes
@@ -93,12 +94,16 @@ class RandomizationConfig:
     """Noise scale for camera FOV."""
 
     @classmethod
-    def resolve(cls, config: Union["RandomizationConfig", dict]) -> "RandomizationConfig":
-        """Merge a dict of overrides into this class's defaults (instances pass through)."""
-        if isinstance(config, cls):
-            return config
+    def resolve(cls, cfg: Union["RandomizationConfig", dict]) -> "RandomizationConfig":
+        """Merge a dict of overrides into this class's defaults (instances pass through).
+
+        The parameter is `cfg`, not `config`, so it cannot shadow the module-level
+        ``from .. import config``.
+        """
+        if isinstance(cfg, cls):
+            return cfg
         merged = asdict(cls())
-        common.dict_merge(merged, config if isinstance(config, dict) else asdict(config))
+        common.dict_merge(merged, cfg if isinstance(cfg, dict) else asdict(cfg))
         return dacite.from_dict(data_class=cls, data=merged, config=dacite.Config(strict=True))
 
 
@@ -135,7 +140,7 @@ class BaseRandomEnv(BaseEnv):
 
     @property
     def _default_sim_config(self):
-        return SimConfig(sim_freq=100, control_freq=10)
+        return SimConfig(sim_freq=int(config.SIM_HZ), control_freq=int(config.CONTROL_HZ))
 
     @property
     def _default_human_render_camera_configs(self):
@@ -438,7 +443,7 @@ class DualCameraEnv(BaseRandomEnv):
 
     @property
     def _default_sensor_configs(self):
-        config = self.domain_randomization_config
+        dr = self.domain_randomization_config
 
         def fov_noise(scale):
             if self.domain_randomization and scale > 0:
@@ -449,9 +454,9 @@ class DualCameraEnv(BaseRandomEnv):
             CameraConfig(
                 "wrist_camera",
                 pose=sapien.Pose(),
-                width=128,
-                height=128,
-                fov=config.wrist_camera_fov + fov_noise(config.wrist_camera_fov_noise),
+                width=config.SENSOR_RESOLUTION,
+                height=config.SENSOR_RESOLUTION,
+                fov=dr.wrist_camera_fov + fov_noise(dr.wrist_camera_fov_noise),
                 near=0.01,
                 far=100,
                 mount=self.wrist_camera_mount,
@@ -459,9 +464,9 @@ class DualCameraEnv(BaseRandomEnv):
             CameraConfig(
                 "overhead_camera",
                 pose=sapien.Pose(),
-                width=128,
-                height=128,
-                fov=config.overhead_camera_fov + fov_noise(config.overhead_camera_fov_noise),
+                width=config.SENSOR_RESOLUTION,
+                height=config.SENSOR_RESOLUTION,
+                fov=dr.overhead_camera_fov + fov_noise(dr.overhead_camera_fov_noise),
                 near=0.01,
                 far=100,
                 mount=self.overhead_camera_mount,
@@ -478,18 +483,18 @@ class DualCameraEnv(BaseRandomEnv):
     def _update_camera_poses(self):
         """Follow the URDF-calibrated camera links, plus a constant calibration offset
         and small per-episode jitter on each."""
-        config = self.domain_randomization_config
+        dr = self.domain_randomization_config
 
-        wrist_offset = self._offset_pose(config.wrist_camera_pos_offset, config.wrist_camera_rot_offset)
+        wrist_offset = self._offset_pose(dr.wrist_camera_pos_offset, dr.wrist_camera_rot_offset)
         wrist_jitter = _sample_jitter_pose(
-            self.num_envs, config.wrist_camera_pos_noise, config.wrist_camera_rot_noise,
+            self.num_envs, dr.wrist_camera_pos_noise, dr.wrist_camera_rot_noise,
             self.domain_randomization, self.device,
         )
         self.wrist_camera_mount.set_pose(self.agent.wrist_camera_link.pose * wrist_offset * wrist_jitter)
 
-        overhead_offset = self._offset_pose(config.overhead_camera_pos_offset, config.overhead_camera_rot_offset)
+        overhead_offset = self._offset_pose(dr.overhead_camera_pos_offset, dr.overhead_camera_rot_offset)
         overhead_jitter = _sample_jitter_pose(
-            self.num_envs, config.overhead_camera_pos_noise, config.overhead_camera_rot_noise,
+            self.num_envs, dr.overhead_camera_pos_noise, dr.overhead_camera_rot_noise,
             self.domain_randomization, self.device,
         )
         self.overhead_camera_mount.set_pose(self.agent.overhead_camera_link.pose * overhead_offset * overhead_jitter)

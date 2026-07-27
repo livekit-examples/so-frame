@@ -23,48 +23,30 @@ from mani_skill.utils.structs.pose import Pose
 from .base_random_env import DualCameraEnv, RandomizationConfig
 from ..robot.so101_on_frame import SO101OnFrame
 
-WORK_SURFACE_Z = 0.0
-
-# Reward: a MONOTONIC STAGE LADDER (see compute_dense_reward), deliberately kept small.
-#
-# Each stage is a fixed rung plus at most 1.0 of bounded shaping, and each rung sits above the
-# previous stage's maximum. That spacing is what does the work: progress is strictly monotone,
-# a regression drops to a lower rung on its own, and there is nothing to trade off against.
-# No penalty terms -- motion limits are enforced structurally instead (the delta action space
-# caps per-step speed at the measured real servo rate, and the 3 N.m force limits cap torque
-# at the STS3215 stall value), so there is no smoothness or effort term left to tune.
-#
-#   reach [0,1] < grasped [2,3] < holding [4,5] < released 6 < success 10
-#
-REWARD_SUCCESS = 10.0     # terminal: bar settled in bin, arm + bar static, gripper clear
-RUNG_RELEASED = 6.0       # bar over the bin, released -- must dominate holding
-RUNG_HOLDING = 4.0        # bar over the bin, still gripped (leave it by opening the jaw)
-RUNG_GRASPED = 2.0        # bar grasped, carried toward the drop point (not yet over the bin)
-#                           reach stage base is 0 (shaping only)
-
-# The one shaping term worth keeping past the rungs: how far opening the jaw over the bin pays
-# BEFORE contact breaks. Without it the holding rung is a flat plateau and the policy sits on
-# it holding the bar, because releasing is a blind leap to the next rung. Stays at 1.0 so the
-# most-open still-holding pose (5.0) is still strictly worse than an actual release (6.0).
-SHAPE_HOLD_OPEN = 1.0
-
-SHARP = 5.0               # single tanh sharpness (~1/length-scale, m^-1) for every distance term
-REACH_XY_ALIGNED = 0.03   # tcp within this xy of the bar is "aligned" and may descend
-# Drop point height above the bin RIM (not floor): the jaw can't open at depth in the 84 mm
-# interior. Carry here, open, let gravity finish; success still requires the bar settled IN the bin.
-GOAL_CLEARANCE = 0.05
-
-# Item and bin spawn in separate regions along the rail, far enough apart that reaching both
-# requires sliding. The small bar gets the far region (dead-center in the overhead frame; it
-# can vanish behind the arm in the near region); the larger bin stays visible in either.
-ITEM_SPAWN_CENTER = (-0.225, -0.70)
-BIN_SPAWN_CENTER = (-0.225, -0.30)
-SPAWN_HALF_SIZE = 0.1
+# Every tunable constant lives in ../config.py; imported by name here so the reward reads
+# cleanly. See that file for the reasoning behind the ladder spacing and the motion limits.
+from ..config import (  # noqa: E402
+    BIN_SPAWN_CENTER,
+    GOAL_CLEARANCE,
+    ITEM_SPAWN_CENTER,
+    REACH_XY_ALIGNED,
+    REWARD_SUCCESS,
+    RUNG_GRASPED,
+    RUNG_HOLDING,
+    RUNG_RELEASED,
+    SHAPE_HOLD_OPEN,
+    SHARP,
+    SPAWN_HALF_SIZE,
+    WORK_SURFACE_Z,
+)
 
 
 @dataclass
 class PickPlaceRandomizationConfig(RandomizationConfig):
-    """Domain randomization config for the pick-and-place task."""
+    """Domain randomization config for the pick-and-place task.
+
+    Randomization *ranges* live here rather than in config.py: they are per-run and
+    CLI-overridable, whereas config.py holds the fixed physical constants of the rig."""
 
     robot_qpos_noise_std: float = np.deg2rad(5)
     # Flat bar matching the real object, 75 x 25 x 15 mm (footprint diagonal ~79 mm fits the

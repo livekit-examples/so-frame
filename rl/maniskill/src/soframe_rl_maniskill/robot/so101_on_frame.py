@@ -27,40 +27,13 @@ SO101_ON_FRAME_URDF = (
 )
 assert SO101_ON_FRAME_URDF.exists(), f"SO-101-on-frame URDF not found at {SO101_ON_FRAME_URDF}"
 
-# Grasp point between the finger pads, in gripper_link's frame. Matches the `grasp_site`
-# MJCF site added for rl/mjlab (simulation/mjcf/so101_on_frame.xml).
-GRASP_SITE_OFFSET = sapien.Pose(p=[0.012, 0.0, -0.07])
+# All of the tunable physical constants live in ../config.py; this module reads them so there
+# is one place to edit. Imported as a module (not `from config import ...`) so a runtime
+# override of e.g. config.ARM_SPEED_SCALE is picked up when the controller is built.
+from .. import config
 
-# Per-joint delta-position step limits (rad for revolute joints, m for the rail), keyed by
-# name so joint order from the URDF loader doesn't matter. Caps track measured real servo
-# speeds (arm ~0.5 rad/s, rail ~7 cm/s) so the motion profile transfers to the real rig.
-_JOINT_DELTA_LIMITS = {
-    "dof_slider": 0.007,
-    "shoulder_pan": 0.05,
-    "shoulder_lift": 0.05,
-    "elbow_flex": 0.05,
-    "wrist_flex": 0.05,
-    "wrist_roll": 0.05,
-    "gripper": 0.2,
-}
-
-# Per-joint force limits: N*m for the six STS3215 revolute servos, N for the rail. Capping
-# at the STS3215's ~3 N*m stall torque keeps the sim arm from pressing harder than the real
-# servo can, closing the sim2real gap. Matches simulation/mjcf/sts3215.xml (forcerange -3 3).
-# The rail is a separate belt-driven actuator, left at a functional value.
-STS3215_STALL_TORQUE = 3.0  # N*m (30 kg*cm @ 12V)
-_JOINT_FORCE_LIMITS = {
-    "dof_slider": 100.0,
-    "shoulder_pan": STS3215_STALL_TORQUE,
-    "shoulder_lift": STS3215_STALL_TORQUE,
-    "elbow_flex": STS3215_STALL_TORQUE,
-    "wrist_flex": STS3215_STALL_TORQUE,
-    "wrist_roll": STS3215_STALL_TORQUE,
-    "gripper": STS3215_STALL_TORQUE,
-}
-
-# Multiplier on the arm/rail delta limits (NOT the gripper) for arm-speed ablations.
-ARM_SPEED_SCALE = 1.0
+GRASP_SITE_OFFSET = config.GRASP_SITE_OFFSET
+STS3215_STALL_TORQUE = config.STS3215_STALL_TORQUE
 
 # PBR texture sets for `apply_realistic_materials` (see `RandomizationConfig.visual_fidelity`).
 _TEXTURES_ROOT = _REPO_ROOT / "simulation" / "assets" / "textures"
@@ -126,13 +99,16 @@ class SO101OnFrame(BaseAgent):
 
     # qpos order matches `self.robot.active_joints`:
     #   [dof_slider, shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
+    # The rest pose is config.REST_QPOS; the deploy-side reset ramps to the same pose.
+    _JOINT_ORDER = ("dof_slider", "shoulder_pan", "shoulder_lift", "elbow_flex",
+                    "wrist_flex", "wrist_roll", "gripper")
     keyframes = dict(
         rest=Keyframe(
-            qpos=np.array([0.0, 0.0, -0.5, 0.8, 0.6, 0.0, 1.2]),
+            qpos=np.array([config.REST_QPOS[j] for j in _JOINT_ORDER]),
             pose=sapien.Pose(),
         ),
         zero=Keyframe(
-            qpos=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            qpos=np.zeros(len(_JOINT_ORDER)),
             pose=sapien.Pose(),
         ),
     )
@@ -140,20 +116,21 @@ class SO101OnFrame(BaseAgent):
     @property
     def _controller_configs(self):
         joint_names = self.joint_names
-        # Scale arm/rail limits by ARM_SPEED_SCALE (gripper unscaled).
+        # Scale arm/rail limits by config.ARM_SPEED_SCALE (gripper unscaled). Read here rather
+        # than at import so --arm_speed_scale can override it before the env is built.
         def _limit(name):
-            lim = _JOINT_DELTA_LIMITS[name]
-            return lim if name == "gripper" else lim * ARM_SPEED_SCALE
+            lim = config.JOINT_DELTA_LIMITS[name]
+            return lim if name == "gripper" else lim * config.ARM_SPEED_SCALE
         delta_lower = [-_limit(name) for name in joint_names]
         delta_upper = [_limit(name) for name in joint_names]
-        force_limits = [_JOINT_FORCE_LIMITS[name] for name in joint_names]
+        force_limits = [config.JOINT_FORCE_LIMITS[name] for name in joint_names]
 
         pd_joint_pos = PDJointPosControllerConfig(  # noqa: F405
             joint_names,
             lower=None,
             upper=None,
-            stiffness=1e3,
-            damping=1e2,
+            stiffness=config.JOINT_STIFFNESS,
+            damping=config.JOINT_DAMPING,
             force_limit=force_limits,
             normalize_action=False,
         )
@@ -162,8 +139,8 @@ class SO101OnFrame(BaseAgent):
             joint_names,
             delta_lower,
             delta_upper,
-            stiffness=[1e3] * len(joint_names),
-            damping=[1e2] * len(joint_names),
+            stiffness=[config.JOINT_STIFFNESS] * len(joint_names),
+            damping=[config.JOINT_DAMPING] * len(joint_names),
             force_limit=force_limits,
             use_delta=True,
             use_target=False,

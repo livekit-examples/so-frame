@@ -1924,6 +1924,24 @@ wheels = [
 ]
 
 [[package]]
+name = "soframe-nets"
+version = "0.1.0"
+source = { editable = "../../nets" }
+dependencies = [
+    { name = "numpy" },
+    { name = "torch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy" },
+    { name = "torch", specifier = ">=2.6.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8" }]
+
+[[package]]
 name = "soframe-rl-maniskill"
 version = "0.1.0"
 source = { editable = "." }
@@ -1933,6 +1951,7 @@ dependencies = [
     { name = "mani-skill-nightly" },
     { name = "numpy" },
     { name = "opencv-python" },
+    { name = "soframe-nets" },
     { name = "tensordict" },
     { name = "torch" },
     { name = "torchrl" },
@@ -1950,6 +1969,7 @@ requires-dist = [
     { name = "mani-skill-nightly" },
     { name = "numpy" },
     { name = "opencv-python", specifier = "==4.12.0.88" },
+    { name = "soframe-nets", editable = "../../nets" },
     { name = "tensordict", specifier = "==0.7.2" },
     { name = "torch", specifier = ">=2.6.0" },
     { name = "torchrl", specifier = "==0.7.2" },
