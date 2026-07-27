@@ -55,6 +55,32 @@ JOINT_DAMPING = 1e2
 
 
 # =====================================================================================
+# Solver cost
+# =====================================================================================
+# PhysX solver settings. These are pure cost/fidelity knobs -- they change no physical constant,
+# only how hard the solver works per substep -- and the physics stage is roughly a third of a
+# step, so they are the cheapest thing to trade.
+#
+# ManiSkill's defaults are 15 position / 1 velocity iterations with friction recomputed every
+# iteration, which is tuned for tasks far more contact-rich than a 3.2 g cube resting on a flat
+# panel. Dropping to these cut the physics stage from 105 to 65 ms/step at 512 envs on an
+# RTX 5090.
+#
+# The measurement that bounds how low they can go is the residual speed of a cube that should be
+# sitting still: 0.37 mm/s at 15 position iterations, 1.33 at 8, 5.29 at 4. So 4 is where a cube
+# left alone starts buzzing, and 8 is the floor. A cube thrown into the bin at 2 m/s never
+# tunnelled its 5 mm collision walls at any setting tried. If you lower these further, re-check
+# both of those -- and note that steady-state arm droop tells you nothing here, since at ~2
+# degrees it is set by the real 3 N.m STS3215 effort limit rather than by solver quality.
+SOLVER_POSITION_ITERATIONS = 8
+SOLVER_VELOCITY_ITERATIONS = 0
+# Recomputing friction on every solver iteration made no measurable difference to either check,
+# so it is off: free. It would matter for an object held by friction alone; the cube is gripped
+# between two jaws at static_friction 2.0 and weighs 3.2 g.
+FRICTION_EVERY_ITERATION = False
+
+
+# =====================================================================================
 # Robot geometry
 # =====================================================================================
 # Grasp point between the finger pads, in gripper_link's frame. Matches the `grasp_site` MJCF
@@ -264,3 +290,8 @@ SENSOR_FAR = 3.0
 # overlay image is 128x128 of pure black) at the cost of a whole extra segmentation render pass
 # per camera per step. It was at -1.0, inside the far plane, which is why that pass existed.
 GROUND_ALTITUDE = -5.0
+
+# The third-person video camera. Not an input to anything -- the policy sees only the two sensor
+# cameras -- but its render target is allocated per sub-scene, so it was reserving ~1 GB of VRAM
+# at 512x512 and 1024 envs. Raise it for a --capture_video eval; training does not read it.
+HUMAN_RENDER_RESOLUTION = 128

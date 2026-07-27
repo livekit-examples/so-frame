@@ -19,7 +19,7 @@ from mani_skill.utils import common, sapien_utils
 from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.articulation import Articulation
 from mani_skill.utils.structs.link import Link
-from mani_skill.utils.structs.types import SimConfig
+from mani_skill.utils.structs.types import SceneConfig, SimConfig
 from mani_skill.utils.structs import Pose
 from mani_skill.utils.visualization.misc import tile_images
 
@@ -154,12 +154,26 @@ class BaseRandomEnv(BaseEnv):
 
     @property
     def _default_sim_config(self):
-        return SimConfig(sim_freq=int(config.SIM_HZ), control_freq=int(config.CONTROL_HZ))
+        return SimConfig(
+            sim_freq=int(config.SIM_HZ),
+            control_freq=int(config.CONTROL_HZ),
+            # Solver effort is a cost knob, not a physical constant; see config.py.
+            scene_config=SceneConfig(
+                solver_position_iterations=config.SOLVER_POSITION_ITERATIONS,
+                solver_velocity_iterations=config.SOLVER_VELOCITY_ITERATIONS,
+                enable_friction_every_iteration=config.FRICTION_EVERY_ITERATION,
+            ),
+        )
 
     @property
     def _default_human_render_camera_configs(self):
+        # A third-person camera for videos and nothing else: the policy never sees it. Its render
+        # target is allocated per sub-scene, so at 512x512 and 1024 envs it reserved about a
+        # gigabyte of VRAM for a camera that only fires when RecordEpisode asks. Sized from
+        # config so a training run pays little and --capture_video runs can raise it.
         pose = sapien_utils.look_at([0.5, 0.3, 0.35], [0.3, 0.0, 0.1])
-        return CameraConfig("render_camera", pose, 512, 512, 52 * np.pi / 180, 0.01, 100)
+        size = config.HUMAN_RENDER_RESOLUTION
+        return CameraConfig("render_camera", pose, size, size, 52 * np.pi / 180, 0.01, 100)
 
     @property
     def apply_greenscreen(self) -> bool:
