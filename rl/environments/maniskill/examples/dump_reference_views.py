@@ -76,7 +76,8 @@ if not args.show_objects:
     u.item.set_pose(Pose.create_from_pq(torch.tensor([[5.0, 5.0, 0.5]])))
     u.bin.set_pose(Pose.create_from_pq(torch.tensor([[6.0, 6.0, 0.5]])))
 
-u._update_camera_poses()
+# No camera-pose sync needed: both sensor cameras are SAPIEN-mounted on their URDF camera
+# links, so moving the rail above already moved the wrist camera with it.
 u.scene.update_render()
 obs = u.get_obs()
 

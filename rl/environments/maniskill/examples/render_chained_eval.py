@@ -45,7 +45,7 @@ parser.add_argument("--render_size", type=int, default=512)
 # they move in sim -- and on the real robot.)
 parser.add_argument("--fps", type=int, default=10)
 parser.add_argument("--visual_fidelity", type=str, default="raster", choices=["flat", "raster", "raytraced"])
-parser.add_argument("--no_overlay", action="store_true", help="skip the greenscreen background overlay for a showcase render; policies are TRAINED with the overlay (background composited to black), so leaving it on is what matches their training obs and success rates")
+parser.add_argument("--overlay", action="store_true", help="composite the greenscreen background overlay. OFF matches training: the background is black by construction now that the ground plane sits beyond config.SENSOR_FAR, so the overlay (and the segmentation render that drives it) is no longer part of the training obs. Only pass this to composite a real background photo")
 parser.add_argument("--sim_envs", type=int, default=16, help="number of parallel sim envs; only env 0 is filmed. Policies trained in batched GPU physics measurably degrade when rolled out in a lone env (contact dynamics resolve differently in a single-scene solver), so render with a training-sized batch. Forced to 1 for raytraced (cpu backend).")
 parser.add_argument("--domain_randomization", action="store_true")
 parser.add_argument("--seed", type=int, default=0)
@@ -65,15 +65,17 @@ steady_cameras = dict(
 
 env_kwargs = dict(
     # The greenscreen overlay only engages when segmentation is in the obs mode
-    # (base_random_env skips it otherwise), and training always ran with it -- plain
-    # "rgb" here silently fed the policy backgrounds it never saw in training.
-    obs_mode="rgb" if args.no_overlay else "rgb+segmentation",
+    # (base_random_env skips it otherwise). Training used to always run with it, so plain
+    # "rgb" here silently fed the policy backgrounds it never saw; that is now the other way
+    # round -- training is plain "rgb" and the black background comes from the far-plane cull,
+    # so asking for the overlay is what would differ from the training obs.
+    obs_mode="rgb+segmentation" if args.overlay else "rgb",
     render_mode="sensors",
     num_envs=1 if args.visual_fidelity == "raytraced" else args.sim_envs,
     domain_randomization=args.domain_randomization,
     domain_randomization_config=dict(
         visual_fidelity=args.visual_fidelity,
-        apply_overlay=not args.no_overlay,
+        apply_overlay=args.overlay,
         **steady_cameras,
     ),
     sensor_configs=dict(width=args.render_size, height=args.render_size),
