@@ -99,14 +99,41 @@ box geoms.
 The root `fix_1` joint (`root → 100cm`) carries a small `+0.01 m` origin lift so the lightbox
 floor's collision pad sits at world `z ≈ 0` rather than slightly underground.
 
+## Visual geometry
+
+Some links are **frames only** — they carry no `<visual>`, so they render as nothing while
+keeping the kinematic chain intact. They were trimmed because the RL render stage is
+geometry-bound (see `rl/environments/maniskill`), and these parts are either hidden inside an
+enclosure or too small to read at the 128 px the policy cameras render at:
+
+| Dropped | Why |
+| --- | --- |
+| `handle`, `handle_1` | frame handles, outside the workspace |
+| `m5x25_low_profile_screw*` | fastener heads |
+| `ge_27`, `motor_1723_3`, `pcb_chazuo_92`, `pinion`, the two metal servo horns | rail drive internals; the enclosure (`sg_ziji_15`, `xg_ziji_16`, `zk_122`) is kept |
+
+That takes a rig from 756k to 567k triangles, about 25% off. The STLs stay on disk
+(`Handle.stl`, `M5x25_low_profile_screw.stl`, `GE_27.stl`, `MOTOR_1723_3.stl`,
+`PCB_CHAZUO_92.stl`, `Pinion.stl`) and are simply unreferenced, so re-adding a `<visual>`
+block is all it takes to get one back.
+
+**The MJCF has not been trimmed** — `../mjcf/so101_on_frame.xml` still renders all of these,
+so the two models differ in visual geometry (only in visual geometry; kinematics, collision
+and camera frames still match).
+
 ## Colors
 
 Set in the combined URDF (edit the palette at the top of the build if you want to tweak):
 
 - SO-101 arm links: **white**; gripper fingers (`wrist_roll_follower`, `moving_jaw`): **orange**
-- Frame `base_mount` + `pinion`: **orange** (same as gripper)
+- Frame `base_mount`: **orange** (same as gripper). `pinion` is assigned orange too, but has
+  no visual geometry left to show it (see above).
 - Aluminium extrusions (`50cm*`, `100cm*`): **medium gray** (to separate from the light side panels)
 - Frame `32mm_camera_holder`: **white**; motors stay black
+
+These are the *baked* colours. `rl/environments/maniskill` recolours the rig at load time from
+its own scheme in `config.py` (black frame and slider, white arm and gripper, motor hardware
+left alone), so the sim renders will not match this palette.
 
 ## Regenerating
 

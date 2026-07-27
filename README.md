@@ -155,10 +155,11 @@ Built on [mjlab](https://github.com/mujocolab/mjlab) (Isaac Lab's manager-based 
 GPU-accelerated MuJoCo-Warp), using the [simulation](#simulation) MJCF model. Trains with
 PPO (rsl-rl) across thousands of parallel environments on ground-truth cube/bin poses.
 
-> **Heads up on the current policy.** It doesn't actually pick and place. The policy found a
-> shortcut and instead **putts the cube like a golf shot**, whacking it across the workspace
-> and into the bin rather than grasping and lifting it. It's a fun bit of reward hacking, and
-> the reward shaping is still being tuned to coax out a proper grasp.
+> **No trained policy ships here.** The environment is the deliverable; you train your own.
+> The action space and control rate were since reworked to match the rest of the repo
+> (10 Hz instead of 50, a per-step motion cap at the measured real servo speed, 3 N·m
+> effort limits, and no smoothness penalties), so any older checkpoint you have means
+> something different by every action it emits.
 
 It's a [uv](https://docs.astral.sh/uv/) project. From `rl/environments/mjlab/`:
 
@@ -177,11 +178,11 @@ manager, and config details.
 
 <img src="assets/rl-maniskill.gif" alt="Vision-based RL rollouts (wrist + overhead cameras)" width="880">
 
-*Chained rollouts (wrist camera left, overhead camera right), rendered in the flat shading
-they were trained on.*
+*Chained rollouts (wrist camera left, overhead camera right).*
 
-Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
-RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
+Trains purely from **the frame's own two cameras** — the wrist camera and the overhead
+camera: no ground-truth cube/bin poses, just RGB pixels and proprioception. Built on
+[ManiSkill3](https://github.com/haosulab/ManiSkill)
 (SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
 Sim-to-Real Robotics](https://arxiv.org/abs/2602.21203) (Almuzairee & Christensen, 2026), a
 visual Soft Actor-Critic that reaches strong success rates in **minutes** of wall-clock time.
@@ -209,9 +210,9 @@ uv run python train.py                      # squint CNN
 uv run python train.py --encoder dino_patch # frozen DINOv2 + patch head
 ```
 
-Task, robot and reward constants live in `rl/environments/maniskill/src/soframe_rl_maniskill/config.py`.
-The encoder, actor and checkpoint format are shared with deploy in
-**[policy/](policy/README.md)**.
+Task, robot, reward, colour and render-cost constants live in
+`rl/environments/maniskill/src/soframe_rl_maniskill/config.py`. The encoder, actor and
+checkpoint format are shared with deploy in **[rl/policy/](rl/policy/README.md)**.
 
 Needs a **Linux + NVIDIA GPU** machine (ManiSkill3/SAPIEN + CUDA; macOS can read/edit code but
 not train). See **[rl/environments/maniskill/README.md](rl/environments/maniskill/README.md)** for the task,

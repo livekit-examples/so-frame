@@ -41,22 +41,15 @@ Training parameters (parallel envs, iterations, PPO hyperparameters, network siz
 **[`train.toml`](train.toml)**. Edit that file rather than the Python. Any value can still
 be overridden per run on the CLI (e.g. `--env.scene.num-envs 2048`).
 
-### Pretrained checkpoint
+No trained checkpoint ships with this directory — `soframe-play` and `soframe-render` both
+need one you trained yourself. `soframe-train` writes to
+`logs/rsl_rl/<experiment_name>/<timestamp>/` (`experiment_name` comes from `train.toml`).
 
-A trained policy ships in **[`checkpoints/model_best.pt`](checkpoints/model_best.pt)**
-(~4 MB): **55.6% place-success at 94% workspace randomization**, trained with the full
-recipe described below. Try it without training anything:
-
-```bash
-# interactive viewer
-uv run soframe-play Mjlab-Pick-Place-Bin-SO101 --checkpoint-file checkpoints/model_best.pt
-
-# fleet video (one arm -> endless field); vary --seed for different rollouts
-uv run soframe-render --checkpoint-file checkpoints/model_best.pt --seed 0 --out fleet.mp4
-```
-
-Both run best on GPU but also work on CPU (slowly; pass `--device cpu` to
-`soframe-render`).
+Note that the action space and control rate were reworked after the last policy was trained
+here: 10 Hz instead of 50, and delta-from-target with a real-speed per-step cap instead of an
+absolute target from the home pose. Observation and action *dimensions* are unchanged, so an
+older checkpoint still loads — it just means something different by every action it emits.
+Retrain rather than trusting one.
 
 ### Fleet render
 
@@ -74,7 +67,6 @@ rl/environments/mjlab/
 ├── pyproject.toml            uv project; mjlab dep + console scripts
 ├── .python-version           pinned to 3.13
 ├── train.toml                training params (edit this to tune runs)
-├── checkpoints/model_best.pt pretrained policy (55.6% success @ 94% randomization)
 └── src/soframe_rl/
     ├── __init__.py           imports config -> registers the task
     ├── train.py / play.py    thin wrappers around mjlab's CLIs
@@ -85,6 +77,8 @@ rl/environments/mjlab/
     ├── assets.py             get_cube_spec (free box) + get_bin_spec (fixed tray)
     ├── pick_place_env_cfg.py robot-agnostic manager wiring (obs/act/reward/etc.)
     ├── mdp/
+    │   ├── actions.py        TargetRelativeJointPositionAction: delta from the running
+    │   │                     target, clamped to the soft joint limits
     │   ├── commands.py       PlaceInBinCommand: spread-scaled cube+bin placement,
     │   │                     goal inside the bin, carry-progress tracking
     │   ├── rewards.py        grasp_lift, potential-based transport, in_bin_bonus
@@ -109,28 +103,33 @@ The scene has three entities:
   re-declared in Python as `BuiltinPositionActuatorCfg`s, so stiffness/damping/effort/
   armature are first-class, tunable, sim-to-real knobs rather than buried in XML. It's a
   fixed-base entity, so mjlab wraps it in a mocap body that also carries the frame's
-  loose geoms, keeping the whole rig positioned correctly in every parallel env.
+  loose geoms, keeping the whole rig positioned correctly in every parallel env. The arm
+  and gripper are capped at the STS3215's ~3 N·m stall torque, matching the XML's
+  `actuatorfrcrange` and the maniskill twin.
 - **`cube`**: a free (`freejoint`) 2.5 cm, 30 g box with high tangential friction so the
-  gripper can hold it.
-- **`bin`**: a base plate plus four walls. No freejoint, so it's teleported to a new spot
-  each episode rather than physically knocked around.
+  gripper can hold it. (The maniskill twin uses a 20 mm CAD cube instead; the two task
+  objects are not identical.)
+- **`bin`**: a base plate plus four walls, 10 cm interior. No freejoint, so it's teleported
+  to a new spot each episode rather than physically knocked around.
 
 The rig sits at a height where the frame's legs rest on the ground plane and the lightbox's
 bottom panel sits at the workspace surface height, with the cube and bin placed on that
-panel in the arm's reach. Physics runs at `timestep=0.005` with `decimation=4` (policy acts
-at 50 Hz).
+panel in the arm's reach. Physics runs at `timestep=0.005` with `decimation=20`, so the
+policy acts at **10 Hz** — the same rate as `so101_constants.CONTROL_HZ`, the maniskill twin
+and the deploy loop's portal tick. Episodes are 30 s (300 steps), which is the runway the
+real-servo speeds need to reach, carry and place.
 
 ### Managers
 
 | Manager | What ours does |
 |---|---|
 | **Observation** | Two groups: `actor` (27-dim, with input noise) and `critic` (same, no noise). Joint pos (7) + joint vel (7) + `ee_to_cube` (3) + `cube_to_goal` (3) + last action (7). |
-| **Action** | One `JointPositionActionCfg` over all 7 actuators (slider + 5 arm + gripper): delta position targets, per-actuator scale, added to the current pose and clipped to joint limits. |
+| **Action** | One `TargetRelativeJointPositionActionCfg` (ours, `mdp/actions.py`) over all 7 actuators (slider + 5 arm + gripper): `target = clamp(previous_target + action * scale)`. Integrating from the previous *target* rather than the measured pose is what the maniskill twin and the deploy loop both do — delta-from-current can't get ahead of a lagging joint, so the target collapses onto the measured pose and the arm stalls under load. `scale` is the measured real joint speed divided by `CONTROL_HZ`, making it a hard per-step motion cap. |
 | **Command** | `PlaceInBinCommand`. On each episode reset it samples a bin and cube position (keeping them apart), teleports both, and publishes a target point just above the bin opening. |
 | **Event** | Resets the robot to its home pose plus a small jitter. Domain-randomization events are a TODO. |
 | **Reward** | The staged terms below. |
 | **Termination** | Time-out only (episode length cap); no early failure termination. |
-| **Curriculum** | Ramps the placement spread and the joint-velocity penalty over training. |
+| **Curriculum** | Ramps the placement spread over training. |
 
 ### Reward
 
@@ -144,26 +143,30 @@ dense term plus a milestone bonus:
 | `transport` | Potential-based carry: rewards only the per-step reduction in the lifted cube's distance to the bin, so it can't be farmed by hovering. |
 | `place_precise` | Sharpens placement once the cube is near the target. |
 | `in_bin_bonus` | Milestone bonus for landing the cube in the bin. |
-| `action_rate_l2` | Penalizes jerky action changes. |
 | `joint_pos_limits` | Keeps the arm off its joint end-stops. |
-| `joint_vel_hinge` | Penalizes joint speeds above a threshold; curriculum-ramped. |
+
+**No speed or smoothness penalties.** `action_rate_l2` and `joint_vel_hinge` are gone: they
+were standing in for a rate limit the action space did not have (the hinge's `max_vel` was
+0.5, literally the real arm's 0.5 rad/s). The relative action space's per-step cap enforces
+the same thing structurally, with no weight to tune against the task rewards.
 
 **Success** (a metric, not a reward) means the cube's center is inside the bin footprint,
 below the rim.
 
 ### Curriculum
 
-Two terms ramp with training progress:
+One term ramps with training progress:
 
-- **Placement spread**: the key one. The cube/bin layout scales from fixed and easy
-  (a short hop between them) to full workspace randomization. It's performance-gated: a
-  smoothed success rate drives it, so it holds the easy layout until the policy can place,
-  then widens randomization as fast as the policy keeps up, and backs off if it starts
-  failing.
-- **Smoothness**: the joint-velocity penalty ramps up linearly over training, so the
-  policy can explore freely early on and is pushed toward smooth, hardware-safe motion
-  later. The ramp is gradual and capped, since too sharp or too large a penalty can make
-  the policy stop moving altogether.
+- **Placement spread**: the cube/bin layout scales from fixed and easy (a short hop between
+  them) to full workspace randomization. It's performance-gated: a smoothed success rate
+  drives it, so it holds the easy layout until the policy can place, then widens
+  randomization as fast as the policy keeps up, and backs off if it starts failing.
+
+The smoothness-penalty ramp that used to sit alongside it went with the penalty it tuned.
+Its own rationale was the argument against it: the weight had to be ramped linearly because
+a step change could collapse a trained policy, and had to stay under a threshold or the
+penalty outbid the task rewards. A per-step cap in the action space has no weight and no
+window to fall out of.
 
 ### Configs
 
