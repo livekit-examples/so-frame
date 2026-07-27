@@ -356,15 +356,6 @@
       <origin xyz="-0.01 0.0515595 0.0231577" rpy="0 -0 0" />
       <inertia ixx="2.29497e-08" ixy="4.50052e-15" ixz="0" iyy="3.51411e-09" iyz="1.0628e-14" izz="2.08762e-08" />
     </inertial>
-    <visual>
-      <origin xyz="-0.01 0.0515595 0.0365" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/Handle.stl" scale="1 1 1" />
-      </geometry>
-      <material name="handle_black">
-        <color rgba="0.1 0.1 0.1 1" />
-      </material>
-    </visual>
   </link>
   <link name="handle_1">
     <inertial>
@@ -372,15 +363,6 @@
       <origin xyz="0.008 0.0665595 0.0231577" rpy="0 -0 0" />
       <inertia ixx="2.29497e-08" ixy="4.50052e-15" ixz="0" iyy="3.51411e-09" iyz="1.0628e-14" izz="2.08762e-08" />
     </inertial>
-    <visual>
-      <origin xyz="0.008 0.0665595 0.0365" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/Handle.stl" scale="1 1 1" />
-      </geometry>
-      <material name="handle_black">
-        <color rgba="0.1 0.1 0.1 1" />
-      </material>
-    </visual>
   </link>
   <link name="inside_corner_bracket_3_way_hidden_2020">
     <inertial>
@@ -580,15 +562,6 @@
       <origin xyz="6.45003e-19 -3.29374e-18 0.0110966" rpy="0 -0 0" />
       <inertia ixx="5.00809e-11" ixy="0" ixz="0" iyy="5.00809e-11" iyz="0" izz="4.26932e-12" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/M5x25_low_profile_screw.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <color rgba="0.74902 0.74902 0.74902 1" />
-      </material>
-    </visual>
   </link>
   <link name="m5x25_low_profile_screw_1">
     <inertial>
@@ -596,15 +569,6 @@
       <origin xyz="6.45003e-19 -3.29374e-18 0.0110966" rpy="0 -0 0" />
       <inertia ixx="5.00809e-11" ixy="0" ixz="0" iyy="5.00809e-11" iyz="0" izz="4.26932e-12" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/M5x25_low_profile_screw.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <color rgba="0.74902 0.74902 0.74902 1" />
-      </material>
-    </visual>
   </link>
   <link name="m5x25_low_profile_screw_2">
     <inertial>
@@ -612,15 +576,6 @@
       <origin xyz="6.45003e-19 -3.29374e-18 0.0110966" rpy="0 -0 0" />
       <inertia ixx="5.00809e-11" ixy="0" ixz="0" iyy="5.00809e-11" iyz="0" izz="4.26932e-12" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/M5x25_low_profile_screw.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <color rgba="0.74902 0.74902 0.74902 1" />
-      </material>
-    </visual>
   </link>
   <link name="m5x25_low_profile_screw_3">
     <inertial>
@@ -628,15 +583,6 @@
       <origin xyz="6.45003e-19 -3.29374e-18 0.0110966" rpy="0 -0 0" />
       <inertia ixx="5.00809e-11" ixy="0" ixz="0" iyy="5.00809e-11" iyz="0" izz="4.26932e-12" />
     </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
-      <geometry>
-        <mesh filename="components/base_frame/meshes/M5x25_low_profile_screw.stl" scale="1 1 1" />
-      </geometry>
-      <material name="0.749020_0.749020_0.749020_0.000000_0.000000">
-        <color rgba="0.74902 0.74902 0.74902 1" />
-      </material>
-    </visual>
   </link>
   <link name="mate_connector_1">
     <inertial>
