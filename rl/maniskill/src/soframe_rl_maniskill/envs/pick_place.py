@@ -373,27 +373,18 @@ class PickPlaceBin(DualCameraEnv):
             self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
 
     def _get_obs_agent(self):
+        """The actor's proprio: noisy measured qpos (7) then the controller's target qpos (7).
+
+        This is the deploy contract -- 14 values the real rig can always produce, in this
+        order. Anything added here changes what every deployed checkpoint expects, so keep it
+        to quantities the robot actually measures or commands. (A previous version inserted
+        action-delay fields here, which silently broke deploy; see nets/README.md.)
+        """
         qpos = self.agent.robot.get_qpos()
         if self.domain_randomization and self.domain_randomization_config.robot_qpos_noise_std > 0:
             noise = torch.randn_like(qpos) * self.domain_randomization_config.robot_qpos_noise_std
             qpos = qpos + noise
         obs = dict(noisy_qpos=qpos)
-
-        # Delayed-MDP augmentation: with a random action delay the raw obs is non-Markov, so
-        # expose the not-yet-applied action history plus the sampled delay to restore Markov.
-        # At deploy, feed the last `max_delay` actions sent and the loop latency / max_delay.
-        max_delay = int(self.domain_randomization_config.action_delay_steps_range[1])
-        if max_delay > 0:
-            act_dim = self.agent.controller.action_space.shape[-1]
-            if self._action_queue is not None:
-                pending = self._action_queue[:, :max_delay].reshape(self.num_envs, -1)
-            else:
-                pending = torch.zeros(self.num_envs, max_delay * act_dim, device=self.device)
-            if self._action_delay is not None:
-                delay = (self._action_delay.float() / max_delay).unsqueeze(-1)
-            else:
-                delay = torch.zeros(self.num_envs, 1, device=self.device)
-            obs.update(pending_actions=pending, action_delay=delay)
 
         controller_state = self.agent.controller.get_state()
         if len(controller_state) > 0:

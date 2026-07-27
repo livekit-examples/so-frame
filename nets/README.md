@@ -24,9 +24,12 @@ That comment was the only mechanism keeping the two in sync, and it did not hold
 1. **The proprio layout drifted.** When per-episode action delay was added to the env, the
    actor's state vector went from `noisy_qpos(7) | target_qpos(7)` = 14 to
    `noisy_qpos(7) | pending_actions(7) | action_delay(1) | target_qpos(7)` = 22. Deploy kept
-   building 14. Every checkpoint from v52 on is undeployable by that code, and if the widths
+   building 14. Every checkpoint from v52 on was undeployable by that code, and if the widths
    had happened to line up it would have fed `target_qpos` into the slot the policy reads as
-   `pending_actions` and driven the robot on a silently wrong observation.
+   `pending_actions` and driven the robot on a silently wrong observation. The action-delay
+   machinery has since been removed from the env, so the contract is 14 by construction — but
+   it is still recorded per checkpoint, so the next change to `_get_obs_agent` fails loudly
+   rather than silently.
 2. **Only 2 of 5 architectures were ever vendored**, so `dino_lora` and `dino_patch`
    checkpoints could not be deployed at all.
 3. **The input resolution was a CLI flag** (`--dino-res`), remembered by hand. `v57_dino_patch`
@@ -52,8 +55,8 @@ missing field, an unknown field, or a wrong width:
 
 ```python
 state = meta["proprio"].assemble({
-    "noisy_qpos": qpos, "pending_actions": last_action_sent,
-    "action_delay": latency_fraction, "controller.target_qpos": target,
+    "noisy_qpos": qpos,                 # measured joint positions, sim units
+    "controller.target_qpos": target,   # the integrated target we are commanding
 })
 ```
 

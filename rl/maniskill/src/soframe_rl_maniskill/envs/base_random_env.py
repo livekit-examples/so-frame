@@ -38,10 +38,6 @@ class RandomizationConfig:
     "raytraced" (PBR + overhead area light; rt/rt-fast shaders only, for one-off renders/
     single-env evals, never training)."""
 
-    action_delay_steps_range: Sequence[int] = (0, 1)
-    """Per-episode action delay in control steps (inclusive) under randomization; 0 when off.
-    Models the control loop's capture->inference->servo-write latency: the policy acts on the
-    world `delay` steps ago. Delayed slots start as zero actions (= hold) at episode start."""
     gripper_stiffness_range: Sequence[float] = (500, 2000)
     """Per-episode gripper joint stiffness range."""
     gripper_damping_range: Sequence[float] = (50, 200)
@@ -119,9 +115,6 @@ class BaseRandomEnv(BaseEnv):
     ):
         self.domain_randomization = domain_randomization
         self.domain_randomization_config = RandomizationConfig.resolve(domain_randomization_config)
-
-        self._action_delay: Optional[torch.Tensor] = None
-        self._action_queue: Optional[torch.Tensor] = None
 
         self._objects_to_remove_from_greenscreen: list[Union[Actor, Link]] = []
         self._segmentation_ids_to_keep: torch.Tensor = None
@@ -371,45 +364,15 @@ class BaseRandomEnv(BaseEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._randomize_gripper_speed(env_idx)
         self._randomize_arm_gains(env_idx)
-        self._randomize_action_delay(env_idx)
-
-    def _randomize_action_delay(self, env_idx: torch.Tensor):
-        lo, hi = self.domain_randomization_config.action_delay_steps_range
-        if self._action_delay is None:
-            self._action_delay = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        if self.domain_randomization and hi > 0:
-            self._action_delay[env_idx] = torch.randint(
-                int(lo), int(hi) + 1, (len(env_idx),), device=self.device
-            )
-        else:
-            self._action_delay[env_idx] = 0
-        if self._action_queue is not None:
-            self._action_queue[env_idx] = 0.0
 
     def step(self, action):
-        """Near-binary gripper (threshold to sign) + per-env action delay (see RandomizationConfig)."""
+        """Near-binary gripper (threshold to sign); see RandomizationConfig.binary_gripper."""
         cfg = self.domain_randomization_config
         if cfg.binary_gripper:
             gi = self.agent.joint_names.index("gripper")
             act = common.to_tensor(action, device=self.device).clone().float()
             act[..., gi] = torch.where(act[..., gi] > 0, 1.0, -1.0)
             action = act
-        max_delay = int(self.domain_randomization_config.action_delay_steps_range[1])
-        if self.domain_randomization and max_delay > 0 and self._action_delay is not None:
-            act = common.to_tensor(action, device=self.device).float()
-            squeeze = act.ndim == 1
-            if squeeze:
-                act = act.unsqueeze(0)
-            if self._action_queue is None or self._action_queue.shape[-1] != act.shape[-1]:
-                self._action_queue = torch.zeros(
-                    (self.num_envs, max_delay + 1, act.shape[-1]), device=self.device
-                )
-            self._action_queue = torch.roll(self._action_queue, shifts=1, dims=1)
-            self._action_queue[:, 0] = act
-            applied = self._action_queue[
-                torch.arange(self.num_envs, device=self.device), self._action_delay
-            ]
-            action = applied.squeeze(0) if squeeze else applied
         return super().step(action)
 
 

@@ -1,24 +1,24 @@
 """The proprioception contract: which fields the actor's state vector holds, in which order.
 
-This is the other half of the sim2real contract, alongside the vision path. It exists because
-the layout silently changed under the old code and deploy never noticed.
-
 The actor's state vector is ``flatten_state_dict(env._get_obs_agent())``, so its layout is the
-insertion order of that dict. When per-episode action delay was added to the env, two fields
-appeared in the middle of it:
+insertion order of that dict. The current contract is deliberately the smallest thing the real
+rig can always produce:
 
-    old (<= v51):  noisy_qpos(7) | target_qpos(7)                                    = 14
-    new (>= v52):  noisy_qpos(7) | pending_actions(7) | action_delay(1) | target_qpos(7) = 22
+    noisy_qpos(7) | controller.target_qpos(7)  = 14
 
-Deploy hardcoded ``N_STATE = 14`` and built ``qpos(7) + target(7)``. Against a 22-dim
-checkpoint that fails to load outright; worse, had the widths happened to line up it would
-have fed ``target_qpos`` into the slot the policy reads as ``pending_actions`` and driven the
-robot on a silently wrong observation. The env's own docstring says deploy should "feed the
-last max_delay actions sent and the loop latency / max_delay" -- deploy never did.
+This module exists because that layout silently changed once and deploy never noticed. Adding
+per-episode action delay to the env inserted two fields into the *middle* of the vector
+(``pending_actions(7)`` and ``action_delay(1)``, giving 22), while deploy went on hardcoding
+``N_STATE = 14`` and building ``qpos(7) + target(7)``. Against a 22-dim checkpoint that fails
+to load outright; had the widths happened to line up it would have fed ``target_qpos`` into the
+slot the policy reads as ``pending_actions`` and driven the robot on a silently wrong
+observation. The action-delay machinery has since been removed from the env, so 14 is now true
+by construction rather than by a config knob.
 
-So the layout travels inside the checkpoint. Training measures it from the live env, deploy
+The layout still travels inside the checkpoint: training measures it from the live env, deploy
 assembles its vector through ``assemble``, and a field that is missing, extra or the wrong
-width raises at startup instead of quietly misaligning.
+width raises at startup instead of quietly misaligning. That is what makes a future change to
+``_get_obs_agent`` a loud failure rather than a robot driving on garbage.
 """
 from __future__ import annotations
 
@@ -28,8 +28,6 @@ import numpy as np
 
 # Field names the env emits, spelled once so training and deploy agree.
 QPOS = "noisy_qpos"
-PENDING_ACTIONS = "pending_actions"
-ACTION_DELAY = "action_delay"
 TARGET_QPOS = "controller.target_qpos"
 
 
