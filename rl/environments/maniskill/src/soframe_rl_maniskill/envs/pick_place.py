@@ -267,7 +267,6 @@ class PickPlaceBin(DualCameraEnv):
             SO101OnFrame.keyframes["rest"].qpos.tolist(), device=self.device
         )
 
-        self._load_camera_mount()
         # One pass: colour scheme always, PBR relief maps only when realistic.
         self.agent.apply_materials(realistic=realistic)
 

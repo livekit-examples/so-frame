@@ -79,6 +79,12 @@ class RandomizationConfig:
     overhead_camera_rot_offset: Sequence[float] = (0.0, 0.0, 0.0)
     """Constant rotation offset (roll, pitch, yaw radians, camera-local)."""
 
+    # Per-env camera jitter. All four of these are drawn ONCE PER SCENE BUILD (reconfigure) and
+    # baked into each camera's local pose on its mount link, which is why they cost nothing per
+    # step. That is the same lifetime the FOV noise below has always had; pose jitter used to be
+    # redrawn every control step, which for a single-frame policy samples the same distribution
+    # but forced a full GPU state fetch/apply round trip 10 times a second. Pass
+    # --reconfiguration_freq to resample during a run.
     wrist_camera_pos_noise: Sequence[float] = (0.002, 0.002, 0.002)
     """Max position noise (x, y, z) meters, on top of the calibrated mount pose."""
     wrist_camera_rot_noise: Sequence[float] = (np.deg2rad(1), np.deg2rad(1), np.deg2rad(1))
@@ -193,16 +199,6 @@ class BaseRandomEnv(BaseEnv):
             [1, 1, -1], [1, 1, 1], shadow=False, shadow_scale=5, shadow_map_size=2048
         )
         self.scene.add_directional_light([0, 0, -1], [1, 1, 1])
-
-    def _load_camera_mount(self):
-        """Create the wrist- and overhead-camera mount actors used for sim-to-real jitter."""
-        builder = self.scene.create_actor_builder()
-        builder.initial_pose = sapien.Pose()
-        self.wrist_camera_mount = builder.build_kinematic("wrist_camera_mount")
-
-        builder = self.scene.create_actor_builder()
-        builder.initial_pose = sapien.Pose()
-        self.overhead_camera_mount = builder.build_kinematic("overhead_camera_mount")
 
     def _force_limit(self, joint, idx: int) -> float:
         """The joint's configured drive force limit, snapshotted on first use.
@@ -403,20 +399,17 @@ class BaseRandomEnv(BaseEnv):
         return super().step(action)
 
 
-def _sample_jitter_pose(num_envs: int, pos_noise, rot_noise, enabled: bool, device) -> Pose:
-    """Small random (position, roll/pitch/yaw) offset pose, batched over envs, to jitter a
-    camera mount on top of its calibrated base pose. Identity offsets when `enabled` is False."""
-    if enabled:
-        rand_vals = 2 * torch.rand(num_envs, 6, device=device) - 1
-        dx = pos_noise[0] * rand_vals[:, 0]
-        dy = pos_noise[1] * rand_vals[:, 1]
-        dz = pos_noise[2] * rand_vals[:, 2]
-        d_roll = rot_noise[0] * rand_vals[:, 3]
-        d_pitch = rot_noise[1] * rand_vals[:, 4]
-        d_yaw = rot_noise[2] * rand_vals[:, 5]
-    else:
-        dx = dy = dz = torch.zeros(num_envs, device=device)
-        d_roll = d_pitch = d_yaw = torch.zeros(num_envs, device=device)
+def _jitter_pose(rand_vals: torch.Tensor, pos_noise, rot_noise) -> Pose:
+    """Per-env (position, roll/pitch/yaw) offset pose from uniforms in [-1, 1], shape (n, 6).
+
+    Composed into a mounted camera's local pose at scene-build time, so an all-zero `rand_vals`
+    gives the identity and costs nothing."""
+    dx = pos_noise[0] * rand_vals[:, 0]
+    dy = pos_noise[1] * rand_vals[:, 1]
+    dz = pos_noise[2] * rand_vals[:, 2]
+    d_roll = rot_noise[0] * rand_vals[:, 3]
+    d_pitch = rot_noise[1] * rand_vals[:, 4]
+    d_yaw = rot_noise[2] * rand_vals[:, 5]
 
     # Euler (roll, pitch, yaw) -> quaternion, batched.
     cj, sj = torch.cos(d_pitch / 2), torch.sin(d_pitch / 2)
@@ -436,8 +429,20 @@ def _sample_jitter_pose(num_envs: int, pos_noise, rot_noise, enabled: bool, devi
 
 
 class DualCameraEnv(BaseRandomEnv):
-    """Wrist camera (follows the gripper) + static overhead camera. Both poses come from
-    forward kinematics of the URDF's calibrated camera links plus small jitter.
+    """Wrist camera (follows the gripper) + static overhead camera.
+
+    Both cameras are SAPIEN-mounted directly on the URDF's calibrated camera links, so their
+    world poses are derived from the link inside the render update and there is nothing to
+    maintain per step. The calibration correction and the per-env jitter are composed into each
+    camera's LOCAL pose on that link, once, when the scene is built.
+
+    This replaced a pair of kinematic mount actors whose poses were rewritten every control step
+    from `link.pose * offset * jitter`. Reading a link pose and writing an actor pose on the GPU
+    backend meant `scene._gpu_fetch_all()` then `scene._gpu_apply_all()` around every step: a
+    full round trip of every env's poses, velocities, qpos, qvel and contact forces, to move two
+    cameras. The jitter is now drawn per scene build instead of per step (see
+    RandomizationConfig).
+
     `FlattenRGBDObservationWrapper` concatenates both cameras' RGB along the channel axis
     (`rgb` becomes H x W x 6)."""
 
@@ -453,23 +458,29 @@ class DualCameraEnv(BaseRandomEnv):
         return [
             CameraConfig(
                 "wrist_camera",
-                pose=sapien.Pose(),
+                pose=self._camera_local_pose(
+                    dr.wrist_camera_pos_offset, dr.wrist_camera_rot_offset,
+                    dr.wrist_camera_pos_noise, dr.wrist_camera_rot_noise,
+                ),
                 width=config.SENSOR_RESOLUTION,
                 height=config.SENSOR_RESOLUTION,
                 fov=dr.wrist_camera_fov + fov_noise(dr.wrist_camera_fov_noise),
                 near=0.01,
                 far=100,
-                mount=self.wrist_camera_mount,
+                mount=self.agent.wrist_camera_link,
             ),
             CameraConfig(
                 "overhead_camera",
-                pose=sapien.Pose(),
+                pose=self._camera_local_pose(
+                    dr.overhead_camera_pos_offset, dr.overhead_camera_rot_offset,
+                    dr.overhead_camera_pos_noise, dr.overhead_camera_rot_noise,
+                ),
                 width=config.SENSOR_RESOLUTION,
                 height=config.SENSOR_RESOLUTION,
                 fov=dr.overhead_camera_fov + fov_noise(dr.overhead_camera_fov_noise),
                 near=0.01,
                 far=100,
-                mount=self.overhead_camera_mount,
+                mount=self.agent.overhead_camera_link,
             ),
         ]
 
@@ -480,41 +491,28 @@ class DualCameraEnv(BaseRandomEnv):
 
         return sapien.Pose(p=list(pos_offset), q=euler2quat(*rot_offset))
 
-    def _update_camera_poses(self):
-        """Follow the URDF-calibrated camera links, plus a constant calibration offset
-        and small per-episode jitter on each."""
-        dr = self.domain_randomization_config
+    def _camera_local_pose(self, pos_offset, rot_offset, pos_noise, rot_noise) -> Pose:
+        """A camera's pose in its mount link's frame: constant calibration correction, then
+        per-env jitter. Batched over envs, drawn from the episode RNG so a seed reproduces it.
 
-        wrist_offset = self._offset_pose(dr.wrist_camera_pos_offset, dr.wrist_camera_rot_offset)
-        wrist_jitter = _sample_jitter_pose(
-            self.num_envs, dr.wrist_camera_pos_noise, dr.wrist_camera_rot_noise,
-            self.domain_randomization, self.device,
+        Returns a plain `sapien.Pose` when there is no jitter to apply, so the no-randomization
+        path stays a single shared pose rather than a batched one."""
+        offset = self._offset_pose(pos_offset, rot_offset)
+
+        jitters = any(n > 0 for n in (*pos_noise, *rot_noise))
+        if not (self.domain_randomization and jitters):
+            return offset
+
+        # (num_envs, 6) uniforms in [-1, 1]: dx dy dz, then d_roll d_pitch d_yaw.
+        rand_vals = common.to_tensor(
+            self._batched_episode_rng.uniform(low=-1.0, high=1.0, size=(6,)),
+            device=self.device,
+        ).float()
+        jitter = _jitter_pose(rand_vals, pos_noise, rot_noise)
+
+        # Both operands are explicitly (num_envs, ...) so the multiply needs no broadcasting.
+        base = Pose.create_from_pq(
+            p=common.to_tensor(offset.p, device=self.device).float().repeat(self.num_envs, 1),
+            q=common.to_tensor(offset.q, device=self.device).float().repeat(self.num_envs, 1),
         )
-        self.wrist_camera_mount.set_pose(self.agent.wrist_camera_link.pose * wrist_offset * wrist_jitter)
-
-        overhead_offset = self._offset_pose(dr.overhead_camera_pos_offset, dr.overhead_camera_rot_offset)
-        overhead_jitter = _sample_jitter_pose(
-            self.num_envs, dr.overhead_camera_pos_noise, dr.overhead_camera_rot_noise,
-            self.domain_randomization, self.device,
-        )
-        self.overhead_camera_mount.set_pose(self.agent.overhead_camera_link.pose * overhead_offset * overhead_jitter)
-
-    def reset(self, *args, **kwargs):
-        obs, info = super().reset(*args, **kwargs)
-        if self.gpu_sim_enabled:
-            self.scene._gpu_fetch_all()
-        self._update_camera_poses()
-        if self.gpu_sim_enabled:
-            self.scene._gpu_apply_all()
-            self.scene._gpu_fetch_all()
-        # super().reset() rendered before the mounts moved; re-render so the first frame
-        # doesn't use the previous episode's (or uninitialized) camera poses.
-        obs = self.get_obs(info)
-        return obs, info
-
-    def _after_control_step(self):
-        if self.gpu_sim_enabled:
-            self.scene._gpu_fetch_all()
-        self._update_camera_poses()
-        if self.gpu_sim_enabled:
-            self.scene._gpu_apply_all()
+        return base * jitter
