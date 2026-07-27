@@ -107,20 +107,84 @@ REST_QPOS = {
 
 
 # =====================================================================================
+# Task objects
+# =====================================================================================
+# Geometry mirrored from the CAD sources in simulation/assets/objects/. That directory's
+# convert.py re-exports the OBJs the env loads AND asserts these numbers still match the 3MF,
+# so editing the CAD without updating here fails loudly instead of changing the task silently.
+OBJECTS_ROOT = "simulation/assets/objects"
+
+# Cube: a 20 mm cube, base at z=0, centred in xy. Collision is an exact box.
+CUBE_SIZE = 0.020
+CUBE_HALF = CUBE_SIZE / 2
+
+# Bin: 100x100x30 mm outer with 2 mm walls and a 2 mm floor, so a 96 mm square opening 28 mm
+# deep. Base at z=0, centred in xy, corners filleted. The 20 mm cube has 76 mm of clearance in
+# the opening, so it drops in at any yaw.
+BIN_FOOTPRINT_HALF = 0.050
+BIN_INTERIOR_HALF = 0.048
+BIN_HEIGHT = 0.030
+BIN_FLOOR_THICKNESS = 0.002
+BIN_WALL_THICKNESS = 0.002
+# The real walls are 2 mm, thin enough that a fast cube can tunnel through in one 10 ms step.
+# Collision walls are thickened OUTWARD with their inner faces left on the true interior, so the
+# opening the cube must fit through stays honest while contact stays reliable. This makes the
+# collision footprint wider than the visual by (this - BIN_WALL_THICKNESS) per side.
+BIN_WALL_COLLISION_THICKNESS = 0.005
+
+
+# =====================================================================================
 # Scene layout
 # =====================================================================================
 WORK_SURFACE_Z = 0.0
 
-# Item and bin spawn in separate regions along the rail, far enough apart that reaching both
-# requires sliding. The small bar gets the far region (dead-center in the overhead frame; it can
-# vanish behind the arm in the near region); the larger bin stays visible in either.
-ITEM_SPAWN_CENTER = (-0.225, -0.70)
-BIN_SPAWN_CENTER = (-0.225, -0.30)
-SPAWN_HALF_SIZE = 0.1
+# ONE spawn zone spanning the workspace, rather than a separate region per object.
+#
+# Widened to the measured maximum: the intersection of three independently measured limits,
+# x [-0.270, -0.012], y [-0.760, -0.050].
+#
+#   1. Top-down graspable reach. Sampling the arm's joint space at a fixed rail position and
+#      keeping poses with the TCP 0-50 mm up and the approach axis within 30 deg of straight
+#      down gives good coverage over x [-0.27, +0.06]. Past x = -0.27 only a narrow sliver of
+#      configurations reach, so grasps there would be fragile. The rail translates the arm along
+#      y (820 mm of travel), so y reach is not the binding constraint -- x is.
+#   2. Overhead camera footprint. The overhead camera is static, so its view of the work surface
+#      is a fixed trapezoid; this is the largest axis-aligned rectangle inside it, evaluated at
+#      BOTH the cube's height and the bin's rim (the taller object sees a smaller footprint).
+#      Vision-only policy, so anything outside this is unlearnable.
+#   3. Physical clearance. Probing where the bin actually settles on the surface: clear over
+#      x [-0.34, 0.00], y [-0.80, -0.05]. Only y >= 0 is blocked, by the frame's near edge.
+#
+# This is 258 x 710 mm, 1.5x the area of the 200 x 600 mm it replaced. NOTE the old zone ran to
+# y = -0.80, which is 40 mm PAST the overhead camera's far edge at -0.760 -- objects spawned in
+# that strip were out of frame, and the policy could not have seen them.
+#
+# Known consequence of one zone spanning the workspace: the ARM is in the workspace too, so at
+# reset the cube is occluded by it in ~12% of spawns (measured by segmentation over 300 spawns;
+# the bin, being far larger, is never fully hidden). Every one of those clears once the gantry
+# moves -- checked by teleporting it aside, after which 0 remain hidden -- so this is transient
+# occlusion the policy can resolve, not an unobservable state. It is concentrated in
+# y [-0.37, -0.10], the near end where the arm parks. The old split-region layout avoided it by
+# keeping the item in the far region only, which is also what made position predictable.
+WORKSPACE_CENTER = (-0.141, -0.405)
+WORKSPACE_HALF = (0.129, 0.355)
 
-# Drop point height above the bin RIM (not the floor): the jaw cannot open at depth in the
-# 84 mm interior. Carry to here, open, let gravity finish; success still requires the bar
-# settled IN the bin.
+# Extra inset on top of each object's own footprint. The zone bounds above already guarantee
+# visibility, but they were measured at the NOMINAL camera pose, and domain randomization jitters
+# the overhead camera by a few mm and up to a degree of FOV each episode. This is the margin for
+# that, so an object never sits exactly on the frame edge.
+SPAWN_PADDING = 0.02
+
+# Minimum GAP (not centre distance) between the cube's and the bin's footprints. The cube is
+# rejection-sampled against the bin until it clears this. Both objects get a random yaw, so the
+# test uses circumradii and is therefore yaw-invariant and slightly conservative.
+SPAWN_MIN_GAP = 0.05
+# How many resample rounds before falling back to a deterministic placement at the far end of
+# the workspace. Never silently emits an overlapping spawn.
+SPAWN_MAX_ATTEMPTS = 32
+
+# Drop point height above the bin RIM (not the floor): the jaw cannot open at depth inside the
+# bin. Carry to here, open, let gravity finish; success still requires the cube settled IN the bin.
 GOAL_CLEARANCE = 0.05
 
 

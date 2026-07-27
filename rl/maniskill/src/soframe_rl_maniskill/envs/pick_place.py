@@ -1,10 +1,11 @@
-"""SO-101-on-frame pick-and-place task: pick a flat bar, place it in a bin. Adapted from
+"""SO-101-on-frame pick-and-place task: pick a cube, place it in a bin. Adapted from
 [Squint](https://github.com/aalmuzairee/squint)'s ``envs/place.py``, with this repo's
 frame-mounted ``so101_on_frame`` agent replacing Squint's bare tabletop SO-101. The
 lightbox work surface is part of the robot's own URDF (no ``TableSceneBuilder``); a ground
 plane far below is a safety catch-all. Observations are vision + proprioception only;
 privileged state exists solely behind an explicit "+state" obs_mode (see ``_get_obs_extra``)."""
 
+import math
 from dataclasses import dataclass
 from typing import Any, Sequence, Union
 
@@ -21,14 +22,23 @@ from mani_skill.utils.structs.actor import Actor
 from mani_skill.utils.structs.pose import Pose
 
 from .base_random_env import DualCameraEnv, RandomizationConfig
-from ..robot.so101_on_frame import SO101OnFrame
+from ..robot.so101_on_frame import SO101OnFrame, _REPO_ROOT
+from .. import config
+
+# CAD meshes for the task objects, exported from the 3MF sources by
+# simulation/assets/objects/convert.py (which also asserts the dimensions in config.py).
+_OBJECTS_ROOT = _REPO_ROOT / config.OBJECTS_ROOT
+CUBE_MESH = _OBJECTS_ROOT / "cube.obj"
+BIN_MESH = _OBJECTS_ROOT / "bin.obj"
+for _mesh in (CUBE_MESH, BIN_MESH):
+    assert _mesh.exists(), (
+        f"task mesh not found at {_mesh}; run simulation/assets/objects/convert.py"
+    )
 
 # Every tunable constant lives in ../config.py; imported by name here so the reward reads
 # cleanly. See that file for the reasoning behind the ladder spacing and the motion limits.
 from ..config import (  # noqa: E402
-    BIN_SPAWN_CENTER,
     GOAL_CLEARANCE,
-    ITEM_SPAWN_CENTER,
     REACH_XY_ALIGNED,
     REWARD_SUCCESS,
     RUNG_GRASPED,
@@ -36,7 +46,6 @@ from ..config import (  # noqa: E402
     RUNG_RELEASED,
     SHAPE_HOLD_OPEN,
     SHARP,
-    SPAWN_HALF_SIZE,
     WORK_SURFACE_Z,
 )
 
@@ -49,19 +58,13 @@ class PickPlaceRandomizationConfig(RandomizationConfig):
     CLI-overridable, whereas config.py holds the fixed physical constants of the rig."""
 
     robot_qpos_noise_std: float = np.deg2rad(5)
-    # Flat bar matching the real object, 75 x 25 x 15 mm (footprint diagonal ~79 mm fits the
-    # real bin's ~84 mm interior at any yaw; grasped across its 25 mm width).
-    item_half_size_x_range: Sequence[float] = (0.0375, 0.0375)
-    item_half_size_y_range: Sequence[float] = (0.0125, 0.0125)
-    item_half_size_z_range: Sequence[float] = (0.0075, 0.0075)
-    # Bin half sizes, matching the real bin: 85 x 85 mm footprint, 35 mm walls, 1 mm thick.
-    bin_half_size_x_range: Sequence[float] = (0.0425, 0.0425)
-    bin_half_size_y_range: Sequence[float] = (0.0425, 0.0425)
-    bin_half_size_z_range: Sequence[float] = (0.0175, 0.0175)
 
+    # Object SIZE is no longer randomized: both the cube and the bin come from fixed CAD meshes
+    # (simulation/assets/objects/), so their dimensions live in config.py. Only material
+    # properties and colour vary per episode.
     item_friction_range: Sequence[float] = (0.5, 1.0)
-    item_density_range: Sequence[float] = (400, 400)  # ~12 g for the default bar.
-    # Fixed colors (purple bar, yellow bin) matched to real captures. Color randomization
+    item_density_range: Sequence[float] = (400, 400)  # ~3.2 g for the 20 mm cube.
+    # Fixed colors (purple cube, yellow bin) matched to real captures. Color randomization
     # is supported but costs sample efficiency, so it's opt-in.
     randomize_item_color: bool = False
     randomize_bin_color: bool = False
@@ -70,8 +73,12 @@ class PickPlaceRandomizationConfig(RandomizationConfig):
 # 300 steps (30 s at 10 Hz): the slow real-servo-tracking speeds need this much runway.
 @register_env("SOFramePickPlaceBin-v1", max_episode_steps=300)
 class PickPlaceBin(DualCameraEnv):
-    """Pick up a flat bar and place it in a bin. Bar and bin spawn in separate rail regions
-    (bar z-rotation also randomized); success = bar settled in the bin, robot clear and static."""
+    """Pick up a 20 mm cube and place it in a bin, both from the CAD meshes in
+    simulation/assets/objects/.
+
+    Cube and bin spawn anywhere in ONE workspace zone (bin first, then the cube at least
+    config.SPAWN_MIN_GAP clear of it), each with a random z-rotation. Success = cube settled in
+    the bin, robot clear and static."""
 
     SUPPORTED_ROBOTS = ["so101_on_frame"]
     SUPPORTED_OBS_MODES = [
@@ -90,18 +97,16 @@ class PickPlaceBin(DualCameraEnv):
             PickPlaceRandomizationConfig, dict
         ] = PickPlaceRandomizationConfig(),
         domain_randomization=False,
-        item_spawn_center=ITEM_SPAWN_CENTER,
-        bin_spawn_center=BIN_SPAWN_CENTER,
-        spawn_half_size=SPAWN_HALF_SIZE,
+        workspace_center=config.WORKSPACE_CENTER,
+        workspace_half=config.WORKSPACE_HALF,
         **kwargs,
     ):
         self.domain_randomization_config = PickPlaceRandomizationConfig.resolve(
             domain_randomization_config
         )
 
-        self.item_spawn_center = item_spawn_center
-        self.bin_spawn_center = bin_spawn_center
-        self.spawn_half_size = spawn_half_size
+        self.workspace_center = workspace_center
+        self.workspace_half = workspace_half
 
         super().__init__(
             *args,
@@ -143,25 +148,21 @@ class PickPlaceBin(DualCameraEnv):
                 colors[too_close] = redraw[too_close]
             return colors
 
-        half_x = sample_range(cfg.item_half_size_x_range)
-        half_y = sample_range(cfg.item_half_size_y_range)
-        half_z = sample_range(cfg.item_half_size_z_range)
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
-        # Purple bar, matched to real captures (median sRGB decoded to linear and scaled by the
-        # bar-to-surface brightness ratio, so it holds under sim lighting not the real exposure).
+        # Purple cube, matched to real captures (median sRGB decoded to linear and scaled by the
+        # object-to-surface brightness ratio, so it holds under sim lighting not the real exposure).
         colors = np.tile([0.28, 0.19, 0.57], (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
-
-        self.item_half_heights = common.to_tensor(half_z, device=self.device)
-        self.item_dimensions = torch.stack(
-            [common.to_tensor(half_x, device=self.device),
-             common.to_tensor(half_y, device=self.device),
-             self.item_half_heights], dim=-1,
-        )
         colors = np.concatenate([colors, np.ones((self.num_envs, 1))], axis=-1)
+
+        # Fixed geometry from the CAD meshes, so these are scalars broadcast per env rather than
+        # per-env samples. Kept as tensors because evaluate() and the reward index them by env.
+        ones = torch.ones(self.num_envs, device=self.device)
+        self.item_half_heights = ones * config.CUBE_HALF
+        self.item_dimensions = torch.stack([ones * config.CUBE_HALF] * 3, dim=-1)
         self.item_frictions = common.to_tensor(frictions, device=self.device)
         self.item_densities = common.to_tensor(densities, device=self.device)
 
@@ -172,16 +173,23 @@ class PickPlaceBin(DualCameraEnv):
             material = sapien.pysapien.physx.PhysxMaterial(
                 static_friction=friction, dynamic_friction=friction, restitution=0,
             )
-            item_half_size = [half_x[i], half_y[i], half_z[i]]
+            # Exact box collision: the mesh IS a 20 mm cube, so a box is identical and cheaper
+            # than a convex hull, and gives PhysX flat faces to rest on.
             builder.add_box_collision(
-                half_size=item_half_size, material=material, density=densities[i]
+                half_size=[config.CUBE_HALF] * 3, material=material, density=densities[i]
             )
             item_material = sapien.render.RenderMaterial(base_color=colors[i])
             if realistic:
                 item_material.set_roughness(0.6)
                 item_material.set_metallic(0.0)
-            builder.add_box_visual(half_size=item_half_size, material=item_material)
-            builder.initial_pose = sapien.Pose(p=[0.2, 0, half_z[i]])
+            # Visual from the CAD mesh. Its base is at z=0 while the collision box is centred on
+            # the origin, so the mesh is lowered by a half-height to line the two up.
+            builder.add_visual_from_file(
+                filename=str(CUBE_MESH),
+                pose=sapien.Pose(p=[0, 0, -config.CUBE_HALF]),
+                material=item_material,
+            )
+            builder.initial_pose = sapien.Pose(p=[0.2, 0, config.CUBE_HALF])
             builder.set_scene_idxs([i])
             item = builder.build(name=f"item-{i}")
             items.append(item)
@@ -190,68 +198,58 @@ class PickPlaceBin(DualCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        # Yellow bin, matched to real captures the same way as the bar's albedo above.
+        # Yellow bin, matched to real captures the same way as the cube's albedo above.
         bin_colors = np.ones((self.num_envs, 3)) * [0.90, 0.47, 0.01]
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
-        # Real bin walls are 1 mm, too thin for reliable contact at the 10 ms step, so walls
-        # keep a 1 mm visual but get a thicker collision box extended outward (inner faces
-        # aligned), so the interior clearance stays true to the real bin.
-        thickness = 0.001
-        wall_collision_thickness = 0.004
-        self.bin_thickness = thickness
 
-        bin_half_sizes_x = sample_range(cfg.bin_half_size_x_range)
-        bin_half_sizes_y = sample_range(cfg.bin_half_size_y_range)
-        bin_half_sizes_z = sample_range(cfg.bin_half_size_z_range)
-
-        self.bin_half_sizes_x = common.to_tensor(bin_half_sizes_x, device=self.device)
-        self.bin_half_sizes_y = common.to_tensor(bin_half_sizes_y, device=self.device)
-        self.bin_half_sizes_z = common.to_tensor(bin_half_sizes_z, device=self.device)
-        self.bin_dimensions = torch.stack(
-            [self.bin_half_sizes_x, self.bin_half_sizes_y, self.bin_half_sizes_z], dim=-1
-        )
+        self.bin_thickness = config.BIN_FLOOR_THICKNESS
+        # [interior_half_x, interior_half_y, rim_height]. The z entry is the FULL rim height
+        # above the work surface (the mesh base sits on it), not a half-extent.
+        self.bin_dimensions = torch.stack([
+            ones * config.BIN_INTERIOR_HALF,
+            ones * config.BIN_INTERIOR_HALF,
+            ones * config.BIN_HEIGHT,
+        ], dim=-1)
 
         bins = []
         for i in range(self.num_envs):
-            bin_half_size = [bin_half_sizes_x[i], bin_half_sizes_y[i], bin_half_sizes_z[i]]
             builder = self.scene.create_actor_builder()
 
-            bin_color = sapien.render.RenderMaterial(base_color=bin_colors[i])
+            bin_material = sapien.render.RenderMaterial(base_color=bin_colors[i])
             if realistic:
-                bin_color.set_roughness(0.55)
-                bin_color.set_metallic(0.0)
+                bin_material.set_roughness(0.55)
+                bin_material.set_metallic(0.0)
 
-            bin_center_pose = sapien.Pose([0.0, 0.0, thickness / 2])
-            bin_center_half_size = [bin_half_size[0], bin_half_size[1], thickness / 2]
-            builder.add_box_collision(pose=bin_center_pose, half_size=bin_center_half_size)
-            builder.add_box_visual(pose=bin_center_pose, half_size=bin_center_half_size, material=bin_color)
+            # Visual: the CAD mesh, filleted corners and true 2 mm walls. Its base is at z=0 and
+            # the actor origin is the base too, so no offset.
+            builder.add_visual_from_file(filename=str(BIN_MESH), material=bin_material)
 
-            # Collision walls sit outward of the visual walls, inner faces aligned.
-            col_off_x = bin_half_size[0] - thickness / 2 + wall_collision_thickness / 2
-            col_off_y = bin_half_size[1] - thickness / 2 + wall_collision_thickness / 2
-            for j in [-1, 1]:
-                builder.add_box_visual(
-                    pose=sapien.Pose([0, j * bin_center_half_size[1], bin_half_size[2]]),
-                    half_size=[bin_half_size[0], thickness / 2, bin_half_size[2]],
-                    material=bin_color,
+            # Collision: floor slab + 4 walls. The mesh is concave, and a convex hull would seal
+            # the opening, so collision is built from boxes instead (convex decomposition would
+            # also work but costs build time across 1024 envs for no benefit on a box tray).
+            floor_h = config.BIN_FLOOR_THICKNESS / 2
+            builder.add_box_collision(
+                pose=sapien.Pose([0, 0, floor_h]),
+                half_size=[config.BIN_FOOTPRINT_HALF, config.BIN_FOOTPRINT_HALF, floor_h],
+            )
+            # Walls span floor top -> rim, inner faces on the true interior, thickened outward.
+            wall_t = config.BIN_WALL_COLLISION_THICKNESS
+            wall_half_h = (config.BIN_HEIGHT - config.BIN_FLOOR_THICKNESS) / 2
+            wall_cz = config.BIN_FLOOR_THICKNESS + wall_half_h
+            wall_off = config.BIN_INTERIOR_HALF + wall_t / 2
+            for j in (-1, 1):
+                builder.add_box_collision(
+                    pose=sapien.Pose([0, j * wall_off, wall_cz]),
+                    half_size=[wall_off, wall_t / 2, wall_half_h],
                 )
                 builder.add_box_collision(
-                    pose=sapien.Pose([0, j * col_off_y, bin_half_size[2]]),
-                    half_size=[bin_half_size[0], wall_collision_thickness / 2, bin_half_size[2]],
-                )
-                builder.add_box_visual(
-                    pose=sapien.Pose([j * bin_center_half_size[0], 0, bin_half_size[2]]),
-                    half_size=[thickness / 2, bin_half_size[1], bin_half_size[2]],
-                    material=bin_color,
-                )
-                builder.add_box_collision(
-                    pose=sapien.Pose([j * col_off_x, 0, bin_half_size[2]]),
-                    half_size=[wall_collision_thickness / 2, bin_half_size[1], bin_half_size[2]],
+                    pose=sapien.Pose([j * wall_off, 0, wall_cz]),
+                    half_size=[wall_t / 2, wall_off, wall_half_h],
                 )
 
-            builder.initial_pose = sapien.Pose(p=[-0.2, 0, bin_half_size[2]])
+            builder.initial_pose = sapien.Pose(p=[-0.2, 0, 0])
             builder.set_scene_idxs([i])
             bin_actor = builder.build(name=f"bin-{i}")
             bins.append(bin_actor)
@@ -259,7 +257,7 @@ class PickPlaceBin(DualCameraEnv):
 
         self.bin = Actor.merge(bins, name="bin")
         self.add_to_state_dict_registry(self.bin)
-        self.bin_radius = torch.linalg.norm(self.bin_dimensions[:, :2], dim=-1)
+        self.bin_radius = ones * config.BIN_FOOTPRINT_HALF * math.sqrt(2)
 
         if self.apply_greenscreen:
             self.remove_object_from_greenscreen(self.agent.robot)
@@ -294,31 +292,89 @@ class PickPlaceBin(DualCameraEnv):
             )
             self.agent.robot.set_pose(Pose.create_from_pq(p=[0, 0, 0]))
 
-            item_spawn_center = self.agent.robot.pose.p + torch.tensor(
-                [self.item_spawn_center[0], self.item_spawn_center[1], 0]
+            # -- Spawn: one zone for both objects, bin placed first --------------------------
+            #
+            # The bin goes anywhere in the workspace; the cube then goes anywhere in the same
+            # workspace that clears the bin by at least SPAWN_MIN_GAP. So the pair can appear in
+            # any relative arrangement, and the policy cannot learn "bar is always far, bin is
+            # always near" from the old split regions.
+            #
+            # Each object samples from the zone inset by its own footprint circumradius plus
+            # SPAWN_PADDING, so it lands fully inside the reachable area and away from the frame
+            # edge. The bin is inset much further than the cube because it is far larger.
+            origin = self.agent.robot.pose.p[env_idx, :2] + torch.tensor(
+                [self.workspace_center[0], self.workspace_center[1]]
             )
-            bin_spawn_center = self.agent.robot.pose.p + torch.tensor(
-                [self.bin_spawn_center[0], self.bin_spawn_center[1], 0]
-            )
+            zone_half = torch.tensor([self.workspace_half[0], self.workspace_half[1]])
 
-            # Separate non-overlapping regions, so offsets are independent uniform samples.
-            item_xy_offset = (torch.rand(b, 2) * 2 - 1) * self.spawn_half_size
-            bin_xy_offset = (torch.rand(b, 2) * 2 - 1) * self.spawn_half_size
+            # Yaw is sampled up front so the edge inset can use each object's ACTUAL rotated
+            # footprint. A square of half-size h at yaw t spans h*(|cos t| + |sin t|) per axis,
+            # between h and h*sqrt(2). Insetting by the worst case instead would cost almost all
+            # of the bin's x freedom: the zone is only 200 mm wide and the bin's diagonal is 141.
+            item_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
+            bin_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
 
+            def aabb_half(quats, half_size):
+                """Axis-aligned half-extent of a square footprint at these yaws."""
+                # z-only rotation: yaw = 2*atan2(qz, qw)
+                yaw = 2.0 * torch.atan2(quats[:, 3], quats[:, 0])
+                spread = yaw.cos().abs() + yaw.sin().abs()
+                return (half_size * spread).unsqueeze(-1).expand(-1, 2)
+
+            def sample_xy(centre, footprint):
+                """Uniform in the zone, inset so the rotated footprint stays inside it."""
+                inset = (zone_half - footprint - config.SPAWN_PADDING).clamp_min(0.0)
+                return centre + (torch.rand(footprint.shape[0], 2) * 2 - 1) * inset
+
+            bin_fp = aabb_half(bin_qs, config.BIN_FOOTPRINT_HALF)
+            cube_fp = aabb_half(item_qs, config.CUBE_HALF)
+
+            # The pairwise test stays on circumradii: conservative is the right side to err on
+            # for "do not overlap", and it is independent of both yaws.
+            bin_r = config.BIN_FOOTPRINT_HALF * math.sqrt(2)
+            cube_r = config.CUBE_HALF * math.sqrt(2)
+            min_centre_dist = bin_r + cube_r + config.SPAWN_MIN_GAP
+
+            bin_xy = sample_xy(origin, bin_fp)
+            cube_xy = sample_xy(origin, cube_fp)
+
+            # Rejection-sample only the cubes that are too close to their bin.
+            for _ in range(config.SPAWN_MAX_ATTEMPTS):
+                too_close = torch.linalg.norm(cube_xy - bin_xy, dim=-1) < min_centre_dist
+                if not too_close.any():
+                    break
+                cube_xy[too_close] = sample_xy(origin[too_close], cube_fp[too_close])
+            else:
+                # Deterministic fallback so a spawn is never left overlapping: push the stragglers
+                # to whichever end of the long (y) axis is further from their bin, at the bin's x.
+                too_close = torch.linalg.norm(cube_xy - bin_xy, dim=-1) < min_centre_dist
+                if too_close.any():
+                    limit = (zone_half[1] - cube_r - config.SPAWN_PADDING).clamp_min(0.0)
+                    far_end = torch.where(bin_xy[:, 1] > origin[:, 1], -limit, limit)
+                    cube_xy[too_close] = torch.stack(
+                        [bin_xy[too_close, 0], (origin[:, 1] + far_end)[too_close]], dim=-1
+                    )
+
+            # The cube's collision box is centred on the actor origin, so it rests a half-height
+            # above the surface. The bin's mesh and collision are both based at its origin.
+            # MUST reuse item_qs / bin_qs, the yaws the edge inset above was computed from.
+            # Drawing fresh ones here would let an object rotate into the zone edge it was
+            # placed to clear.
             item_xyz = torch.zeros((b, 3))
-            item_xyz[:, :2] = item_spawn_center[env_idx, :2] + item_xy_offset
+            item_xyz[:, :2] = cube_xy
             item_xyz[:, 2] = WORK_SURFACE_Z + self.item_half_heights[env_idx]
-            qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
-            self.item.set_pose(Pose.create_from_pq(item_xyz, qs))
+            self.item.set_pose(Pose.create_from_pq(item_xyz, item_qs))
 
             bin_xyz = torch.zeros((b, 3))
-            bin_xyz[:, :2] = bin_spawn_center[env_idx, :2] + bin_xy_offset
-            bin_xyz[:, 2] = WORK_SURFACE_Z + self.bin_thickness / 2
-            qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
-            self.bin.set_pose(Pose.create_from_pq(bin_xyz, qs))
+            bin_xyz[:, :2] = bin_xy
+            bin_xyz[:, 2] = WORK_SURFACE_Z
+            self.bin.set_pose(Pose.create_from_pq(bin_xyz, bin_qs))
 
+            # Goal marker: resting height of the cube on the bin's interior floor.
             goal_xyz = bin_xyz.clone()
-            goal_xyz[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_heights[env_idx]
+            goal_xyz[:, 2] = (
+                WORK_SURFACE_Z + config.BIN_FLOOR_THICKNESS + self.item_half_heights[env_idx]
+            )
             self.goal_site.set_pose(Pose.create_from_pq(goal_xyz))
 
     def _get_obs_agent(self):
@@ -371,17 +427,19 @@ class PickPlaceBin(DualCameraEnv):
     def evaluate(self):
         item_pos = self.item.pose.p
         bin_pos = self.bin.pose.p.clone()
-        bin_pos[:, 2] = WORK_SURFACE_Z + self.bin_thickness + self.item_half_heights
+        bin_pos[:, 2] = WORK_SURFACE_Z + config.BIN_FLOOR_THICKNESS + self.item_half_heights
 
+        # Over the OPENING, not the outer footprint: the walls are part of the footprint but a
+        # cube above a wall is not above the hole.
         offset = item_pos - bin_pos
-        inside_x = torch.abs(offset[:, 0]) < self.bin_half_sizes_x
-        inside_y = torch.abs(offset[:, 1]) < self.bin_half_sizes_y
+        inside_x = torch.abs(offset[:, 0]) < config.BIN_INTERIOR_HALF
+        inside_y = torch.abs(offset[:, 1]) < config.BIN_INTERIOR_HALF
         is_item_above_bin = inside_x & inside_y
-        # In the bin = the bar's lowest corner is within tolerance of the bin floor. A tilted
-        # bar leaning on a wall counts; one bridging flat across the rim, or still falling, does not.
+        # In the bin = the cube's lowest corner is within tolerance of the bin's interior floor.
+        # A cube tilted against a wall counts; one bridging the rim, or still falling, does not.
         item_rot = self.item.pose.to_transformation_matrix()[..., :3, :3]
         item_lowest = item_pos[:, 2] - (item_rot[..., 2, :].abs() * self.item_dimensions).sum(-1)
-        touches_bottom = item_lowest <= WORK_SURFACE_Z + self.bin_thickness + 0.005
+        touches_bottom = item_lowest <= WORK_SURFACE_Z + config.BIN_FLOOR_THICKNESS + 0.005
         is_item_in_bin = is_item_above_bin & touches_bottom
 
         item_lifted = self.item.pose.p[..., -1] >= (WORK_SURFACE_Z + self.item_half_heights + 1e-3)
@@ -429,7 +487,7 @@ class PickPlaceBin(DualCameraEnv):
         # Drop point: above the bin rim (GOAL_CLEARANCE). The carry term shapes toward it.
         goal_xyz = self.bin.pose.p.clone()
         goal_xyz[..., 2] = (
-            WORK_SURFACE_Z + self.bin_dimensions[:, 2] * 2 + self.item_half_heights + GOAL_CLEARANCE
+            WORK_SURFACE_Z + config.BIN_HEIGHT + self.item_half_heights + GOAL_CLEARANCE
         )
 
         # Stage 0 [0, 1]: top-down reach. xy alignment first; the z term only pays once aligned,
