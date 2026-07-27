@@ -151,9 +151,8 @@ class PickPlaceBin(DualCameraEnv):
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
-        # Purple cube, matched to real captures (median sRGB decoded to linear and scaled by the
-        # object-to-surface brightness ratio, so it holds under sim lighting not the real exposure).
-        colors = np.tile([0.28, 0.19, 0.57], (self.num_envs, 1))
+        # Cube colour from config.COLOR_CUBE (linear base colour).
+        colors = np.tile(config.COLOR_CUBE, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
         colors = np.concatenate([colors, np.ones((self.num_envs, 1))], axis=-1)
@@ -198,8 +197,8 @@ class PickPlaceBin(DualCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        # Yellow bin, matched to real captures the same way as the cube's albedo above.
-        bin_colors = np.ones((self.num_envs, 3)) * [0.90, 0.47, 0.01]
+        # Bin colour from config.COLOR_BIN.
+        bin_colors = np.tile(config.COLOR_BIN, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
@@ -269,8 +268,8 @@ class PickPlaceBin(DualCameraEnv):
         )
 
         self._load_camera_mount()
-        if realistic:
-            self.agent.apply_realistic_materials()
+        # One pass: colour scheme always, PBR relief maps only when realistic.
+        self.agent.apply_materials(realistic=realistic)
 
         goal_builder = self.scene.create_actor_builder()
         goal_builder.add_sphere_visual(

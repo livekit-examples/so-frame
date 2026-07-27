@@ -219,6 +219,52 @@ REACH_XY_ALIGNED = 0.03   # tcp within this xy of the bar is "aligned" and may d
 
 
 # =====================================================================================
+# Colours
+# =====================================================================================
+# One place for every colour in the scene. These are LINEAR base colours (not sRGB), which is
+# what SAPIEN's RenderMaterial takes.
+#
+# Neither "black" nor "white" is set to a pure 0 or 1. Pure black returns no light at all and
+# renders as a flat silhouette with no shape cues, and pure white clips under the softbox and
+# loses its edges the same way; 0.04 and 0.88 read as black and white while keeping the shading
+# gradients the vision policy localizes from. Real matte black plastic reflects ~4-5% anyway.
+BLACK = (0.04, 0.04, 0.04)
+WHITE = (0.88, 0.88, 0.88)
+
+# Task objects.
+COLOR_CUBE = BLACK
+COLOR_BIN = BLACK
+
+# Rig. "extrusion" is the 2020 aluminium frame and its brackets; "slider" is the gantry carriage
+# the arm rides on plus the arm's base; "gripper" is the jaw assembly; "arm" is the links between
+# base and gripper.
+COLOR_EXTRUSION = BLACK
+COLOR_SLIDER = BLACK
+COLOR_GRIPPER = WHITE
+COLOR_ARM = WHITE
+
+# Link-name patterns -> colour group. Matched as substrings against the URDF link names, first
+# match wins. Any link that matches nothing keeps the colour baked into the URDF -- that is
+# deliberate for the lightbox panels (the work surface, near-white) and the camera holders.
+COLOR_GROUPS = (
+    # (group name, link-name substrings)
+    ("gripper",   ("gripper_link", "moving_jaw", "pinion", "金属舵盘")),
+    ("arm",       ("shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link")),
+    ("slider",    ("20mm_gantry_plate", "v_wheel", "m5_nylock", "m5x25_low_profile_screw",
+                   "handle", "base_mount", "base_link", "sg_ziji", "xg_ziji", "pcb_chazuo",
+                   "ge_27", "zk_122", "motor_1723")),
+    ("extrusion", ("100cm", "50cm", "inside_corner_bracket", "angle_bracket")),
+)
+
+COLOR_BY_GROUP = {
+    "gripper": COLOR_GRIPPER,
+    "arm": COLOR_ARM,
+    "slider": COLOR_SLIDER,
+    "extrusion": COLOR_EXTRUSION,
+}
+
+
+# =====================================================================================
 # Cameras
 # =====================================================================================
 # Calibrated against the real rig; the deploy side rectifies each real camera to match, using a

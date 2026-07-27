@@ -35,11 +35,11 @@ from .. import config
 GRASP_SITE_OFFSET = config.GRASP_SITE_OFFSET
 STS3215_STALL_TORQUE = config.STS3215_STALL_TORQUE
 
-# PBR texture sets for `apply_realistic_materials` (see `RandomizationConfig.visual_fidelity`).
+# PBR texture sets for `apply_materials` (see `RandomizationConfig.visual_fidelity`).
 _TEXTURES_ROOT = _REPO_ROOT / "simulation" / "assets" / "textures"
 
 # The URDF only defines flat `<color rgba>` materials and SAPIEN's loader keeps only the
-# resolved rgba, so `apply_realistic_materials` matches each part's baked base_color back to
+# resolved rgba, so `apply_materials` matches each part's baked base_color back to
 # these known URDF colors to pick a texture set.
 _ALUMINUM_BASE_COLORS = [
     (0.4, 0.4, 0.4),                 # extrusion_gray (2020 extrusion bars)
@@ -52,8 +52,18 @@ _WHITE_PLASTIC_BASE_COLORS = [
 ]
 
 # The lightbox's diffusing side panels: large matte surfaces, not small 3D-printed parts,
-# though they share a base color with some (see `apply_realistic_materials`).
+# though they share a base color with some (see `apply_materials`).
 _LIGHTBOX_PANEL_LINKS = {"part_1", "part_1_1", "part_1_2", "part_1_3"}
+
+# PBR relief maps per colour group: the frame and carriage are aluminium, the arm and jaw are
+# printed plastic. Only roughness/metallic/normal are taken from these; albedo comes from the
+# colour scheme.
+_GROUP_TEXTURE_SET = {
+    "extrusion": "aluminum",
+    "slider": "aluminum",
+    "arm": "plastic_white",
+    "gripper": "plastic_white",
+}
 
 _ORANGE_PLASTIC_BASE_COLORS = [
     (0.94, 0.49, 0.06),  # gripper_orange, accent_orange
@@ -203,42 +213,81 @@ class SO101OnFrame(BaseAgent):
         qvel = self.robot.get_qvel()[:, arm_idx]
         return torch.max(torch.abs(qvel), 1)[0] <= threshold
 
-    def apply_realistic_materials(self):
-        """Wire real PBR textures onto the flat-color URDF materials for the "raster"/
-        "raytraced" fidelity modes; untextured parts keep their flat color. The lightbox
-        panels (``_LIGHTBOX_PANEL_LINKS``) get a plain matte material rather than the
-        plastic grain, which would catch light unevenly across their large flat surfaces."""
-        aluminum = _load_texture_set("aluminum")
-        plastic_white = _load_texture_set("plastic_white")
-        plastic_orange = _load_texture_set("plastic_orange")
+    @staticmethod
+    def _color_group(link_name: str):
+        """Which colour group a link belongs to, or None to keep its URDF colour."""
+        for group, patterns in config.COLOR_GROUPS:
+            if any(p in link_name for p in patterns):
+                return group
+        return None
+
+    def apply_materials(self, realistic: bool):
+        """Set every render material in ONE pass: the colour scheme plus, when `realistic`, the
+        PBR relief maps.
+
+        Single pass on purpose. Colouring and texturing used to be two walks over the same parts,
+        and each material mutation makes that part's material unique, so touching every grouped
+        part twice doubled the descriptor sets and exhausted the Vulkan descriptor pool under
+        "raster" once both the train and eval env pools existed.
+
+        Grouped links (config.COLOR_GROUPS) get a FLAT scheme colour and, when realistic, only the
+        roughness / metallic / normal maps -- deliberately no albedo map, because SAPIEN's
+        base-colour texture replaces base_color rather than modulating it, and an albedo map would
+        simply overwrite the scheme colour (this is why the gripper stayed orange when the two were
+        applied in sequence).
+
+        Ungrouped links keep their baked URDF colour and get the full texture set matched from that
+        colour. That covers the lightbox panels (the work surface) and the camera holders, which are
+        not part of the scheme.
+        """
+        textures = {}
+        if realistic:
+            for name in ("aluminum", "plastic_white", "plastic_orange"):
+                textures[name] = _load_texture_set(name)
+
+        def relief_only(material, texture_set):
+            """Surface detail without touching albedo, so the flat scheme colour survives."""
+            if "roughness" in texture_set:
+                material.set_roughness_texture(texture_set["roughness"])
+            if "metallic" in texture_set:
+                material.set_metallic_texture(texture_set["metallic"])
+            if "normal" in texture_set:
+                material.set_normal_texture(texture_set["normal"])
 
         for link in self.robot.links:
             is_lightbox_panel = link.name in _LIGHTBOX_PANEL_LINKS
+            group = self._color_group(link.name)
             for obj in link._objs:
                 render_body_component = obj.entity.find_component_by_type(RenderBodyComponent)
                 if render_body_component is None:
                     continue
                 for render_shape in render_body_component.render_shapes:
                     for part in render_shape.parts:
+                        material = part.material
+
                         if is_lightbox_panel:
-                            part.material.set_roughness(0.9)
-                            part.material.set_metallic(0.0)
+                            # Large flat diffusers: plain matte, no grain to catch light unevenly.
+                            if realistic:
+                                material.set_roughness(0.9)
+                                material.set_metallic(0.0)
                             continue
 
-                        color = part.material.get_base_color()
+                        if group is not None:
+                            material.set_base_color([*config.COLOR_BY_GROUP[group], 1.0])
+                            if realistic:
+                                relief_only(material, textures[_GROUP_TEXTURE_SET[group]])
+                            continue
+
+                        if not realistic:
+                            continue
+                        color = material.get_base_color()
                         if _base_color_matches(color, _ALUMINUM_BASE_COLORS):
-                            textures = aluminum
+                            texture_set = textures["aluminum"]
                         elif _base_color_matches(color, _WHITE_PLASTIC_BASE_COLORS):
-                            textures = plastic_white
+                            texture_set = textures["plastic_white"]
                         elif _base_color_matches(color, _ORANGE_PLASTIC_BASE_COLORS):
-                            textures = plastic_orange
+                            texture_set = textures["plastic_orange"]
                         else:
                             continue
-
-                        part.material.set_base_color_texture(textures["base_color"])
-                        if "roughness" in textures:
-                            part.material.set_roughness_texture(textures["roughness"])
-                        if "metallic" in textures:
-                            part.material.set_metallic_texture(textures["metallic"])
-                        if "normal" in textures:
-                            part.material.set_normal_texture(textures["normal"])
+                        material.set_base_color_texture(texture_set["base_color"])
+                        relief_only(material, texture_set)
