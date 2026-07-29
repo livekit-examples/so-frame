@@ -3,16 +3,15 @@
 Joins the LiveKit room as the Portal `robot`, publishes 7-DOF state + RAW camera
 frames every tick, and applies the latest action (absolute position targets).
 
-The rig is a leslider -- an SO-101 arm on a linear rail driven as ONE integrated
-7-DOF follower (`SO101SliderPosFollower`) over a single Feetech bus, the rail a
-real STS3215 motor (NOT a plain 6-DOF arm + separate slider). The follower names
-the rail `slider.pos` in 0..100; our wire contract calls it `dof_slider.pos`
-(same 0..100 range), so the only boundary work is a key rename. Arm joints are
-degrees (use_degrees=True), gripper + slider are 0..100.
+The rig is one integrated 7-DOF follower (`SO101SliderPosFollower`) over a single
+Feetech bus: SO-101 arm plus the rail as a real STS3215 motor. Wire units are arm
+degrees (use_degrees=True), gripper + rail 0..100. The follower names the rail
+`slider.pos`, our wire calls it `dof_slider.pos`, same range, so the boundary is a
+key rename.
 
-Wire contract is ../portal.yaml (7 joints, 2 cameras) in REAL units; the policy
-operator (policy/run.py) owns the sim<->real bridge and camera rectification, so
-the robot stays generic and the web-ui sees the true wide-FOV stream.
+Wire contract is ../portal.yaml (7 joints, 2 cameras) in REAL units. The policy
+operator (policy/run.py) owns the sim<->real bridge and camera rectification, so the
+robot stays generic and the web UI sees the true wide-FOV stream.
 """
 from __future__ import annotations
 
@@ -45,25 +44,27 @@ CAMERAS = {
     "overhead_camera": ("SO101_CAM_OVERHEAD", "/dev/video2"),
 }
 
-# The follower reports the rail under `slider.pos`; our wire calls it
-# `dof_slider.pos`. Both are 0..100, so translation is a pure key rename.
+# Follower rail key -> wire rail key. Both 0..100, so translation is a key rename.
 FOLLOWER_SLIDER_KEY = "slider.pos"
 WIRE_SLIDER_KEY = "dof_slider.pos"
 
-# Parked-but-safe rest pose the `reset_to_zero_position` RPC drives to. REAL wire
-# units: arm degrees, gripper + rail 0..100 (rail 0 far, 100 near camera).
-# NEEDS-CALIBRATION per rig: sample the ARM values from the physical arm at its
-# safe parked pose (sim keyframe "rest" qpos=[0,0,-0.5,0.8,0.6,0.0,1.2] rad,
-# converted through the policy's bridge). The rail's 49 IS calibrated (sim
-# dof_slider=0 -> mid-travel). Override any via a RESET_POSE_* env var.
+# Parked rest pose the `reset_to_zero_position` RPC drives to, in REAL wire units:
+# arm degrees, gripper + rail 0..100 (rail 0 far, 100 near camera). Override any via
+# a RESET_POSE_* env var.
+# These are the sim rest keyframe (soframe_policy.rig.REST_QPOS,
+# qpos=[0,0,-0.5,0.8,0.6,0.0,1.2] rad) put through the policy's bridge, as literals: this module
+# talks wire units only and does not import sim code. Keep the two in step by hand.
+#
+# The gripper is deliberately OPEN. A parked arm must release anything it happens to be holding,
+# so this is the one value not worth rounding toward "tidy".
 REST_POSE_DEFAULTS: dict[str, float] = {
     WIRE_SLIDER_KEY:      49.0,   # sim dof_slider=0 m -> ~mid-travel (0..100)
     "shoulder_pan.pos":   0.0,
-    "shoulder_lift.pos": -30.0,
-    "elbow_flex.pos":    45.0,
-    "wrist_flex.pos":    35.0,
-    "wrist_roll.pos":     0.0,
-    "gripper.pos":       10.0,
+    "shoulder_lift.pos": -30.0,   # sim -0.5 rad
+    "elbow_flex.pos":     45.0,   # sim 0.8 rad
+    "wrist_flex.pos":     35.0,   # sim 0.6 rad
+    "wrist_roll.pos":      0.0,
+    "gripper.pos":        68.75,  # sim 1.2 rad, ~69% open on the 0..100 jaw range
 }
 REST_POSE_ENV_KEYS: dict[str, str] = {
     WIRE_SLIDER_KEY:     "RESET_POSE_SLIDER",
@@ -87,11 +88,10 @@ def build_rest_pose() -> dict[str, float]:
 def build_follower(camera_fps: int) -> SO101SliderPosFollower:
     """The integrated 7-DOF leslider follower (arm + gripper + rail) + 2 cameras.
 
-    camera_fps is the CAMERA's hardware capture rate (SO101_CAM_FPS, default 30) --
-    NOT the control rate. lerobot validates the camera delivers this fps, and the USB
-    cameras only do 30 (asking for 10 fails). The control loop runs at the slower
-    PORTAL_FPS and samples the latest frame each tick. On Linux the cameras force the
-    V4L2 backend (OpenCV's auto-picker otherwise no-ops the fourcc/resolution set)."""
+    camera_fps is the CAMERA's hardware capture rate (SO101_CAM_FPS, default 30), NOT
+    the control rate: lerobot validates the camera delivers it and the USB cameras only
+    do 30. The loop ticks at the slower PORTAL_FPS and samples the latest frame. Linux
+    forces the V4L2 backend, since OpenCV's auto-picker no-ops the fourcc/resolution set."""
     width, height = int(env("SO101_CAM_WIDTH", "640")), int(env("SO101_CAM_HEIGHT", "480"))
     backend = Cv2Backends.V4L2 if platform.system() == "Linux" else Cv2Backends.ANY
     cameras = {}
@@ -106,9 +106,8 @@ def build_follower(camera_fps: int) -> SO101SliderPosFollower:
         id=env("LESLIDER_ID", "leslider"),
         port=env("LESLIDER_PORT", env("SO101_PORT", "/dev/ttyACM0")),
         cameras=cameras,
-        use_degrees=True,   # arm joints in degrees, matching policy/bridge.py
-        # 0 keeps the rail moving to its goal at full speed; a positive raw-ticks/s
-        # cap slows travel if needed.
+        use_degrees=True,   # arm joints in degrees, matching utils/bridge.py
+        # 0 = rail runs to its goal at full speed; a positive raw-ticks/s cap slows it.
         slider_goal_speed=int(env("LESLIDER_SLIDER_GOAL_SPEED", "0")),
         read_current=False,
     ))
@@ -117,8 +116,8 @@ def build_follower(camera_fps: int) -> SO101SliderPosFollower:
 def split_obs(observation: dict) -> tuple[dict[str, float], dict[str, object]]:
     """Split the follower's flat observation into (wire state, camera frames).
 
-    Motor scalars are the `.pos`/`.vel` keys; the rest are camera ndarrays. The
-    rail's `slider.pos` is renamed to the wire's `dof_slider.pos` (same 0..100)."""
+    Motor scalars are the `.pos`/`.vel` keys, the rest are camera ndarrays. `slider.pos`
+    is renamed to the wire's `dof_slider.pos`."""
     state: dict[str, float] = {}
     for key, value in observation.items():
         if key.endswith(".pos") or key.endswith(".vel"):
@@ -195,7 +194,7 @@ async def main() -> None:
                 print(f"[robot] motor read failed: {exc}")
                 continue
 
-            state, frames = split_obs(obs)  # 7-DOF wire state (rail renamed)
+            state, frames = split_obs(obs)
             robot.send_state(state, timestamp_us=ts_us)
 
             for name in CAMERAS:

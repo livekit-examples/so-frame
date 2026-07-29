@@ -1,9 +1,9 @@
-"""Debug harness for the deploy wiring -- check the camera mapping and the joint bridge
-WITHOUT a policy in the loop.
+"""Debug harness for the deploy wiring: check the camera mapping and the joint bridge with no
+policy in the loop.
 
 Imports the same bridge and camera stack the policy operator uses, so what passes here is what
-ships. Modes (see main): --frame, --bridge (default), --live, --snapshot, --control. Only
---control moves the robot.
+ships. Modes: --frame, --bridge (default), --live, --snapshot, --control. Only --control moves
+the robot.
 """
 from __future__ import annotations
 
@@ -28,8 +28,7 @@ from utils.camera_mapping import (  # noqa: E402
     rectify,
 )
 
-# The squint encoder's input resolution. Only used to preview what survives the downsample;
-# the real thing is SquintEncoder.preprocess, which the policy calls.
+# The squint encoder's input resolution, for previewing what survives the downsample.
 SQUINT_SIZE = 32
 
 
@@ -119,12 +118,10 @@ def run_bridge() -> int:
     print(f"\n[debug] rail: sim {lo:+.3f} (FAR) -> real {r_lo:.3f}, "
           f"sim {hi:+.3f} (CLOSE/near-camera) -> real {r_hi:.3f}, "
           f"sim 0 (rest) -> real {r_mid:.3f}")
-    zeros = [k for k in bridge.JOINT_KEYS
-             if k != "dof_slider.pos" and bridge.OFFSET_REAL[k] == 0.0]
-    if zeros:
-        print(f"[debug] NEEDS-CALIBRATION: {len(zeros)} arm/gripper joints still "
-              "assume real-zero == sim-zero (OFFSET_REAL=0). Measure real .pos at "
-              "the sim-zero pose before any real rollout.")
+    print("[debug] arm/gripper OFFSET_REAL=0 and SIGN=+1, i.e. real .pos is taken to be the "
+          "URDF pose in degrees. That is what lerobot's follower calibration establishes; a "
+          "mismatch shows as the arm resting visibly off the sim rest pose, or moving the wrong "
+          "way on one joint. Check against --live before a rollout.")
     return 0 if max_err < 1e-6 else 1
 
 
@@ -180,7 +177,7 @@ async def run_snapshot(out_dir: pathlib.Path) -> int:
 
 async def run_live(out_dir: pathlib.Path, every: float) -> int:
     """Read-only: periodically dump the live rectified view and the state bridge round-trip."""
-    from livekit.portal import (  # imported here so modes 1/2 need no livekit
+    from livekit.portal import (  # imported here so --frame/--bridge need no livekit
         Observation, Operator, OperatorConfig, frame_bytes_to_numpy_rgb,
     )
     from utils.common import env, load_env, mint_token, pace
@@ -244,7 +241,7 @@ async def run_live(out_dir: pathlib.Path, every: float) -> int:
 
 
 _SIM_REST = bridge.SIM_REST
-# Short aliases + index accepted for joint names in the REPL.
+# Aliases and bare indices accepted for joint names in the REPL.
 _ALIASES = {"slider": "dof_slider.pos", "rail": "dof_slider.pos",
             "pan": "shoulder_pan.pos", "lift": "shoulder_lift.pos",
             "elbow": "elbow_flex.pos", "wrist": "wrist_flex.pos",
@@ -287,16 +284,11 @@ async def run_control(assume_yes: bool) -> int:
     fps = int(env("PORTAL_FPS", "10"))
     config_path = _HERE.parent / "portal.yaml"
 
-    uncal = [k for k in bridge.JOINT_KEYS
-             if k != "dof_slider.pos" and bridge.OFFSET_REAL[k] == 0.0]
     print("=" * 70)
     print("  MANUAL CONTROL -- THIS MOVES THE REAL ROBOT.")
     print("  Targets ramp at the trained speed (rail ~12 cm/s), not instantly.")
-    if uncal:
-        print(f"  WARNING: {len(uncal)} arm/gripper joints are NOT calibrated "
-              "(OFFSET_REAL=0).")
-        print("  The RAIL is calibrated; test it first (`far`/`near`). Arm moves may "
-              "be wrong.")
+    print("  Test the rail first (`far`/`near`): it is the one axis calibrated from geometry")
+    print("  rather than from the follower's lerobot homing.")
     print("  Keep an e-stop / power cut in reach. Ctrl-C stops sending immediately.")
     print("=" * 70)
     if not assume_yes:
@@ -313,7 +305,7 @@ async def run_control(assume_yes: bool) -> int:
     await op.set_active_operator(me)   # claim control
     print("[debug] claimed control. Waiting for the first observation to seed target ...")
 
-    # Seed goal/target from the first real pose so the first send is a no-op.
+    # Seed from the first real pose so the first send is a no-op.
     goal: dict[str, float] | None = None
     async for _ in pace(fps):
         obs = latest["obs"]
@@ -325,7 +317,7 @@ async def run_control(assume_yes: bool) -> int:
     target = dict(goal)
     print("[debug] seeded from current pose. Type `?` for commands.")
 
-    # Background stdin reader -> queue, so the send loop never blocks.
+    # Background stdin reader, so the send loop never blocks.
     queue: asyncio.Queue[str] = asyncio.Queue()
     loop = asyncio.get_event_loop()
     stop = {"quit": False}
@@ -436,12 +428,9 @@ async def run_control_ui(assume_yes: bool) -> int:
     fps = int(env("PORTAL_FPS", "10"))
     config_path = _HERE.parent / "portal.yaml"
 
-    uncal = [k for k in bridge.JOINT_KEYS if k != "dof_slider.pos" and bridge.OFFSET_REAL[k] == 0.0]
     print("=" * 70)
     print("  MANUAL CONTROL (OpenCV UI) -- THIS MOVES THE REAL ROBOT.")
     print("  Drag a joint's trackbar; the arm ramps to it at the trained speed.")
-    if uncal:
-        print(f"  WARNING: {len(uncal)} arm/gripper joints uncalibrated (OFFSET_REAL=0); rail is calibrated.")
     print("  Focus the window -- keys: r=rest  h=hold-here  q/esc=quit. Ctrl-C also stops.")
     print("=" * 70)
     if not assume_yes and input("  type 'drive' to proceed: ").strip() != "drive":
@@ -476,8 +465,8 @@ async def run_control_ui(assume_yes: bool) -> int:
             cv2.setTrackbarPos(_JOINT_TB[k], win, _sim_to_tb(k, pose[k]))
 
     mappings = {t: _mapping_for(t) for t, _ in CAMERA_STACK}
-    # Speed check: sim commands DELTA_LIMIT * |SCALE| * fps in wire units. Compare
-    # against the real robot's measured max; if well below, the hardware can't keep up.
+    # Speed check: sim commands DELTA_LIMIT * |SCALE| * fps wire units/s. If the measured
+    # real max stays well below it, the hardware cannot keep up with the trained speed.
     sim_max_speed = {k: bridge.DELTA_LIMIT[k] * abs(bridge.SCALE[k]) * fps for k in bridge.JOINT_KEYS}
     max_real_speed = {k: 0.0 for k in bridge.JOINT_KEYS}
     prev = {"state": None, "t": None}

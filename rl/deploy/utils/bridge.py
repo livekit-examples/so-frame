@@ -1,15 +1,19 @@
 """sim <-> real unit and coordinate bridge.
 
-Sim units are radians for the arm and gripper, metres for the rail. Wire units are degrees for
-the arm and gripper, 0..100 for the rail (0 = far from the camera, 100 = near).
+UNIT CONTRACT: sim is radians (arm, gripper) and metres (rail); the wire is degrees (arm,
+gripper) and 0..100 for the rail (0 = far from the camera, 100 = near).
 
-Joint order, joint limits, per-step delta caps and the rest pose are NOT defined here -- they
-come from ``soframe_policy.rig``, which the training side reads too. This file owns only the
-unit conversion, which is deploy-specific.
+Joint order, joint limits, per-step delta caps and the rest pose come from
+``soframe_policy.rig``, which training reads too. This file owns only the unit conversion.
 
-CALIBRATION STATUS: the rail mapping is derived from geometry. The arm and gripper mappings
-assume real zero == sim zero (``OFFSET_REAL`` and ``SIGN`` are identity). Measure each arm
-joint's real ``.pos`` at the sim-zero pose into ``OFFSET_REAL`` before trusting a real rollout.
+``OFFSET_REAL`` is 0 for the arm and gripper joints by design, not by omission: the follower runs
+lerobot's per-motor calibration (``leslider/configs/calibrate_follower_pos.yaml``), which already
+places real ``.pos`` zero at the same physical pose as the URDF zero. So real == sim after the
+unit scale, and there is nothing to measure here.
+
+That leaves two assumptions, both cheap to check with ``debug_policy.py --bridge`` against a live
+arm: the calibrated zero really is the URDF zero pose, and ``SIGN`` is identity (a flipped joint
+would drive the arm the wrong way, which no offset would rescue). Re-check after re-homing a servo.
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from typing import Mapping
 
 from soframe_policy import rig
 
-# Wire keys: the follower names every joint "<name>.pos". Order follows rig.JOINT_NAMES, which
+# Wire keys: the follower names every joint "<name>.pos". JOINT ORDER is rig.JOINT_NAMES, which
 # is also portal.yaml's order and the policy's action order.
 JOINT_KEYS = tuple(f"{name}.pos" for name in rig.JOINT_NAMES)
 
@@ -29,10 +33,9 @@ SCALE: dict[str, float] = {f"{n}.pos": _RAD2DEG for n in rig.JOINT_NAMES}
 SIGN: dict[str, float] = {k: 1.0 for k in JOINT_KEYS}          # flip per rig
 OFFSET_REAL: dict[str, float] = {k: 0.0 for k in JOINT_KEYS}   # real .pos at sim zero
 
-# Rail: normalized 0..100 over its travel. Affine, no sign flip. Calibrated from geometry,
-# unlike the arm zeros above. Public because the rail is the one joint callers single out:
-# its sim low limit is exactly wire 0 by construction of this mapping, which is where you
-# park the carriage to re-zero it.
+# Rail: normalized 0..100 over its travel, affine, no sign flip, calibrated from geometry.
+# Its sim low limit is exactly wire 0 by construction, the end of travel you park the
+# carriage at to re-zero it.
 RAIL = "dof_slider.pos"
 _S_LO, _S_HI = rig.JOINT_LIMITS["dof_slider"]
 SCALE[RAIL] = 100.0 / (_S_HI - _S_LO)
