@@ -82,7 +82,7 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
     than a default guess.
     """
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    ckpt = torch.load(str(path), map_location=device)
+    ckpt = torch.load(str(path), map_location="cpu")
     meta = dict(ckpt.get("meta") or {})
 
     if not meta:
@@ -100,15 +100,21 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
                 "action_high": torch.full((n_act,), 1.0)}
 
     spec = ProprioSpec.from_meta(meta["proprio"])
+    # Build on CPU, then move. The constructors run an orthogonal init that load_state_dict
+    # overwrites two lines later, so initialising on the target device is wasted work at best.
+    # At worst it is fatal: nn.init.orthogonal_ calls torch.linalg.qr, which has no MPS kernel
+    # before torch 2.13, so building straight onto an Apple GPU raised NotImplementedError to
+    # produce weights that were about to be discarded. The encoder reads its device from its
+    # own parameters at call time, so moving after the load is equivalent.
     encoder, actor = build(
         meta["kind"], num_cams=meta["num_cams"], res=meta["res"], n_state=spec.n_state,
         n_act=meta["n_act"], action_low=meta["action_low"], action_high=meta["action_high"],
-        device=device, encoder_kwargs=encoder_kwargs,
+        device="cpu", encoder_kwargs=encoder_kwargs,
     )
     encoder.load_state_dict(ckpt["encoder"])
     actor.load_state_dict(ckpt["actor"])
-    encoder.eval()
-    actor.eval()
+    encoder = encoder.to(device).eval()
+    actor = actor.to(device).eval()
     meta["proprio"] = spec
     meta["global_step"] = ckpt.get("global_step")
     return encoder, actor, meta

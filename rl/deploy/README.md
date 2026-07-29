@@ -18,6 +18,12 @@ uv sync
 cp .env.example .env      # LIVEKIT_URL, API key/secret, LIVEKIT_ROOM
 ```
 
+`soframe-policy` is a path dependency at `../policy`, so this project only syncs
+next to a copy of [`rl/policy/`](../policy/README.md). To put both on a robot host use
+`./scripts/deploy_to_robot.sh <host> --sync`, which ships `rl/deploy` to `~/so-frame-deploy`
+and `rl/policy` to `~/policy` so the relative path still resolves. Copying only this
+directory gives `Distribution not found at: file:///…/policy` on sync.
+
 ## Run
 
 ```bash
@@ -25,12 +31,14 @@ cp .env.example .env      # LIVEKIT_URL, API key/secret, LIVEKIT_ROOM
 uv run robot
 
 # wherever the GPU is
-POLICY_CHECKPOINT=/path/to/ckpt_best.pt uv run policy --claim
+POLICY_CHECKPOINT=/path/to/ckpt_best.pt uv run policy --viz
 ```
 
-`--claim` drives immediately; without it the policy waits to be claimed by the web UI. Keys while
-running: `r` reset to rest and hold, `p` pause/resume, `q` quit. `--viz` shows what the policy
-sees.
+It claims control on startup and starts **paused**, holding the pose, so nothing moves until you
+press `p`. `--no-start-paused` drives on launch; `--no-claim` sits idle until the web UI claims
+it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0` ramp the rail alone to
+wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` shows what the policy
+sees, and appears even with no frames arriving so you can tell connected from stalled.
 
 There are no architecture flags. The checkpoint records its own encoder, input resolution,
 camera count and proprio layout — see [policy/](../policy/README.md).
@@ -49,12 +57,18 @@ Rectification replays `utils/camera_mappings/<camera>_camera_mapping.json`. To f
 
 ```bash
 # in rl/environments/maniskill (needs the simulator), dump what the sim camera sees
-uv run python examples/dump_reference_views.py --out ../../rl/deploy/utils/reference_views
+uv run python examples/dump_reference_views.py --out ../../deploy/utils/reference_views
 
 # here, drag sliders until the real frame matches it
 uv run python utils/calibrate_camera.py utils/captures/real_overhead_camera.png \
     --reference utils/reference_views/overhead_camera.png --camera overhead
 ```
+
+Sliders: `rot90` / `angle` / `k1` / `k2` / `focal` straighten and scale the raw frame, then
+`zoom` and `crop cx` / `cy` / `size` frame it. `[c]` re-centres the crop, `[s]` saves. Pass
+`--out-size` to match the checkpoint's render size (128 for squint, 168 for `dino_patch`);
+it defaults to whatever the existing mapping recorded. The sim FOV and camera pose are not
+sliders here: the reference render is fixed, and the URDF pose is ground truth.
 
 A missing mapping falls back to a plain resize, which is **out of distribution** — the loop says
 so loudly at startup.

@@ -30,11 +30,13 @@ SIGN: dict[str, float] = {k: 1.0 for k in JOINT_KEYS}          # flip per rig
 OFFSET_REAL: dict[str, float] = {k: 0.0 for k in JOINT_KEYS}   # real .pos at sim zero
 
 # Rail: normalized 0..100 over its travel. Affine, no sign flip. Calibrated from geometry,
-# unlike the arm zeros above.
-_RAIL = "dof_slider.pos"
+# unlike the arm zeros above. Public because the rail is the one joint callers single out:
+# its sim low limit is exactly wire 0 by construction of this mapping, which is where you
+# park the carriage to re-zero it.
+RAIL = "dof_slider.pos"
 _S_LO, _S_HI = rig.JOINT_LIMITS["dof_slider"]
-SCALE[_RAIL] = 100.0 / (_S_HI - _S_LO)
-OFFSET_REAL[_RAIL] = -100.0 * _S_LO / (_S_HI - _S_LO)
+SCALE[RAIL] = 100.0 / (_S_HI - _S_LO)
+OFFSET_REAL[RAIL] = -100.0 * _S_LO / (_S_HI - _S_LO)
 
 # Per-step delta caps and the rest pose, keyed by wire name for convenience.
 DELTA_LIMIT: dict[str, float] = {f"{n}.pos": v for n, v in rig.JOINT_DELTA_LIMITS.items()}

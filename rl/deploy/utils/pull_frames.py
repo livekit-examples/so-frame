@@ -19,7 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from utils.common import env, load_env, mint_token  # noqa: E402
 
 _HERE = pathlib.Path(__file__).resolve().parent
-CONFIG_PATH = _HERE.parents[1] / "portal.yaml"
+CONFIG_PATH = _HERE.parent / "portal.yaml"   # _HERE is utils/; portal.yaml sits in rl/deploy/
 CAMERAS = ("arm_camera", "overhead_camera")
 
 

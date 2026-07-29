@@ -476,7 +476,7 @@ feetech = [
 [[package]]
 name = "lerobot-robot-so101-slider-pos"
 version = "0.1.0"
-source = { git = "https://github.com/pham-tuan-binh/leslider?subdirectory=packages%2Flerobot_robot_so101_slider_pos&rev=4c1c85d4f140b1c4704cafa7624f14e844919700#4c1c85d4f140b1c4704cafa7624f14e844919700" }
+source = { git = "https://github.com/pham-tuan-binh/leslider?subdirectory=packages%2Flerobot_robot_so101_slider_pos&rev=c18e50fed2eb8e4343de40a3e90cbb10eb885e04#c18e50fed2eb8e4343de40a3e90cbb10eb885e04" }
 dependencies = [
     { name = "lerobot", extra = ["feetech"] },
 ]
@@ -993,7 +993,7 @@ wheels = [
 [[package]]
 name = "so-frame-deploy"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "lerobot", extra = ["feetech"] },
     { name = "lerobot-robot-so101-slider-pos" },
@@ -1009,7 +1009,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "lerobot", extras = ["feetech"], specifier = ">=0.6.0" },
-    { name = "lerobot-robot-so101-slider-pos", git = "https://github.com/pham-tuan-binh/leslider?subdirectory=packages%2Flerobot_robot_so101_slider_pos&rev=4c1c85d4f140b1c4704cafa7624f14e844919700" },
+    { name = "lerobot-robot-so101-slider-pos", git = "https://github.com/pham-tuan-binh/leslider?subdirectory=packages%2Flerobot_robot_so101_slider_pos&rev=c18e50fed2eb8e4343de40a3e90cbb10eb885e04" },
     { name = "livekit-api", specifier = ">=0.7" },
     { name = "livekit-portal", specifier = ">=0.2.4" },
     { name = "numpy", specifier = ">=1.24" },
