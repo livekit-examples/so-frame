@@ -210,7 +210,7 @@ GOAL_CLEARANCE = 0.05
 # progress is strictly monotone, a regression drops to a lower rung on its own, and there is
 # nothing to trade off against.
 #
-#   reach [0,1] < grasped [2,3] < holding [4,5] < released 6 < success 10
+#   reach [0,1.5] < grasped [2,3] < holding [4,5] < released 6 < success 10
 #
 # There are no penalty terms. Motion limits are enforced structurally by the delta action space
 # and the effort limits above, so there is no smoothness or effort weight to balance against
@@ -221,15 +221,32 @@ RUNG_HOLDING = 4.0        # bar over the bin, still gripped (leave it by opening
 RUNG_GRASPED = 2.0        # bar grasped, carried toward the drop point (not yet over the bin)
 #                           the reach stage's base is 0 (shaping only)
 
-# The one shaping term beyond the rungs: how far opening the jaw over the bin pays BEFORE
-# contact breaks. Without it the holding rung is a flat plateau and the policy sits on it
-# holding the bar, because releasing is a blind leap to the next rung. Keep it below
-# (RUNG_RELEASED - RUNG_HOLDING) so the most-open still-holding pose stays strictly worse than
-# an actual release.
+# Two jaw-motion shaping terms beyond the rungs, one per end of the pick. Each exists for the
+# same reason: without it the rung below is a flat plateau the policy can sit on, because the jaw
+# motion that leaves it is a blind leap to the next rung.
+#
+# Opening: how far opening the jaw over the bin pays BEFORE contact breaks. Keep it below
+# (RUNG_RELEASED - RUNG_HOLDING) so the most-open still-holding pose stays strictly worse than an
+# actual release.
 SHAPE_HOLD_OPEN = 1.0
+# Closing: the mirror of the above, how far closing the jaw pays while the tool is ON the cube
+# but the grasp has not caught yet. Gated on being on the cube (xy aligned AND within
+# REACH_Z_ALIGNED in z), so closing on the way down -- shutting the jaw before it surrounds the
+# cube -- pays nothing. Keep it below (RUNG_GRASPED - 1.0), the headroom above the reach stage's
+# shaping maximum, so a shut jaw that has not caught the cube stays strictly worse than a grasp.
+SHAPE_REACH_CLOSE = 0.5
 
 SHARP = 5.0               # single tanh sharpness (~1/length-scale, m^-1) for every distance term
 REACH_XY_ALIGNED = 0.03   # tcp within this xy of the bar is "aligned" and may descend
+REACH_Z_ALIGNED = 0.02    # ... and within this z of it as well, so the jaw is around it and may close
+
+# The spacing rule above, made real. Reach and grasped each carry 1.0 of bounded distance shaping
+# on top of their base, and each jaw term adds to the stage it pays in.
+assert (
+    1.0 + SHAPE_REACH_CLOSE < RUNG_GRASPED
+    and RUNG_GRASPED + 1.0 < RUNG_HOLDING
+    and RUNG_HOLDING + SHAPE_HOLD_OPEN < RUNG_RELEASED < REWARD_SUCCESS
+), "every reward stage's maximum must stay strictly below the next stage's rung"
 
 
 # =====================================================================================

@@ -40,11 +40,13 @@ for _mesh in (CUBE_MESH, BIN_MESH):
 from ..config import (  # noqa: E402
     GOAL_CLEARANCE,
     REACH_XY_ALIGNED,
+    REACH_Z_ALIGNED,
     REWARD_SUCCESS,
     RUNG_GRASPED,
     RUNG_HOLDING,
     RUNG_RELEASED,
     SHAPE_HOLD_OPEN,
+    SHAPE_REACH_CLOSE,
     SHARP,
     WORK_SURFACE_Z,
 )
@@ -494,8 +496,13 @@ class PickPlaceBin(DualCameraEnv):
             WORK_SURFACE_Z + config.BIN_HEIGHT + self.item_half_heights + GOAL_CLEARANCE
         )
 
-        # Stage 0 [0, 1]: top-down reach. xy alignment first; the z term only pays once aligned,
-        # so the tool descends from ABOVE rather than scooping from the side (which wrecked grasps).
+        # How far the jaw is open, in [0, 1]. Used at both ends of the pick: closing pays in the
+        # reach stage, opening pays in the holding stage.
+        openness = self._gripper_qpos_openness()
+
+        # Stage 0 [0, 1.5]: top-down reach, then clamp. xy alignment first; the z term only pays
+        # once aligned, so the tool descends from ABOVE rather than scooping from the side (which
+        # wrecked grasps).
         reach_d_xy = torch.linalg.norm(tcp[:, :2] - item_p[:, :2], axis=1)
         reach_d_z = torch.abs(tcp[:, 2] - item_p[:, 2])
         aligned_xy = reach_d_xy < REACH_XY_ALIGNED
@@ -503,6 +510,14 @@ class PickPlaceBin(DualCameraEnv):
             aligned_xy,
             0.5 * (1 - torch.tanh(SHARP * reach_d_z)),
             torch.zeros_like(reach_d_z),
+        )
+        # The mirror of the openness term in stage 2: once the tool is ON the cube, squeezing the
+        # jaw shut is a continuous climb toward the grasped rung instead of a blind jump from a
+        # flat plateau. Gated on BOTH axes being aligned, so closedness pays nothing on the way
+        # in -- a jaw that shuts before it surrounds the cube cannot grasp it.
+        on_item = aligned_xy & (reach_d_z < REACH_Z_ALIGNED)
+        reward = reward + torch.where(
+            on_item, SHAPE_REACH_CLOSE * (1 - openness), torch.zeros_like(openness)
         )
 
         # Stage masks. is_item_above_bin is horizontal-only; holding vs released splits on contact.
@@ -522,7 +537,6 @@ class PickPlaceBin(DualCameraEnv):
         # unclamping is a continuous climb instead of a blind jump to the released rung.
         # Openness pays HERE only, never while carrying, so opening early (and dropping the bar
         # short of the bin) is still worth strictly less than carrying on.
-        openness = self._gripper_qpos_openness()
         reward = torch.where(holding_above, RUNG_HOLDING + SHAPE_HOLD_OPEN * openness, reward)
 
         # Stage 3 [6]: released over the bin. Flat -- success is what pays for a clean settle.

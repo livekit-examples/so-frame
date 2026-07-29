@@ -51,8 +51,13 @@ Reward is a monotonic ladder — each stage sits above the previous stage's maxi
 monotone and a regression falls to a lower rung on its own:
 
 ```
-reach [0,1] < grasped [2,3] < holding [4,5] < released 6 < success 10
+reach [0,1.5] < grasped [2,3] < holding [4,5] < released 6 < success 10
 ```
+
+Both jaw motions are shaped, so neither is a blind jump off a plateau: closing pays while the tool
+is on the cube (top of the reach stage), opening pays while holding over the bin (top of the
+holding stage). Each stays below the next rung, so a jaw that shuts without catching the cube is
+worth less than a grasp, and the most-open still-holding pose is worth less than a real release.
 
 No penalty terms. Motion limits are structural instead: the delta action space caps per-step speed
 at the measured real servo rate (0.05 rad/step arm, 0.007 m/step rail at 10 Hz) and the force
