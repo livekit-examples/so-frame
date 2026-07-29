@@ -1,19 +1,18 @@
 {
-  "camera": "wrist",
+  "camera": "arm",
   "source_image_size": [
     640,
     480
   ],
-  "fov_deg": 54.6,
-  "sim_fov_deg": 58.0,
+  "fov_deg": 48.84,
   "rot90": 0,
   "angle_deg": 0.0,
-  "k1": -0.33,
-  "k2": 0.12,
-  "focal_px": 465,
-  "zoom": 1.0,
-  "crop_cx": 320,
-  "crop_cy": 240,
-  "crop_size": 480,
+  "k1": -0.405,
+  "k2": 0.17,
+  "focal_px": 547,
+  "zoom": 0.91,
+  "crop_cx": 341,
+  "crop_cy": 232,
+  "crop_size": 452,
   "out_size": 128
 }
