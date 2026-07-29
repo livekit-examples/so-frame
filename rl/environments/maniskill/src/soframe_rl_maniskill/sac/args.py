@@ -13,13 +13,27 @@ from typing import Optional
 
 from soframe_policy.encoders import ENCODERS
 
-# Per-encoder defaults for the two knobs that genuinely differ. `res` means the squinted image
+# Per-encoder defaults for the knobs that genuinely differ. `res` means the squinted image
 # size for the CNN and the per-camera DINOv2 input resolution for the patch head; `buffer_size`
 # follows from how big one cached observation is (a 32px 6-channel image is ~6 KB, a 2-camera
 # 168px token grid is ~110 KB in bf16).
+#
+# `num_updates` is the value the best run for that encoder actually used, paired with the
+# `batch_size` default of 512 and 1024 `num_envs`. Keep it that way: it is the one knob here
+# that is a tuned result rather than a structural consequence of the architecture, so a value
+# nothing has trained at is worse than no default. squint used to say 256, which no successful
+# run ever used -- 64 is what v40_squint_clean (0.688) and v42_squint_topdown (0.656) ran, and
+# 32 is what v1-dino ran to 0.743. Both are ratios against 1024 envs; changing num_envs without
+# scaling num_updates silently changes the update-to-data ratio.
+#
+# `buffer_size` is NOT here any more. It used to be a per-encoder constant chosen by what fit in
+# VRAM (1M for squint, 75k for dino_patch), which meant the two encoders retained wildly
+# different amounts of history -- at 1024 envs, 3.3 episodes versus 0.24 -- so any comparison
+# between them confounded architecture with replay retention. It is now derived from
+# --replay_episodes for both, and the buffer lives in host RAM to make that affordable.
 ENCODER_DEFAULTS = {
-    "squint":     dict(res=32,  render_size=128, buffer_size=1_000_000, num_updates=256),
-    "dino_patch": dict(res=168, render_size=168, buffer_size=75_000,    num_updates=32),
+    "squint":     dict(res=32,  render_size=128, num_updates=64),
+    "dino_patch": dict(res=168, render_size=168, num_updates=32),
 }
 
 
@@ -64,7 +78,13 @@ class Args:
     env_domain_randomization: bool = True
     """adds domain randomization flag if env supports it"""
     randomize_colors: bool = False
-    """also randomize bar/bin colors per scene build (default fixed purple/yellow); pair with --reconfiguration_freq"""
+    """also randomize bar/bin colors per scene build (on top of --object_colors); pair with --reconfiguration_freq"""
+    object_colors: str = "black"
+    """cube/bin colour scheme. "black" matches the real rig (both config.BLACK, ~4-5% reflectance
+    matte plastic). "distinct" paints the cube blue and the bin yellow, which the squint CNN needs:
+    at res 32 the cube is one pixel, so hue is the only cue it has, and under "black" three seeds
+    scored 0.000 over 12M steps. Costs sim2real fidelity, so it is not the default -- dino_patch
+    resolves the cube as a shape at res 112/168 and should stay on "black"."""
     overhead_camera_fov: Optional[float] = None
     """override the overhead camera's base FOV, in DEGREES (measured via rl/deploy/utils/calibrate_camera.py)"""
     wrist_camera_fov: Optional[float] = None
@@ -77,8 +97,10 @@ class Args:
     """rendering fidelity (see envs/base_random_env.py): "raster" realistic PBR + soft shadow, "flat" fast shadowless, "raytraced" eval-only on the cpu backend"""
     num_envs: int = 1024
     """the number of parallel environments"""
-    num_eval_envs: int = 32
-    """the number of parallel evaluation environments"""
+    num_eval_envs: int = 35
+    """the number of parallel evaluation environments. 35 rather than a round 32 so the eval
+    video tiles without gaps: RecordEpisode uses nrows = int(sqrt(num_envs)), so 35 is exactly
+    5 rows x 7 columns, where 32 leaves a ragged last column."""
     partial_reset: bool = False
     """whether to let parallel environments reset upon termination instead of truncation"""
     eval_partial_reset: bool = False
@@ -89,6 +111,11 @@ class Args:
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     eval_freq: int = 100_000
     """evaluation frequency in terms of global steps"""
+    log_freq: int = 10
+    """how often, in iterations, to push the SAC losses to wandb. Needed because episode metrics
+    only exist at a truncation boundary (every env_horizon iterations, since partial_reset is
+    off), and tying loss logging to that boundary makes the curves unreadably sparse: at
+    env_horizon=300 and --num_envs 4096 that is one point per 1.2M steps, ~10 for a whole run."""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = None
@@ -122,11 +149,34 @@ class Args:
     """camera sensor-realism augmentation (compression/noise/gamma) on top of color jitter"""
 
     # Algorithm specific arguments
-    total_timesteps: int = 1_500_000
-    """total timesteps of the experiments"""
+    total_timesteps: int = 12_000_000
+    """total timesteps of the experiments. 12M is what every real run here has used: a
+    from-scratch squint CNN does not land its first success until ~7M, so shorter budgets
+    finish before the task is learned."""
+    replay_episodes: float = 2.0
+    """replay retention, in EPISODES per env. The buffer holds
+    `replay_episodes * config.EPISODE_HORIZON * num_envs` transitions, the same formula for every
+    encoder, so squint and dino_patch see the same amount of history and a comparison between
+    them measures the architecture rather than the buffer. Expressed in episodes because that is
+    the unit the task has: at 2.0 every env keeps its last two full attempts."""
     buffer_size: Optional[int] = None
-    """the replay memory buffer size. Defaults per --encoder (cached DINOv2 tokens are far
-    larger per transition than a 32px image stack)."""
+    """replay size in transitions. Leave unset: it is derived from --replay_episodes. Set it only
+    to override that derivation, e.g. to reproduce a pre-v4 run's absolute buffer size."""
+    replay_storage: str = "cpu"
+    """where the replay lives: "cpu" (pinned host RAM, with a prefetch thread overlapping the
+    gather and the PCIe copy with training) or "gpu" (VRAM, as every run through v3 did). Host
+    storage is what makes equal retention affordable -- 2 episodes of dino_patch tokens at 512
+    envs is 63 GB, past a 96 GB card once the model and sim are on it, but light on a 214 GB
+    host. It trades capacity for bandwidth: every update pulls batch*(obs+next_obs) over PCIe."""
+    replay_prefetch: int = 2
+    """batches the replay keeps in flight when --replay_storage cpu. 0 makes sampling synchronous,
+    which is the fallback if the prefetch thread is ever suspected of masking a bug."""
+    obs_only_replay: bool = True
+    """store each observation once and recover next_obs by an index offset, halving replay memory
+    (see sac/replay.py; unit tests in tests/test_replay.py). On by default from v4: host storage
+    is only implemented in this buffer, and the torchrl two-copy layout cannot hold 2 episodes of
+    dino tokens anywhere. --no-obs_only_replay falls back to the torchrl buffer, which forces
+    --replay_storage gpu."""
     batch_size: int = 512
     """the batch size of sample from the replay memory"""
     num_updates: Optional[int] = None
@@ -192,6 +242,23 @@ class Args:
         if self.encoder_lr is None:
             self.encoder_lr = self.q_lr
 
+        if self.object_colors not in ("black", "distinct"):
+            raise ValueError(
+                f"--object_colors must be black|distinct, got {self.object_colors!r}"
+            )
+        if self.replay_storage not in ("cpu", "gpu"):
+            raise ValueError(f"--replay_storage must be cpu|gpu, got {self.replay_storage!r}")
+        if self.replay_storage == "cpu" and not self.obs_only_replay:
+            raise ValueError(
+                "--replay_storage cpu needs --obs_only_replay: host storage is implemented in "
+                "sac/replay.py only, not in the torchrl buffer. Pass --replay_storage gpu to "
+                "use the torchrl two-copy buffer, but note it cannot hold 2 episodes of "
+                "dino_patch tokens in VRAM."
+            )
+        # Retention in episodes -> transitions. Rounded to whole iterations by the buffer itself.
+        if self.buffer_size is None:
+            from .. import config
+            self.buffer_size = int(self.replay_episodes * config.EPISODE_HORIZON * self.num_envs)
         if self.sim_backend not in ("gpu", "cpu"):
             raise ValueError(f"--sim_backend must be gpu|cpu, got {self.sim_backend!r}")
         if self.sim_backend == "cpu" and (self.num_envs > 1 or self.num_eval_envs > 1):

@@ -201,6 +201,23 @@ SPAWN_MAX_ATTEMPTS = 32
 # bin. Carry to here, open, let gravity finish; success still requires the cube settled IN the bin.
 GOAL_CLEARANCE = 0.05
 
+# Steps per episode, passed to register_env. Named because replay sizing is expressed in
+# EPISODES rather than transitions (sac/args.py: --replay_episodes), so the two must agree:
+# a buffer quoted as "2 episodes of retention" is 2 * this * num_envs transitions.
+#
+# 200 from v4 (was 300 for every run through v3). At CONTROL_HZ that is 20 s per attempt.
+#
+# Sized against rail travel, which dominates the budget. Park to cube, then cube to bin, at the
+# measured 0.007 m/step over the workspace's 0.71 m y span, costs 58 steps at the median spawn,
+# 110 at p90 and 139 at p99 (measured over 200k sampled spawns). At 200 that leaves the worst
+# decile 45% of the episode for descending, grasping, lifting, releasing and settling; at 150 it
+# left 27%, which is why 150 was rejected. The 300 the earlier runs used left 63%.
+#
+# Episode returns are still not comparable with the 300-step history: a shorter episode accrues
+# fewer per-step rungs, so v4's return curve sits below v1-v3 for reasons unrelated to policy
+# quality. Compare success_at_end, not return.
+EPISODE_HORIZON = 200
+
 
 # =====================================================================================
 # Reward ladder
@@ -262,7 +279,19 @@ assert (
 BLACK = (0.04, 0.04, 0.04)
 WHITE = (0.88, 0.88, 0.88)
 
-# Task objects.
+# Hue-separated task-object colours, selected by --object_colors distinct. These exist because
+# the squint CNN cannot use the black scheme: at res 32 the 20mm cube is a SINGLE pixel, and once
+# it shares a colour with the bin and the frame extrusions its only distinguishing feature is
+# gone. v40_squint_clean reached 0.688 when the cube was purple and the bin yellow (before
+# 3183004 made both black); three seeds at the same hyperparameters under the black scheme
+# scored 0.000 across a full 12M steps, never finding a single success. dino_patch is unaffected,
+# resolving the cube as a multi-pixel shape at res 112/168.
+#
+# Same no-pure-0-or-1 rule as above, so both keep their shading gradients.
+YELLOW = (0.80, 0.62, 0.04)
+BLUE = (0.04, 0.12, 0.60)
+
+# Task objects. Overridden per-run by --object_colors; see sac/args.py.
 COLOR_CUBE = BLACK
 COLOR_BIN = BLACK
 

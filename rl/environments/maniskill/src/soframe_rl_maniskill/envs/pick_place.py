@@ -73,7 +73,7 @@ class PickPlaceRandomizationConfig(RandomizationConfig):
 
 
 # 300 steps (30 s at 10 Hz): the slow real-servo-tracking speeds need this much runway.
-@register_env("SOFramePickPlaceBin-v1", max_episode_steps=300)
+@register_env("SOFramePickPlaceBin-v1", max_episode_steps=config.EPISODE_HORIZON)
 class PickPlaceBin(DualCameraEnv):
     """Pick up a 20 mm cube and place it in a bin, both from the CAD meshes in
     simulation/assets/objects/.

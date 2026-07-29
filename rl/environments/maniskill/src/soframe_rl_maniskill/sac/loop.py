@@ -36,6 +36,7 @@ from soframe_policy.encoders import ENCODERS
 from .build import make_envs
 from .critic import Critic
 from .logger import Logger, evaluate
+from .replay import ObsOnlyReplay
 
 
 def train(args):
@@ -45,6 +46,13 @@ def train(args):
     # agent's controller configs are constructed.
     from .. import config
     config.ARM_SPEED_SCALE = args.arm_speed_scale
+
+    # Same deal: pick_place reads config.COLOR_CUBE / COLOR_BIN when it builds the scene.
+    if args.object_colors == "distinct":
+        config.COLOR_CUBE = config.BLUE
+        config.COLOR_BIN = config.YELLOW
+        print("[config] --object_colors distinct: cube blue, bin yellow "
+              "(hue cue the res-32 squint CNN needs; costs sim2real fidelity)")
 
     run_name = args.exp_name or f"{args.env_id}__{args.encoder}__{args.seed}__{int(time.time())}"
     model_path = os.path.abspath(f"runs/{run_name}/ckpt.pt")
@@ -165,7 +173,19 @@ def train(args):
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr,
                                  capturable=args.cudagraphs and not args.compile)
 
-    rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
+    if args.obs_only_replay:
+        rb = ObsOnlyReplay(args.buffer_size, args.num_envs,
+                           device=device,
+                           storage_device="cpu" if args.replay_storage == "cpu" else device,
+                           prefetch=args.replay_prefetch)
+        if rb.capacity != args.buffer_size:
+            print(f"[replay] buffer_size {args.buffer_size} -> {rb.capacity} "
+                  f"(rounded down to {rb.iters} whole iterations of {args.num_envs} envs)")
+        print(f"[replay] {rb.capacity:,} transitions = {args.replay_episodes:g} episodes/env "
+              f"on {args.replay_storage}"
+              + (f", prefetch {args.replay_prefetch}" if args.replay_storage == "cpu" else ""))
+    else:
+        rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
 
     print("-----------------------")
     print(args)
@@ -351,16 +371,23 @@ def train(args):
             real_next_obs['rgb'][need_final_obs] = infos["final_observation"]['rgb'][need_final_obs]
             real_next_obs['state'][need_final_obs] = infos["final_observation"]['state'][need_final_obs]
 
-        transition = TensorDict(
-            observations=obs,
-            next_observations=real_next_obs,
-            actions=torch.as_tensor(actions, device=device, dtype=torch.float),
-            rewards=torch.as_tensor(rewards, device=device, dtype=torch.float),
-            dones=dones,
-            batch_size=rewards.shape[0],
-            device=device,
-        )
-        rb.extend(transition)
+        act_t = torch.as_tensor(actions, device=device, dtype=torch.float)
+        rew_t = torch.as_tensor(rewards, device=device, dtype=torch.float)
+        if args.obs_only_replay:
+            # next_obs is not stored: it is the same env's observation one iteration later.
+            # `need_final_obs` is exactly the mask where that identity breaks (the real next
+            # observation is the pre-reset final_observation), so those slots get dropped.
+            rb.extend(obs['rgb'], obs['state'], act_t, rew_t, dones, need_final_obs)
+        else:
+            rb.extend(TensorDict(
+                observations=obs,
+                next_observations=real_next_obs,
+                actions=act_t,
+                rewards=rew_t,
+                dones=dones,
+                batch_size=rewards.shape[0],
+                device=device,
+            ))
 
         obs = next_obs
 
@@ -380,8 +407,11 @@ def train(args):
 
                 d.update(out_main)
 
-        # Log
-        if "final_info" in infos:
+        # Log. Episode metrics only exist on a truncation boundary, but the SAC losses in `d` are
+        # refreshed every iteration, so the two cadences are kept separate: waiting for a boundary
+        # to flush the losses would log them once per env_horizon iterations and lose the rest.
+        episode_ended = "final_info" in infos
+        if episode_ended:
             final_info = infos["final_info"]
             done_mask = infos["_final_info"]
             for k, v in final_info["episode"].items():
@@ -390,10 +420,15 @@ def train(args):
             avg_returns.extend(infos["final_info"]["episode"]["return"][done_mask])
             desc = (f"global_step={global_step}, "
                     f"episodic_return={torch.tensor(avg_returns).mean(): 4.2f} (max={max_ep_ret: 4.2f})")
+
+        if d and (episode_ended or iteration % args.log_freq == 0):
             sps = global_step / logger.wall_time
             d["time/sps"] = sps
             pbar.set_description(f"{sps: 4.4f} sps, " + desc)
             logger.log(d=d, step=global_step)
+            # Cleared so the next point carries fresh losses, and so the episode metrics stay a
+            # sparse series instead of a stale value repeated until the next truncation.
+            d = {}
 
         pbar.update(args.num_envs)
         global_step += args.num_envs
@@ -408,6 +443,8 @@ def train(args):
     logger.close()
     print("Starting cleanup...")
     try:
+        if hasattr(rb, "close"):
+            rb.close()      # stop the replay prefetch thread before tearing the sim down
         envs.close()
         eval_envs.close()
     except Exception:
