@@ -1,10 +1,11 @@
 """Environment construction and the per-encoder observation pipeline.
 
-This is the only place the two encoders differ structurally, and the difference is entirely in
+This is the only place the encoders differ structurally, and the difference is entirely in
 the wrapper stack:
 
-    squint      render at render_size -> downsample to res -> jitter -> sensor aug
-    dino_patch  render at render_size -> jitter -> sensor aug -> tokenize at res
+    squint       render at render_size -> downsample to res -> jitter -> sensor aug
+    dino_patch   render at render_size -> jitter -> sensor aug -> tokenize at res
+    dino_global  render at render_size -> jitter -> sensor aug -> global vectors at res
 
 Ordering matters in both. The augmentations need images, so they come before tokenisation;
 the tokeniser is always last, because what it emits are features, not pixels.
@@ -117,13 +118,19 @@ def apply_obs_pipeline(env, args, device):
         if args.sensor_aug:
             # after ColorJitter; applied to eval too so best-ckpt selection favors robustness
             env = wrappers.SensorAugWrapper(env)
-    elif args.encoder == "dino_patch":
+    elif args.encoder in ("dino_patch", "dino_global"):
         if args.apply_jitter:
             env = wrappers.ColorJitterWrapper(env)
         if args.sensor_aug:
             env = wrappers.SensorAugWrapper(env)
-        # LAST: everything above needs pixels, and this emits features.
-        env = wrappers.DinoTokenWrapper(env, res=args.res, device=device)
+        # LAST: everything above needs pixels, and this emits features. The two dino pipelines
+        # are identical up to this point by design, so a dense-vs-collapsed comparison differs
+        # only in the reduction applied to the same backbone output.
+        if args.encoder == "dino_patch":
+            env = wrappers.DinoTokenWrapper(env, res=args.res, device=device)
+        else:
+            env = wrappers.DinoGlobalWrapper(env, res=args.res, device=device,
+                                             pool=args.dino_pool)
     else:
         raise ValueError(f"no observation pipeline defined for encoder {args.encoder!r}")
     return env

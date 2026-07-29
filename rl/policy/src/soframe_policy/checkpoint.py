@@ -24,11 +24,16 @@ FORMAT_VERSION = 1
 
 
 def save(path, encoder, actor, *, num_cams, res, n_act, action_low, action_high,
-         proprio, global_step=None, extra=None):
+         proprio, global_step=None, extra=None, encoder_kwargs=None):
     """Write encoder + actor weights and the metadata needed to rebuild them.
 
     ``proprio`` is the ``ProprioSpec`` measured from the training env; it defines n_state and
     the field order deploy must reproduce.
+
+    ``encoder_kwargs`` are constructor arguments beyond (num_cams, res) that change the head's
+    behaviour. They MUST be recorded: dino_global's ``pool="cls"`` and ``pool="mean"`` produce
+    identical state-dict shapes, so a checkpoint trained on one would load silently into the
+    other and the deployed policy would be fed a different global vector than it trained on.
     """
     if not isinstance(proprio, ProprioSpec):
         raise TypeError(f"proprio must be a ProprioSpec, got {type(proprio).__name__}")
@@ -42,6 +47,7 @@ def save(path, encoder, actor, *, num_cams, res, n_act, action_low, action_high,
         "proprio": proprio.to_meta(),
         "action_low": torch.as_tensor(action_low, dtype=torch.float32).cpu(),
         "action_high": torch.as_tensor(action_high, dtype=torch.float32).cpu(),
+        "encoder_kwargs": dict(encoder_kwargs or {}),
     }
     payload = {
         "meta": meta,
@@ -100,6 +106,10 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
                 "action_high": torch.full((n_act,), 1.0)}
 
     spec = ProprioSpec.from_meta(meta["proprio"])
+    # Metadata wins here as it does for kind/res. The caller's encoder_kwargs are a fallback for
+    # checkpoints written before the field existed, where the only encoders in circulation
+    # (squint, dino_patch) took no extra constructor arguments.
+    encoder_kwargs = meta.get("encoder_kwargs") or (encoder_kwargs or {})
     # Build on CPU, then move. The constructors run an orthogonal init that load_state_dict
     # overwrites two lines later, so initialising on the target device is wasted work at best.
     # At worst it is fatal: nn.init.orthogonal_ calls torch.linalg.qr, which has no MPS kernel

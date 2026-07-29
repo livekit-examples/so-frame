@@ -32,8 +32,13 @@ from soframe_policy.encoders import ENCODERS
 # between them confounded architecture with replay retention. It is now derived from
 # --replay_episodes for both, and the buffer lives in host RAM to make that affordable.
 ENCODER_DEFAULTS = {
-    "squint":     dict(res=32,  render_size=128, num_updates=64),
-    "dino_patch": dict(res=168, render_size=168, num_updates=32),
+    "squint":      dict(res=32,  render_size=128, num_updates=64),
+    "dino_patch":  dict(res=168, render_size=168, num_updates=32),
+    # The dense-vs-collapsed control for dino_patch: same backbone, same resolution, same
+    # num_updates, so the only difference is whether the patch grid survives. Matching
+    # num_updates matters more than tuning it -- an update-ratio difference would confound the
+    # very thing the run is measuring.
+    "dino_global": dict(res=168, render_size=168, num_updates=32),
 }
 
 
@@ -153,6 +158,11 @@ class Args:
     """total timesteps of the experiments. 12M is what every real run here has used: a
     from-scratch squint CNN does not land its first success until ~7M, so shorter budgets
     finish before the task is learned."""
+    dino_pool: str = "cls"
+    """--encoder dino_global only: what "one vector" means. "cls" is the CLS token, the canonical
+    global vector and what the backbone was trained to make globally informative. "mean" is the
+    mean over patch tokens, the stronger classical baseline. "cls_mean" concatenates both, giving
+    the collapsed head two vectors per camera instead of one. Ignored by other encoders."""
     replay_episodes: float = 2.0
     """replay retention, in EPISODES per env. The buffer holds
     `replay_episodes * config.EPISODE_HORIZON * num_envs` transitions, the same formula for every
@@ -253,6 +263,10 @@ class Args:
         if self.object_colors not in ("black", "distinct"):
             raise ValueError(
                 f"--object_colors must be black|distinct, got {self.object_colors!r}"
+            )
+        if self.encoder == "dino_global" and self.dino_pool not in ("cls", "mean", "cls_mean"):
+            raise ValueError(
+                f"--dino_pool must be cls|mean|cls_mean, got {self.dino_pool!r}"
             )
         if self.replay_storage not in ("cpu", "gpu"):
             raise ValueError(f"--replay_storage must be cpu|gpu, got {self.replay_storage!r}")

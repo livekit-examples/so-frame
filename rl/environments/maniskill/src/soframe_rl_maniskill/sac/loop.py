@@ -97,8 +97,12 @@ def train(args):
     action_space = envs.unwrapped.single_action_space
     encoder_cls = ENCODERS[args.encoder]
 
+    # Constructor arguments beyond (num_cams, res). Recorded in the checkpoint, because
+    # dino_global's pool choice does not change any tensor shape and so cannot be inferred back.
+    encoder_kwargs = {"pool": args.dino_pool} if args.encoder == "dino_global" else {}
+
     def new_encoder(dev=device):
-        return encoder_cls(bundle.num_cams, res=args.res, device=dev)
+        return encoder_cls(bundle.num_cams, res=args.res, device=dev, **encoder_kwargs)
 
     def new_actor(dev=device):
         return Actor(encoder.repr_dim, bundle.n_state, bundle.n_act,
@@ -208,6 +212,7 @@ def train(args):
             num_cams=bundle.num_cams, res=args.res, n_act=bundle.n_act,
             action_low=action_space.low, action_high=action_space.high,
             proprio=bundle.proprio, global_step=global_step,
+            encoder_kwargs=encoder_kwargs,
             # Training-only extras; deploy ignores them, a resumed run uses them.
             extra={"critic": critic_target.state_dict(),
                    "log_alpha": log_alpha,

@@ -23,7 +23,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 
-from soframe_policy.encoders import dino_patch
+from soframe_policy.encoders import dino_global, dino_patch
 
 
 class DownsampleObsWrapper(gym.ObservationWrapper):
@@ -184,4 +184,45 @@ class DinoTokenWrapper(gym.ObservationWrapper):
         if squeeze:
             tokens = tokens.squeeze(0)
         obs['rgb'] = tokens
+        return obs
+
+
+class DinoGlobalWrapper(gym.ObservationWrapper):
+    """Replace RGB observations with frozen DINOv2 global vectors, cached.
+
+    The collapsed counterpart of DinoTokenWrapper, and identical in every respect except what
+    the backbone's output is reduced to: one vector per camera (or two under pool="cls_mean")
+    instead of a patch grid. Same placement rule -- LAST in the pipeline, after anything that
+    needs pixels.
+
+    Input (B, H, W, 3*num_cams) uint8; output (B, n_vec, 384) bf16. That output is 1.5 KB per
+    observation against the patch grid's 216 KB, which is why replay sizing stops mattering for
+    this encoder.
+    """
+
+    def __init__(self, env, res, device=None, pool="cls"):
+        super().__init__(env)
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.res = res
+        self.pool = pool
+        shp = self.observation_space['rgb'].shape
+        C = shp[-1]
+        assert C % 3 == 0, f"expected 3*num_cams channels, got {C}"
+        self.num_cams = C // 3
+        self.n_vec = dino_global.vector_count(self.num_cams, pool)
+        # Load now rather than on the first observation, so a missing torch.hub cache fails at
+        # startup instead of mid-rollout.
+        dino_global.load_backbone(self.device)
+        self.observation_space['rgb'] = gym.spaces.Box(
+            low=-3.4e38, high=3.4e38, shape=(self.n_vec, dino_global.EMBED), dtype="float32"
+        )
+
+    def observation(self, obs):
+        rgb = obs['rgb']
+        squeeze = rgb.dim() == 3
+        vecs = dino_global.embed_global(rgb, self.res, num_cams=self.num_cams,
+                                        device=self.device, pool=self.pool)
+        if squeeze:
+            vecs = vecs.squeeze(0)
+        obs['rgb'] = vecs
         return obs
