@@ -162,12 +162,20 @@ class Args:
     buffer_size: Optional[int] = None
     """replay size in transitions. Leave unset: it is derived from --replay_episodes. Set it only
     to override that derivation, e.g. to reproduce a pre-v4 run's absolute buffer size."""
-    replay_storage: str = "cpu"
-    """where the replay lives: "cpu" (pinned host RAM, with a prefetch thread overlapping the
-    gather and the PCIe copy with training) or "gpu" (VRAM, as every run through v3 did). Host
-    storage is what makes equal retention affordable -- 2 episodes of dino_patch tokens at 512
-    envs is 63 GB, past a 96 GB card once the model and sim are on it, but light on a 214 GB
-    host. It trades capacity for bandwidth: every update pulls batch*(obs+next_obs) over PCIe."""
+    replay_storage: str = "gpu"
+    """where the replay lives: "gpu" (VRAM) or "cpu" (pinned host RAM, with a prefetch thread
+    overlapping the gather and the PCIe copy with training).
+
+    Default gpu, on measurement. At the standard v4 config -- dino_patch res 168, 512 envs,
+    2 episodes at a 200-step horizon -- the single-copy buffer is 42 GiB and the whole run peaks
+    at 59.5 GiB of a 97.9 GiB card, so host storage buys nothing and costs 24% throughput (267
+    vs 333 sps over a matched 100k-step smoke). It is `obs_only_replay` rather than host storage
+    that makes this fit: the two-copy layout would be 84 GiB of buffer plus ~17 GiB of model and
+    sim, which is over the card.
+
+    Use cpu when the buffer genuinely will not fit -- dino_patch at 1024 envs (84 GiB buffer,
+    ~101 GiB total) or more than 2 episodes of retention. The prefetch keeps the penalty at ~24%
+    rather than the several-fold hit a synchronous host buffer would take."""
     replay_prefetch: int = 2
     """batches the replay keeps in flight when --replay_storage cpu. 0 makes sampling synchronous,
     which is the fallback if the prefetch thread is ever suspected of masking a bug."""
