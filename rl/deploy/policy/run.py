@@ -3,14 +3,8 @@
 Each tick: rectify both raw camera frames to the sim view, stack arm|overhead, run one
 inference, integrate the normalized delta into a running sim target, and send joint targets back.
 
-Nothing here is architecture-specific. The checkpoint carries its own encoder kind, resolution
-and proprio layout, so there are no --arch / --dino-res flags to get wrong, and the proprio
-vector is assembled through the layout the policy was trained on rather than a hardcoded width.
-
-By default it claims control on startup and starts PAUSED, holding the pose: nothing moves
-until you press p. That way the debug keys work with no web UI in the loop, and you get to
-look at --viz before the arm does anything. --no-start-paused drives on launch instead, and
---no-claim goes back to sitting idle until the web UI claims it.
+Claims control on startup and starts PAUSED, holding the pose. --no-start-paused drives on
+launch; --no-claim stays idle until the web UI claims it.
 
 Debug keys (terminal or --viz window): p = pause/resume, r = reset to rest then hold paused,
 0 = ramp the rail alone to wire 0 (end of travel) for re-zeroing, q = quit.
@@ -49,7 +43,7 @@ NAME = env("OPERATOR_NAME", "policy")
 TITLE = env("OPERATOR_TITLE", "RL policy")
 
 def build_rgb(obs: Observation, mappings: dict[str, dict | None]) -> np.ndarray | None:
-    """Rectify both cameras and stack them channel-wise, as the sim did; None if a frame is missing."""
+    """Rectify both cameras and stack them channel-wise as the sim did; None if a frame is missing."""
     chans = []
     for track, _ in CAMERA_STACK:
         vf = obs.frames.get(track)
@@ -73,13 +67,7 @@ def _viz_tile(chans, label):
 
 
 def viz_grid(rgb, status: str, net_res: int):
-    """Rectified views over what the encoder actually gets, or a placard saying why not.
-
-    ``rgb`` is the stacked camera view, or None when there is nothing to show. The caller
-    draws this every tick including the idle ones, so an unclaimed policy or a silent robot
-    gets a window that explains itself rather than no window at all -- the failure mode this
-    replaced, where every path to imshow sat behind an early-out.
-    """
+    """Rectified views over what the encoder gets, or a placard saying why not (rgb=None)."""
     import cv2
     if rgb is None:
         grid = np.zeros((512, 512, 3), dtype=np.uint8)
@@ -88,8 +76,8 @@ def viz_grid(rgb, status: str, net_res: int):
     else:
         wrist, overhead = rgb[..., 0:3], rgb[..., 3:6]
         src = wrist.shape[0]
-        # The lower row is the encoder's own input resolution, so a mapping that does not match
-        # the checkpoint shows up as a visibly upsampled tile instead of passing silently.
+        # Lower row is the encoder's input resolution, so a mapping that does not match the
+        # checkpoint shows up as a visibly upsampled tile.
         small = [cv2.resize(c, (net_res, net_res), interpolation=cv2.INTER_AREA)
                  for c in (wrist, overhead)]
         grid = np.vstack([
@@ -99,15 +87,15 @@ def viz_grid(rgb, status: str, net_res: int):
         ])
     bar = np.zeros((30, grid.shape[1], 3), dtype=np.uint8)
     cv2.putText(bar, status, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
-    # Fixed legend under the frames: the keys work in this window as well as the terminal.
+    # Legend: the keys work in this window as well as the terminal.
     legend = np.full((30, grid.shape[1], 3), 32, dtype=np.uint8)
     cv2.putText(legend, VIZ_KEYS, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (210, 210, 210), 1)
     return np.vstack([grid, bar, legend])
 
 
 def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> dict:
-    """The proprio fields the env exposes, by name. The policy's own ProprioSpec decides the
-    order and width, and raises if this set does not match what it trained on."""
+    """The proprio fields the env exposes, by name. The policy's ProprioSpec decides order and
+    width, and raises if this set does not match what it trained on."""
     return {
         "noisy_qpos": [sim_qpos[k] for k in bridge.JOINT_KEYS],
         "controller.target_qpos": [sim_target[k] for k in bridge.JOINT_KEYS],
@@ -130,16 +118,14 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
     latest_obs: Observation | None = None
     control = {"enabled": False}
     mode = {"state": "run", "label": "reset"}  # run | paused | resetting
-    # Joints the current ramp is driving, and where to. Anything absent holds its target, so
-    # a ramp can be whole-body (reset) or a single joint (zero the slider).
+    # Joints the current ramp is driving, and where to; anything absent holds its target.
     goal: dict[str, float] = {}
     reset_wait = {"ticks": 0, "deadline": 0.0}
     # Settle tolerance in DELTA_LIMIT units, close to training's initial qpos noise.
     SETTLE_TOL = 1.5
     SETTLE_SECS = 1.0   # measured pose must hold within tolerance this long
     SETTLE_TIMEOUT = 5.0  # give up waiting and pause anyway (e.g. gripper blocked)
-    # Running integrated target (sim units); seeded from the first measured qpos
-    # on claim so the first action is a no-jump delta.
+    # Running integrated target (sim units), seeded from the first measured qpos on claim.
     sim_target: dict[str, float] | None = None
 
     def on_observation(obs: Observation) -> None:
@@ -179,8 +165,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             print(f"[policy-{NAME}] RESET -- ramping to the rest pose (slider mid), "
                   "will hold PAUSED once settled (stage the scene, then p to run)")
         elif ch == "0":
-            # The rail's sim low limit is wire 0 by construction of the bridge mapping, i.e.
-            # the end of travel you park the carriage at to re-zero it. The arm is left alone.
+            # The rail's sim low limit is wire 0, the end of travel for re-zeroing. Arm holds.
             goal.clear()
             goal[bridge.RAIL] = bridge.SIM_LIMITS[bridge.RAIL][0]
             mode["state"], mode["label"] = "resetting", "zero-slider"
@@ -221,8 +206,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
     await op.connect(url, mint_token(f"policy-{NAME}", room, name=TITLE, attributes=attrs))
 
     if claim:
-        # Self-claim so the keys work without the web UI, but hold the pose by default: the
-        # operator decides when the arm starts moving, after seeing the rectified views.
+        # Self-claim so the keys work without the web UI, but hold the pose by default.
         sim_target = None
         control["enabled"] = True
         mode["state"] = "paused" if start_paused else "run"
@@ -269,8 +253,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             if quit_requested:
                 break
             obs = latest_obs
-            # Rectify before the early-outs so an unclaimed policy still previews the view it
-            # would drive on. Two resizes per tick, negligible next to inference.
+            # Rectify before the early-outs so an unclaimed policy still previews its view.
             rgb = build_rgb(obs, mappings) if obs is not None else None
 
             if viz:
@@ -301,8 +284,8 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             if rgb is None:
                 continue  # wait for both camera frames
 
-            # Seed the target from the current pose on (re)claim/resume. Must sit
-            # AFTER viz-window key handling, which can clear sim_target mid-tick.
+            # Seed the target from the current pose on (re)claim/resume. Must sit AFTER
+            # viz-window key handling, which can clear sim_target mid-tick.
             if sim_target is None:
                 sim_target = dict(sim_qpos)
 
@@ -353,8 +336,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
                 continue
 
             # Threshold the gripper to fully open/closed; MUST match how the checkpoint was
-            # trained. Training went back to the continuous gripper, so this is off by default;
-            # pass --binary-gripper for the v35-era binary-jaw checkpoints.
+            # trained. Off by default, matching the continuous-gripper training default.
             if binary_gripper:
                 action[gripper_idx] = 1.0 if float(action[gripper_idx]) > 0 else -1.0
 
@@ -364,8 +346,8 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
                 for i, k in enumerate(bridge.JOINT_KEYS)
             }
             sim_target = bridge.clamp_sim(stepped)
-            # --max-lag: cap how far the target may lead the measured pose (per joint,
-            # in per-step deltas), so it can't wind up ahead of a slower arm.
+            # --max-lag: cap how far the target may lead the measured pose, per joint, in
+            # per-step deltas.
             if max_lag is not None:
                 sim_target = {
                     k: min(sim_qpos[k] + max_lag * bridge.DELTA_LIMIT[k],
@@ -404,17 +386,16 @@ def cli() -> None:
                         help="claim control on startup, so the debug keys work with no web UI "
                              "(default). --no-claim stays idle until the web UI claims it.")
     parser.add_argument("--start-paused", action=argparse.BooleanOptionalAction, default=True,
-                        help="claim but hold the pose until you press p (default), so nothing "
-                             "moves until you have looked at --viz. --no-start-paused MOVES "
-                             "THE ROBOT as soon as frames arrive.")
+                        help="claim but hold the pose until you press p (default). "
+                             "--no-start-paused MOVES THE ROBOT as soon as frames arrive.")
     parser.add_argument("--max-lag", type=float, default=None,
                         help="anti-oscillation: cap how far the target may lead the measured "
-                             "pose, in per-step deltas (e.g. 2.0), so it can't wind up ahead of "
-                             "a slower arm and overshoot. Keeps the arm flowing at 10 Hz.")
+                             "pose, in per-step deltas (e.g. 2.0), so it cannot overshoot "
+                             "ahead of a slower arm.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
-                             "matching the continuous-gripper training default; pass "
-                             "--binary-gripper for a v35-era binary-gripper checkpoint.")
+                             "matching the continuous-gripper training default; must match how "
+                             "the checkpoint was trained.")
     parser.add_argument("--viz", action="store_true",
                         help="show the two rectified camera views (what the policy sees) in an "
                              "OpenCV window while driving; press q to close")

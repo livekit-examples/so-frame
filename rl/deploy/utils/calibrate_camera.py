@@ -2,28 +2,11 @@
 
 Drag sliders to rectify a raw photo (rotate -> undistort -> crop) until it matches a reference
 render of the same sim camera, then save the mapping the deploy loop replays every tick.
+Pure OpenCV + numpy, so this runs anywhere, including the robot host. See README for commands.
 
-    # once, in rl/environments/maniskill (needs the simulator):
-    uv run python examples/dump_reference_views.py --out ../../deploy/utils/reference_views
-
-    # here, per camera (no simulator needed):
-    uv run python utils/calibrate_camera.py utils/captures/real_overhead_camera.png \\
-        --reference utils/reference_views/overhead_camera.png --camera overhead
-
-Pure OpenCV + numpy on purpose. The previous version rendered the sim live, which meant the
-deploy tree had to install mani_skill and SAPIEN just to calibrate a camera. The sim side is
-now a PNG, so this runs anywhere -- including on the robot host.
-
-The trade: the sim's FOV is no longer a slider, because the reference render is fixed. If the
-scale cannot be made to match, the sim FOV itself is wrong -- re-dump the reference with
-`--overhead-fov` / `--wrist-fov` and re-fit. That is rare; the FOVs in config.py are already
-calibrated. The sim CAMERA POSE was never a slider here on purpose: the URDF pose is ground
-truth, and the old pose-offset fit is superseded by the FOV parameterization.
-
-The crop is fully adjustable, matching what apply_mapping already replays: pan it with
-crop cx/cy, resize it with crop size, and pull the undistorted view in or out with zoom
-(< 1 shrinks the output focal so a strong barrel lens fits the canvas). Earlier versions
-hardcoded a centred largest-square crop at zoom 1, which the mapping format never required.
+The sim FOV and camera pose are not sliders: the reference render is fixed and the URDF pose is
+ground truth. If the scale cannot be matched, re-dump the reference with a corrected
+`--overhead-fov` / `--wrist-fov` and re-fit.
 
 Keys: [s] save, [c] re-centre the crop for the current rot90, [q] quit.
 """
@@ -40,11 +23,11 @@ from camera_mapping import SIM_SENSOR_SIZE, apply_mapping
 
 WINDOW = "calibrate_camera"
 VIEW = 256   # display size per panel
-SQUINT = 32  # the squint encoder's resolution, shown so you can judge what survives it
+SQUINT = 32  # the squint encoder's input resolution
 
 
 def squint_tile(img):
-    """What the policy's low-res encoder actually sees, upscaled to compare."""
+    """What the squint encoder sees, upscaled to compare."""
     small = cv2.resize(img, (SQUINT, SQUINT), interpolation=cv2.INTER_AREA)
     return cv2.resize(small, (VIEW, VIEW), interpolation=cv2.INTER_NEAREST)
 
@@ -57,18 +40,14 @@ def rotated_dims(raw_shape, rot90):
 def build_mapping(camera, raw_shape, rot90, angle, k1, k2, focal, *,
                   crop_cx=None, crop_cy=None, crop_size=None, zoom=1.0,
                   out_size=SIM_SENSOR_SIZE):
-    """The mapping dict, exactly as apply_mapping will replay it at deploy time.
-
-    The crop defaults to the largest centred square, which is what this tool used to hardcode.
-    """
+    """The mapping dict, exactly as apply_mapping will replay it at deploy time."""
     h, w = rotated_dims(raw_shape, rot90)
     crop = min(int(crop_size) if crop_size else min(h, w), h, w)
     return dict(
         camera=camera,
         source_image_size=[int(raw_shape[1]), int(raw_shape[0])],
-        # Angular span of the crop at this focal length. Recorded for reference: it is the real
-        # camera's span, and it can legitimately differ from the sim FOV, since the fit is what
-        # reconciles the two. Tracks zoom, which scales the undistorted output focal.
+        # Angular span of the crop at this focal length, recorded for reference. This is the
+        # real camera's span and may differ from the sim FOV; the fit reconciles the two.
         fov_deg=round(float(np.rad2deg(2 * np.arctan(crop / (2 * focal * zoom)))), 2),
         rot90=int(rot90), angle_deg=float(angle), k1=float(k1), k2=float(k2),
         focal_px=int(focal), zoom=round(float(zoom), 3),
@@ -92,8 +71,7 @@ def main():
     parser.add_argument("--out-size", type=int, default=None,
                         help=f"rectified output resolution (default: the existing mapping's, "
                              f"else {SIM_SENSOR_SIZE}). Match the checkpoint's render size: "
-                             f"{SIM_SENSOR_SIZE} for squint, 168 for dino_patch. Too small and "
-                             "the encoder upsamples a blurrier view than it trained on.")
+                             f"{SIM_SENSOR_SIZE} for squint, 168 for dino_patch.")
     args = parser.parse_args()
 
     raw = cv2.imread(args.image)
@@ -105,7 +83,7 @@ def main():
                          "(dump it with rl/environments/maniskill/examples/dump_reference_views.py)")
     ref_view = cv2.resize(ref, (VIEW, VIEW), interpolation=cv2.INTER_AREA)
 
-    # Seed from the existing mapping for this camera, so re-fitting starts where you left off.
+    # Seed from the existing mapping, so re-fitting starts where you left off.
     existing = pathlib.Path(args.out_dir) / f"{args.camera}_camera_mapping.json"
     seed = json.loads(existing.read_text()) if existing.exists() else {}
     if seed:
@@ -113,8 +91,7 @@ def main():
 
     out_size = args.out_size or int(seed.get("out_size", SIM_SENSOR_SIZE))
 
-    # Crop sliders span the largest raw dimension, since rot90 can swap h and w while running;
-    # build_mapping and apply_mapping both clamp the crop back inside the frame.
+    # Crop sliders span the largest raw dimension, since rot90 can swap h and w while running.
     max_dim = int(max(raw.shape[0], raw.shape[1]))
     seed_h, seed_w = rotated_dims(raw.shape, int(seed.get("rot90", 1)))
 
@@ -148,7 +125,7 @@ def main():
         mapping = build_mapping(args.camera, raw.shape, rot90, angle, k1, k2, focal,
                                 crop_cx=g("crop cx"), crop_cy=g("crop cy"),
                                 crop_size=crop_size, zoom=zoom, out_size=out_size)
-        # Rectify through the SAME function deploy uses, so what you align is what ships.
+        # Rectify through the SAME function deploy replays, so what you align is what ships.
         rect = apply_mapping(raw, mapping)
         rect_view = cv2.resize(rect, (VIEW, VIEW), interpolation=cv2.INTER_NEAREST)
 
@@ -180,8 +157,7 @@ def main():
         if key in (ord("q"), 27):
             break
         if key == ord("c"):
-            # rot90 may have swapped h and w since the sliders were seeded.
-            h, w = rotated_dims(raw.shape, rot90)
+            h, w = rotated_dims(raw.shape, rot90)   # rot90 may have swapped h and w
             cv2.setTrackbarPos("crop cx", WINDOW, w // 2)
             cv2.setTrackbarPos("crop cy", WINDOW, h // 2)
             cv2.setTrackbarPos("crop size", WINDOW, min(h, w))

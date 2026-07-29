@@ -1,11 +1,11 @@
 # soframe-policy
 
-The vision encoder, the actor, and the checkpoint format — everything that goes *into* a policy
+The vision encoder, the actor, and the checkpoint format: everything that goes *into* a policy
 checkpoint. Training (`rl/environments/maniskill`) and deploy (`rl/deploy`) both depend on this package, so
 these are defined once instead of copied.
 
 Pure `torch` + `numpy`. No `mani_skill`, `gymnasium` or `livekit`, because it installs on the
-robot as well as the GPU box. The critic and training loop live in `rl/environments/maniskill` — they never
+robot as well as the GPU box. The critic and training loop live in `rl/environments/maniskill`, they never
 run on the robot.
 
 ## Loading a checkpoint
@@ -31,8 +31,8 @@ action = actor.get_eval_action(encoder(encoder.preprocess(rgb)), state)
 ```
 
 `rgb` is the raw camera stack, `(B, H, W, 3*num_cams)` uint8. `preprocess` does whatever that
-encoder needs — squinting down for the CNN, DINOv2 tokenising for the patch head — and is the
-same code training uses, so sim and real cannot drift.
+encoder needs (squinting down for the CNN, DINOv2 tokenising for the patch head) and is the
+same code training uses, so sim and real cannot drift on resize, normalization or camera order.
 
 `assemble` raises if a field is missing, unknown, or the wrong width.
 
@@ -42,14 +42,18 @@ same code training uses, so sim and real cannot drift.
 |---|---|---|
 | `squint` | CNN over a squinted image stack | `(B, res, res, 3*num_cams)` uint8, `res` ∈ {16,32,64} |
 | `dino_patch` | self-attention over frozen DINOv2 patch tokens | `(B, n_tok, 384)` bf16, `n_tok = num_cams*(res/14)²` |
+| `dino_global` | MLP over one frozen DINOv2 vector per camera | `(B, n_vec, 384)` bf16, `n_vec = num_cams` (×2 for `pool="cls_mean"`) |
+
+`dino_global`'s `pool` is recorded in the checkpoint: `cls` and `mean` produce identical
+state-dict shapes, so it cannot be recovered from the weights.
 
 The frozen ViT is not in the checkpoint; it comes from `torch.hub` on first use.
 
-## Tests
+## Commands
+
+Run the contract tests. They pin each architecture's state_dict signature and the proprio layout,
+so an edit that would break existing checkpoints fails here rather than silently:
 
 ```bash
 uv run --project rl/policy pytest rl/policy/tests -q
 ```
-
-They pin each architecture's state_dict signature, so an edit that would break existing
-checkpoints fails here rather than silently.

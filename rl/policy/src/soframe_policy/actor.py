@@ -1,14 +1,8 @@
 """The SAC actor and its observation projection, shared by training and deploy.
 
-Vendored from Squint (https://github.com/aalmuzairee/squint) and byte-compatible with it:
-parameter names and shapes are unchanged, so checkpoints trained by any of the old
-per-architecture train scripts still load here.
-
-The one generalization: ``Projection``'s RGB width is a constructor argument. The squint CNN
-path projects its 1024-d features down to 50, while the DINOv2 patch path projects 512 -> 256
-(a 50-d bottleneck throws away too much of a transformer readout). Those were previously two
-copy-pasted ``Projection`` classes in two train scripts; the width is the only thing that
-ever differed, and it is not a parameter name, so both checkpoint generations load.
+Vendored from Squint (https://github.com/aalmuzairee/squint); parameter names and shapes are
+unchanged, so existing checkpoints load. ``Projection``'s RGB width is a constructor argument
+(50 for the squint CNN, 256 for the DINOv2 heads), which is not a parameter name.
 """
 from __future__ import annotations
 
@@ -49,11 +43,8 @@ class Projection(nn.Module):
 class Actor(nn.Module):
     """Squashed-Gaussian SAC actor over (encoder features, proprio).
 
-    Takes the action bounds as plain arrays rather than a gym env, so deploy does not have to
-    fake an env object to construct one (the old ``rl/deploy/policy/agent.py`` built a
-    ``SimpleNamespace`` env stub purely to satisfy this signature). Use ``from_env`` on the
-    training side. ``action_scale``/``action_bias`` stay registered buffers, so the state_dict
-    is unchanged either way.
+    Action bounds are plain arrays, not a gym env, so deploy needs no env object; use
+    ``from_env`` on the training side. ``action_scale``/``action_bias`` are registered buffers.
     """
 
     def __init__(self, n_obs, n_state, n_act, action_low, action_high,

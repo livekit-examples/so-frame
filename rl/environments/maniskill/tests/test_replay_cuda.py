@@ -1,16 +1,13 @@
 """The host-RAM + prefetch path, checked on a real GPU.
 
-tests/test_replay.py covers the index arithmetic on CPU, where sampling is synchronous and
-single-threaded. None of that exercises what host storage actually adds: pinned staging buffers,
-a background gather holding the lock against concurrent writes, an async host-to-device copy on a
-side stream, and a ring of staging slots reused once their event drains. Those fail by handing
-back CORRUPT batches, not by raising, so the test has to check content rather than liveness.
+What host storage adds over tests/test_replay.py's synchronous CPU path: pinned staging buffers, a
+background gather holding the lock against concurrent writes, an async host-to-device copy on a side
+stream, and a ring of staging slots reused once their event drains. Those fail by handing back
+CORRUPT batches rather than by raising, so this checks content, not liveness.
 
 Same trick as the CPU test: every observation carries a value that uniquely identifies
-(iteration, env), so a sample that mixes slots, reads a half-written row, or reuses a staging
-buffer before its copy landed produces a value that cannot be reconciled with the reference.
-
-    uv run --with pytest pytest tests/test_replay_cuda.py -q
+(iteration, env), so a sample that mixes slots, reads a half-written row or reuses a staging buffer
+before its copy landed cannot be reconciled with the reference.
 """
 
 import pytest

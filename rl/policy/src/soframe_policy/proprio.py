@@ -1,24 +1,14 @@
 """The proprioception contract: which fields the actor's state vector holds, in which order.
 
-The actor's state vector is ``flatten_state_dict(env._get_obs_agent())``, so its layout is the
-insertion order of that dict. The current contract is deliberately the smallest thing the real
-rig can always produce:
+The state vector is ``flatten_state_dict(env._get_obs_agent())``, so its layout is that dict's
+insertion order:
 
     noisy_qpos(7) | controller.target_qpos(7)  = 14
 
-This module exists because that layout silently changed once and deploy never noticed. Adding
-per-episode action delay to the env inserted two fields into the *middle* of the vector
-(``pending_actions(7)`` and ``action_delay(1)``, giving 22), while deploy went on hardcoding
-``N_STATE = 14`` and building ``qpos(7) + target(7)``. Against a 22-dim checkpoint that fails
-to load outright; had the widths happened to line up it would have fed ``target_qpos`` into the
-slot the policy reads as ``pending_actions`` and driven the robot on a silently wrong
-observation. The action-delay machinery has since been removed from the env, so 14 is now true
-by construction rather than by a config knob.
-
-The layout still travels inside the checkpoint: training measures it from the live env, deploy
-assembles its vector through ``assemble``, and a field that is missing, extra or the wrong
-width raises at startup instead of quietly misaligning. That is what makes a future change to
-``_get_obs_agent`` a loud failure rather than a robot driving on garbage.
+The layout travels inside the checkpoint: training measures it from the live env, deploy
+assembles its vector through ``assemble``, and a field that is missing, extra or the wrong width
+raises at startup. Without that, a change to ``_get_obs_agent`` can insert a field mid-vector and
+the robot drives on a silently misaligned observation.
 """
 from __future__ import annotations
 
@@ -79,8 +69,7 @@ class ProprioSpec:
     def assemble(self, values, dtype=np.float32) -> np.ndarray:
         """Build the state vector from a {field_name: value} mapping, in the trained order.
 
-        Raises on a missing field, an unknown field, or a width mismatch -- the three ways
-        deploy can drift from training without a crash to point at it.
+        Raises on a missing field, an unknown field, or a width mismatch.
         """
         missing = [n for n in self.names if n not in values]
         extra = [n for n in values if n not in self.names]

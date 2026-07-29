@@ -1,14 +1,12 @@
 """The deploy checkpoint format: weights plus enough metadata to rebuild the policy.
 
-Why this exists. Deploy used to reconstruct the architecture from command-line flags
-(``--arch squint|dino``, ``--dino-res 112``) that had to be remembered to match the
-checkpoint. Getting either wrong either fails to load or, worse, loads and runs on tokens
-from the wrong resolution -- a silent sim2real mismatch on real hardware. The encoder kind,
-camera count, input resolution and action bounds are properties of the trained artifact, so
-they are written into it and read back, not passed by hand.
+Encoder kind, camera count, input resolution, action bounds and proprio layout are properties of
+the trained artifact, so they are written into it and read back rather than passed by hand: a
+wrong value loads and runs on features the policy never trained on, a silent sim2real mismatch on
+real hardware.
 
-``save`` is called by training, ``load`` by deploy. Checkpoints written before this format
-have no ``meta`` block; pass ``kind`` and ``res`` explicitly to load those.
+``save`` is called by training, ``load`` by deploy. Checkpoints written before this format have no
+``meta`` block; pass ``kind`` and ``res`` explicitly to load those.
 """
 from __future__ import annotations
 
@@ -30,10 +28,9 @@ def save(path, encoder, actor, *, num_cams, res, n_act, action_low, action_high,
     ``proprio`` is the ``ProprioSpec`` measured from the training env; it defines n_state and
     the field order deploy must reproduce.
 
-    ``encoder_kwargs`` are constructor arguments beyond (num_cams, res) that change the head's
-    behaviour. They MUST be recorded: dino_global's ``pool="cls"`` and ``pool="mean"`` produce
-    identical state-dict shapes, so a checkpoint trained on one would load silently into the
-    other and the deployed policy would be fed a different global vector than it trained on.
+    ``encoder_kwargs`` are constructor arguments beyond (num_cams, res) and MUST be recorded:
+    dino_global's ``pool="cls"`` and ``pool="mean"`` produce identical state-dict shapes, so a
+    checkpoint trained on one would otherwise load silently into the other.
     """
     if not isinstance(proprio, ProprioSpec):
         raise TypeError(f"proprio must be a ProprioSpec, got {type(proprio).__name__}")
@@ -65,8 +62,8 @@ def save(path, encoder, actor, *, num_cams, res, n_act, action_low, action_high,
 
 def build(kind, *, num_cams, res, n_state, n_act, action_low, action_high, device=None,
           encoder_kwargs=None):
-    """Construct a matched (encoder, actor) pair. Shared by training and deploy so the actor's
-    RGB projection width always follows the encoder that feeds it."""
+    """Construct a matched (encoder, actor) pair: the actor's RGB projection width follows the
+    encoder that feeds it."""
     if kind not in ENCODERS:
         raise ValueError(f"unknown encoder kind {kind!r}; known: {sorted(ENCODERS)}")
     encoder_cls = ENCODERS[kind]
@@ -84,8 +81,7 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
     through it rather than hardcoding a width.
 
     Metadata in the checkpoint wins. The keyword arguments are only a fallback for pre-``meta``
-    checkpoints, where a wrong value is a silent mismatch -- hence the explicit error rather
-    than a default guess.
+    checkpoints, and are required rather than defaulted there, since a wrong value is silent.
     """
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     ckpt = torch.load(str(path), map_location="cpu")
@@ -106,16 +102,11 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
                 "action_high": torch.full((n_act,), 1.0)}
 
     spec = ProprioSpec.from_meta(meta["proprio"])
-    # Metadata wins here as it does for kind/res. The caller's encoder_kwargs are a fallback for
-    # checkpoints written before the field existed, where the only encoders in circulation
-    # (squint, dino_patch) took no extra constructor arguments.
+    # Metadata wins, as for kind/res; the caller's value is a fallback for checkpoints written
+    # before the field existed.
     encoder_kwargs = meta.get("encoder_kwargs") or (encoder_kwargs or {})
-    # Build on CPU, then move. The constructors run an orthogonal init that load_state_dict
-    # overwrites two lines later, so initialising on the target device is wasted work at best.
-    # At worst it is fatal: nn.init.orthogonal_ calls torch.linalg.qr, which has no MPS kernel
-    # before torch 2.13, so building straight onto an Apple GPU raised NotImplementedError to
-    # produce weights that were about to be discarded. The encoder reads its device from its
-    # own parameters at call time, so moving after the load is equivalent.
+    # Build on CPU, then move: the constructors' nn.init.orthogonal_ calls torch.linalg.qr, which
+    # has no MPS kernel before torch 2.13, and load_state_dict overwrites the init anyway.
     encoder, actor = build(
         meta["kind"], num_cams=meta["num_cams"], res=meta["res"], n_state=spec.n_state,
         n_act=meta["n_act"], action_low=meta["action_low"], action_high=meta["action_high"],

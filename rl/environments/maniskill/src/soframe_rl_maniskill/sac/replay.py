@@ -1,53 +1,41 @@
-"""Circular replay that stores each observation once instead of twice, in host RAM.
+"""Circular replay that stores each observation once instead of twice, optionally in host RAM.
 
-The obvious replay layout stores ``observations`` and ``next_observations`` side by side, which
-doubles the memory for no extra information: the next observation of a transition is simply the
-observation the same env reports one step later. For the squint CNN nobody cares -- a 32px
-6-channel stack is 6 KB. For the DINOv2 patch head it decides whether training is possible at
-all: a 2-camera 168px token grid is 216 KB, so the two-copy layout costs 432 KB per transition
-and a buffer big enough to outlive the ~500k-step forgetting window would need 206 GB.
+The next observation of a transition is just the observation the same env reports one step later, so
+storing ``next_observations`` alongside ``observations`` doubles memory for no information. That
+matters for the DINOv2 patch head: a 2-camera 168px token grid is 216 KB, so a two-copy layout costs
+432 KB per transition.
 
-The trick is that ``extend`` is called once per iteration with exactly ``num_envs`` transitions,
-and the underlying storage is round-robin, so slot layout is completely predictable:
+``extend`` is called once per iteration with exactly ``num_envs`` transitions and storage is
+round-robin, so the slot layout is predictable:
 
     slot(iteration k, env e) = (k mod iters) * num_envs + e
 
-which means the successor of slot ``i`` is always ``(i + num_envs) % capacity`` -- the same env,
-one iteration later. So ``next_observations`` never needs storing; it is an index offset.
-
-Two slot classes cannot be read that way and are masked out of sampling:
+The successor of slot ``i`` is therefore always ``(i + num_envs) % capacity``: same env, one
+iteration later. Two slot classes cannot be read that way and are masked out of sampling:
 
 * the newest iteration, whose successor has not been written yet;
 * truncation/termination boundaries, where the true next observation is the pre-reset
-  ``final_observation`` and the slot one stride later holds the POST-reset observation of the
-  next episode. Bootstrapping across that seam is the classic replay bug, so those transitions
-  are dropped rather than approximated. With ``partial_reset`` off and a 300-step horizon that
-  is 1 transition in 300, ~0.3% of the data.
+  ``final_observation`` and the slot one stride later holds the POST-reset observation of the next
+  episode. Bootstrapping across that seam is the classic replay bug, so those transitions are
+  dropped rather than approximated (~1 in EPISODE_HORIZON with ``partial_reset`` off).
 
-Wraparound needs no special handling: writing iteration k overwrites iteration ``k - iters``,
-whose own predecessor (``k - iters - 1``) was already overwritten one iteration earlier, so no
-surviving slot is ever left pointing at a successor that has been recycled underneath it.
+Wraparound needs no special handling: writing iteration k overwrites iteration ``k - iters``, whose
+own predecessor was already overwritten one iteration earlier, so no surviving slot is left pointing
+at a recycled successor.
 
-Sampling is uniform with replacement over the valid slots, matching torchrl's ``RandomSampler``,
-which is what this replaces.
+Sampling is uniform with replacement over the valid slots, matching torchrl's ``RandomSampler``.
 
 Host storage
 ------------
-Pass ``storage_device="cpu"`` to keep the buffer in pinned host RAM instead of VRAM. That is what
-makes equal retention across encoders affordable: 3 episodes at a 300-step horizon is
-``3 * 300 * num_envs`` transitions, which for dino_patch at res 168 and 512 envs is 95 GB -- far
-past a 96 GB card but comfortable on a 214 GB host.
+``storage_device="cpu"`` keeps the buffer in pinned host RAM instead of VRAM, trading capacity for
+bandwidth: every update pulls ``batch * (obs + next_obs)`` over PCIe, and the CPU-side gather of
+scattered rows is single-threaded memcpy. A prefetch thread hides both: it holds the lock only for
+the gather, stages into pinned buffers, issues the host-to-device copy on a side stream, and hands
+the consumer a CUDA event to wait on.
 
-The cost moves from capacity to bandwidth. Every update pulls ``batch * (obs + next_obs)`` over
-PCIe, and the CPU-side gather of scattered 216 KB rows is single-threaded memcpy. Both are hidden
-by a prefetch thread: it holds the lock only for the gather, stages into pinned buffers, issues
-the host-to-device copy on a side stream, and hands the consumer a CUDA event to wait on. The
-main loop therefore overlaps the next batch's gather and transfer with the current batch's
-backward pass, and only stalls if the GPU gets ahead of host memory bandwidth.
-
-Prefetch is only engaged for the pinned-host-to-CUDA case. When storage and compute are the same
-device there is nothing to overlap, so ``sample`` takes the direct path and stays synchronous,
-which also keeps the unit tests deterministic.
+Prefetch engages only for the pinned-host-to-CUDA case. With storage and compute on the same device
+there is nothing to overlap, so ``sample`` takes the direct, synchronous path, which also keeps the
+unit tests deterministic.
 """
 
 from __future__ import annotations
@@ -67,8 +55,8 @@ class ObsOnlyReplay:
             ``num_envs`` so the successor stride is exact.
         num_envs: transitions per ``extend`` call. The successor stride.
         device: device sampled batches are delivered on (where training runs).
-        storage_device: where the buffer itself lives. Defaults to ``device`` (the old
-            all-on-GPU behaviour); pass ``"cpu"`` for pinned host RAM.
+        storage_device: where the buffer itself lives. Defaults to ``device``; pass ``"cpu"`` for
+            pinned host RAM.
         prefetch: batches kept in flight by the background thread. Only used when storage is
             pinned host memory and ``device`` is CUDA. 0 disables the thread.
     """
@@ -86,8 +74,8 @@ class ObsOnlyReplay:
         self.device = torch.device(device)
         self.storage_device = torch.device(storage_device if storage_device is not None else device)
 
-        # Pinned host pages are what make the copy asynchronous; without pinning, torch has to
-        # bounce through its own staging buffer and the transfer serialises against compute.
+        # Pinned host pages are what make the copy asynchronous: unpinned, torch bounces through its
+        # own staging buffer and the transfer serialises against compute.
         self._pinned = self.storage_device.type == "cpu" and self.device.type == "cuda"
         self._async = self._pinned and prefetch > 0
         self._prefetch = int(prefetch) if self._async else 0
@@ -109,8 +97,8 @@ class ObsOnlyReplay:
         self._written = 0         # iterations written, ever
         self._valid_idx = None    # cache, refreshed once per extend rather than per sample
 
-        # Writers and the prefetch thread both touch the store; the lock is held for the gather
-        # (tens of ms) so a slot cannot be recycled underneath a batch that is mid-copy.
+        # Writers and the prefetch thread both touch the store; the lock is held for the whole
+        # gather so a slot cannot be recycled underneath a batch that is mid-copy.
         self._lock = threading.Lock()
         self._q: queue.Queue | None = None
         self._thread: threading.Thread | None = None
@@ -138,9 +126,9 @@ class ObsOnlyReplay:
     def extend(self, obs_rgb, obs_state, actions, rewards, dones, boundary):
         """Append one iteration of ``num_envs`` transitions.
 
-        ``boundary`` marks envs whose stored successor observation belongs to the next episode
-        (i.e. the loop substituted ``final_observation`` into its next_obs). Pass the same mask
-        the loop uses for that substitution.
+        ``boundary`` marks envs whose stored successor observation belongs to the next episode, i.e.
+        where the loop substituted ``final_observation`` into its next_obs. MUST be the same mask the
+        loop uses for that substitution.
         """
         n = self.num_envs
         if obs_rgb.shape[0] != n:
@@ -151,9 +139,9 @@ class ObsOnlyReplay:
         start = self._cursor
         idx = torch.arange(start, start + n, device=self.storage_device) % self.capacity
 
-        # Blocking device-to-host copies. One iteration is num_envs rows (110 MB for dino at
-        # 512 envs, ~6 ms), small enough that overlapping the write is not worth the extra
-        # lifetime rules it would put on the caller's tensors.
+        # Blocking device-to-host copies. One iteration is num_envs rows (110 MB for dino at 512
+        # envs, ~6 ms), small enough that overlapping the write is not worth the lifetime rules it
+        # would put on the caller's tensors.
         with self._lock:
             self._rgb[idx] = obs_rgb.to(device=self.storage_device, dtype=self._rgb.dtype)
             self._state[idx] = obs_state.to(device=self.storage_device, dtype=self._state.dtype)

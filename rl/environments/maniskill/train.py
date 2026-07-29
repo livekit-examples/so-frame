@@ -1,17 +1,9 @@
 """Train a vision policy on SOFramePickPlaceBin-v1 with Squint SAC.
 
-One script for every architecture; pick the vision encoder with --encoder.
-
-    uv run python train.py                              # squint CNN (default)
-    uv run python train.py --encoder dino_patch         # frozen DINOv2 + patch head
-    uv run python train.py --help                       # every flag, with docs
-
-Defaults that follow from the encoder (input resolution, replay size, updates per step) are
-filled in by Args.resolve(); see src/soframe_rl_maniskill/sac/args.py. Task, robot and reward
-constants live in src/soframe_rl_maniskill/config.py.
-
-This replaced train_squint.py / train_dino.py / train_dino_v2.py / train_dino_v3.py /
-train_dino_v4.py, which were ~95% the same SAC loop.
+One script for every architecture; pick the vision encoder with --encoder. Input resolution,
+replay size and updates per step default per encoder (Args.resolve in
+src/soframe_rl_maniskill/sac/args.py). Task, robot and reward constants live in
+src/soframe_rl_maniskill/config.py. See the README for invocations.
 """
 
 import os

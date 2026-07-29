@@ -1,15 +1,11 @@
 """Render each sim camera to a PNG, for calibrating the real cameras against.
 
-This is the whole handoff from sim to deploy calibration. Run it here (needs the simulator),
-then fit the real cameras against the PNGs with rl/deploy/utils/calibrate_camera.py (needs only
-OpenCV, so it also runs on the robot host).
+This is the whole handoff from sim to deploy calibration: run it here (needs the simulator), then fit
+the real cameras against the PNGs with rl/deploy/utils/calibrate_camera.py.
 
-    uv run python examples/dump_reference_views.py
-    uv run python examples/dump_reference_views.py --out ../../deploy/utils/reference_views
-
-Domain randomization is OFF and the objects are hidden by default: what you are aligning is the
-rig's fixed geometry -- frame edges, panel corners, the arm base -- not a particular episode.
-Pass --show-objects if you want the cube and bin in frame as a sanity check.
+Domain randomization is OFF and the objects are hidden by default: what you align is the rig's fixed
+geometry (frame edges, panel corners, the arm base), not a particular episode. Pass --show-objects
+for the cube and bin as a sanity check.
 """
 
 import argparse
@@ -69,8 +65,7 @@ env = gym.make(
 env.reset(seed=0)
 u = env.unwrapped
 
-# Put the rail where asked; the arm (and wrist camera) move with it. The gripper too: the
-# jaws are the only rig geometry the wrist camera sees up close, so they carry the alignment.
+# The jaws are the only rig geometry the wrist camera sees up close, so they carry the alignment.
 def place(qpos, name, fraction):
     """Set one joint to a fraction of its travel, 0..1."""
     idx = u.agent.joint_names.index(name)
@@ -88,13 +83,10 @@ if not args.show_objects:
     u.item.set_pose(Pose.create_from_pq(torch.tensor([[5.0, 5.0, 0.5]])))
     u.bin.set_pose(Pose.create_from_pq(torch.tensor([[6.0, 6.0, 0.5]])))
 
-# Both sensor cameras are SAPIEN-mounted on their URDF camera links, so the set_qpos above
-# already moved the wrist camera with the arm. But a mounted camera takes its picture from the
-# transforms cached at the PREVIOUS capture, so the first get_obs() after a set_qpos returns
-# the pre-set pose. Capture once to flush, then render and capture again for the frame that
-# actually reflects the qpos. Without this every reference silently rendered the reset
-# keyframe and both --rail and --gripper were no-ops. update_render() twice does not do it;
-# the discarded capture is what flushes the mount.
+# A SAPIEN-mounted camera takes its picture from the transforms cached at the PREVIOUS capture, so
+# the first get_obs() after a set_qpos returns the pre-set pose. Capture once to flush, then render
+# and capture again. Without the discarded capture every reference renders the reset keyframe and
+# --rail and --gripper are silent no-ops; update_render() twice does not flush the mount.
 u.scene.update_render()
 u.get_obs()
 u.scene.update_render()

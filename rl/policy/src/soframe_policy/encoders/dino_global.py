@@ -1,29 +1,17 @@
-"""Global-vector DINOv2 encoder over a frozen ViT-S/14: the ablation of the patch head.
-
-This is the control experiment for `dino_patch`. Patch Policy's claim is that keeping the DENSE
-patch tokens and reading them out with self-attention beats collapsing them, which is what
-almost every prior frozen-backbone controller did. `dino_patch` implements the dense side. This
-implements the collapsed side, so the claim can be tested on our task instead of assumed:
+"""Global-vector DINOv2 encoder over a frozen ViT-S/14: the collapsed-pooling control for
+``dino_patch``.
 
     dino_patch    2 cams -> 288 tokens x 384  -> 4-layer self-attention -> readout token
     dino_global   2 cams ->   2 vectors x 384 -> MLP
 
-Everything else is deliberately identical -- same frozen ViT-S/14 with registers, same
-resolution, same ImageNet normalization, same repr_dim and RGB_PROJ_DIM into the actor, same
-cached-feature training path. So a difference in success rate is attributable to the spatial
-representation and not to capacity elsewhere in the stack.
+Everything else matches ``dino_patch``: same frozen ViT-S/14 with registers, same resolution,
+ImageNet normalization, repr_dim, RGB_PROJ_DIM and cached-feature training path, so the spatial
+representation is the only difference. Collapsing also shrinks a cached observation from 216 KB
+to 1.5 KB.
 
-Two consequences of collapsing, both of which matter more than they first appear:
-
-* The cached observation goes from 216 KB to 1.5 KB, a factor of 140. Replay retention stops
-  being a constraint at all: 2 episodes at 512 envs is 300 MB instead of 42 GB.
-* Spatial information survives only insofar as the CLS token encodes it. For a task whose whole
-  difficulty is *where* the cube is relative to the jaw, that is the thing being ablated. If the
-  patch head's advantage is real, this is where it should show up.
-
-``embed_global`` is the sim2real-critical function, mirroring ``dino_patch.tokenize``: training
-caches features through it in an obs wrapper, deploy calls it per tick on rectified frames. One
-definition, so sim and real cannot disagree on resize mode, normalization or camera ordering.
+``embed_global`` is sim2real-critical, mirroring ``dino_patch.tokenize``: training caches features
+through it in an obs wrapper, deploy calls it per tick. One definition, so sim and real cannot
+disagree on resize mode, normalization or camera ordering.
 """
 from __future__ import annotations
 
@@ -48,12 +36,10 @@ def embed_global(rgb, res, num_cams=None, device=None, pool="cls"):
 
     Each camera is bilinearly resized to ``res``, ImageNet-normalized and pushed through
     ``forward_features``; the per-camera vectors are stacked camera-major, so ordering matches
-    the channel ordering of the input stack exactly as the patch encoder's token grids do.
+    the input stack's channel order, as the patch encoder's token grids do.
 
-    ``pool`` selects what "global" means: the CLS token (default, the canonical single vector),
-    the mean over patch tokens, or both concatenated. CLS is the default because it is what the
-    backbone was trained to make globally informative; mean-pooling is the stronger classical
-    baseline and is offered so the ablation cannot be dismissed as a straw man.
+    ``pool`` is what "global" means: ``cls`` (default, what the backbone was trained to make
+    globally informative), ``mean`` over patch tokens, or ``cls_mean`` for both concatenated.
     """
     if pool not in POOLS:
         raise ValueError(f"pool must be one of {POOLS}, got {pool!r}")
@@ -89,11 +75,8 @@ def embed_global(rgb, res, num_cams=None, device=None, pool="cls"):
 class DinoGlobalEncoder(nn.Module):
     """MLP head over frozen DINOv2 global vectors, one (or two) per camera.
 
-    The head is an MLP rather than a single Linear on purpose. A linear probe would lose to the
-    patch head's 4-layer transformer on parameter count alone, and the question is whether DENSE
-    versus COLLAPSED matters, not whether 4 layers beat 0. Two hidden layers at the transformer's
-    own width is the closest honest match: the representation differs, the capacity to exploit it
-    does not.
+    Input is (B, n_vec, EMBED) bf16; output is (B, repr_dim) fp32. Two hidden layers at the patch
+    head's own width, so capacity is not a confound against it.
     """
 
     KIND = "dino_global"
@@ -111,9 +94,8 @@ class DinoGlobalEncoder(nn.Module):
         self.n_vec = vector_count(num_cams, pool)
         self.repr_dim = repr_dim
 
-        # Per-camera embedding, matching dino_patch's cam_embed: concatenation order already
-        # encodes which camera is which, but a learned offset lets the head separate them before
-        # they are mixed, rather than relying on the flattening order alone.
+        # Per-camera learned offset, matching dino_patch's cam_embed, so the head can separate the
+        # cameras before they are mixed rather than relying on flattening order alone.
         self.cam_embed = nn.Parameter(torch.zeros(self.n_vec, embed, device=device))
 
         layers = [nn.LayerNorm(self.n_vec * embed, device=device)]
@@ -130,8 +112,8 @@ class DinoGlobalEncoder(nn.Module):
         nn.init.zeros_(self.cam_embed)
 
     def preprocess(self, rgb):
-        """Raw camera stack -> frozen global vectors. Deploy calls this per tick; training does
-        it once per env step in an obs wrapper (which calls ``embed_global`` directly)."""
+        """Raw camera stack -> frozen global vectors. Deploy calls this per tick; training calls
+        ``embed_global`` once per env step in an obs wrapper."""
         return embed_global(rgb, self.res, num_cams=self.num_cams,
                             device=self.cam_embed.device, pool=self.pool)
 

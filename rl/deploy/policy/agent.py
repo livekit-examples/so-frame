@@ -1,12 +1,10 @@
 """Load a trained policy for inference on the real robot.
 
-One class for every architecture. The checkpoint records its own encoder kind, input
-resolution, camera count, action bounds and proprio layout, so there is nothing to pass in and
-nothing to remember -- see soframe_policy/checkpoint.py.
+One class for every architecture: the checkpoint records its own encoder kind, input
+resolution, camera count, action bounds and proprio layout. See soframe_policy/checkpoint.py.
 
-This replaced a SquintPolicy and a DinoPolicy that each hand-copied the training network
-definitions, took the architecture and resolution as constructor arguments, and covered only
-2 of the 5 architectures that existed.
+On a Mac set POLICY_DEVICE=mps; the default device pick is cuda-or-cpu, so DINOv2 lands on
+the CPU otherwise.
 """
 from __future__ import annotations
 
@@ -21,8 +19,8 @@ from soframe_policy import checkpoint
 class Policy:
     """Inference wrapper around a trained encoder + actor.
 
-    ``act(rgb, proprio)`` takes the rectified camera stack (H, W, 3*num_cams) uint8 and a
-    ``{field: value}`` proprio mapping, and returns the normalized action in [-1, 1]^n_act.
+    ``act(rgb, proprio)``: rectified camera stack (H, W, 3*num_cams) uint8 plus a
+    ``{field: value}`` proprio mapping -> normalized action in [-1, 1]^n_act.
     """
 
     def __init__(self, ckpt_path: str | pathlib.Path, device: str | None = None):
@@ -47,14 +45,13 @@ class Policy:
                 f"({expected} channels); got {rgb.shape[-1]}"
             )
         # assemble() raises on a missing, unknown or wrong-width field, so a proprio mismatch
-        # fails here rather than silently feeding the policy a misaligned vector.
+        # fails here instead of feeding the policy a misaligned vector.
         state = torch.as_tensor(
             self.proprio.assemble(proprio), dtype=torch.float32, device=self.device
         ).unsqueeze(0)
 
         frame = torch.from_numpy(np.ascontiguousarray(rgb)).to(self.device).unsqueeze(0)
-        # preprocess() is the SAME code the training obs pipeline used: the area downsample for
-        # the CNN, or the DINOv2 tokenizer for the patch head.
+        # preprocess() is the same code the training obs pipeline used.
         features = self.encoder(self.encoder.preprocess(frame))
         action = self.actor.get_eval_action(features, state)
         return action.squeeze(0).cpu().numpy()

@@ -1,14 +1,8 @@
 """Differential test for ObsOnlyReplay against the two-copy layout it replaces.
 
-The whole correctness claim is "next_obs can be recovered from an index offset instead of being
-stored". So the test does not check that claim by restating it -- it keeps a reference dict of
-what the old layout WOULD have stored for every transition, and asserts that every sample the
-new buffer hands back agrees with it. That catches stride errors, wraparound aliasing and
-boundary seams in one assertion.
-
-Runs on CPU with tiny tensors, so the whole file is well under a second. No GPU, no ManiSkill.
-
-    uv run pytest tests/test_replay.py -q
+Keeps a reference dict of what the two-copy layout WOULD have stored for every transition and
+asserts every sample agrees with it, which catches stride errors, wraparound aliasing and boundary
+seams in one assertion. CPU, tiny tensors, no GPU and no ManiSkill.
 """
 
 import torch
@@ -84,8 +78,8 @@ def test_nothing_sampleable_after_one_iteration():
 def test_next_obs_matches_two_copy_layout_including_wraparound():
     """The core claim, checked against the reference for every sample.
 
-    18 iterations over a 5-iteration buffer means it wraps more than three times, and the
-    7-step horizon puts boundaries at iterations 6 and 13, both of which get overwritten.
+    18 iterations over a 5-iteration buffer wraps more than three times, and the 7-step horizon puts
+    boundaries at iterations 6 and 13, both of which get overwritten.
     """
     n_iters = 18
     rb, obs, acts, rews, truth = _fill(n_iters)

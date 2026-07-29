@@ -1,9 +1,8 @@
 """Pull raw camera frames off the live robot over the LiveKit portal room.
 
-Connects as a PASSIVE participant (never claims control, never sends actions), so
-it can run while a policy is driving. Waits until both camera tracks deliver a
-frame, saves each raw RGB frame to --out, then disconnects. These raw frames are
-the input for camera calibration and the sim-vs-real comparison figures.
+PASSIVE: never claims control, never sends actions, so it is safe while a policy drives.
+Waits for a frame on both camera tracks, saves each raw RGB frame to --out, disconnects.
+The saved frames are the input for camera calibration.
 """
 import argparse
 import asyncio
@@ -19,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from utils.common import env, load_env, mint_token  # noqa: E402
 
 _HERE = pathlib.Path(__file__).resolve().parent
-CONFIG_PATH = _HERE.parent / "portal.yaml"   # _HERE is utils/; portal.yaml sits in rl/deploy/
+CONFIG_PATH = _HERE.parent / "portal.yaml"
 CAMERAS = ("arm_camera", "overhead_camera")
 
 

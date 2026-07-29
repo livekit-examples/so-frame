@@ -1,7 +1,5 @@
-"""Weights & Biases logging and the eval loop.
-
-Both vendored from Squint (https://github.com/aalmuzairee/squint), unchanged apart from
-dropping the privileged-state plumbing.
+"""Weights & Biases logging and the eval loop, vendored from Squint
+(https://github.com/aalmuzairee/squint).
 """
 
 import glob

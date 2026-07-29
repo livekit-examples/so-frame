@@ -180,16 +180,19 @@ manager, and config details.
 *Chained rollouts (wrist camera left, overhead camera right), rendered in the flat shading
 they were trained on.*
 
-Trains purely from **the frame's own wrist camera**: no ground-truth cube/bin poses, just
+Trains purely from **the frame's own two cameras** (wrist + overhead): no ground-truth cube/bin poses, just
 RGB pixels and proprioception. Built on [ManiSkill3](https://github.com/haosulab/ManiSkill)
 (SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
 Sim-to-Real Robotics](https://arxiv.org/abs/2602.21203) (Almuzairee & Christensen, 2026), a
 visual Soft Actor-Critic that reaches strong success rates in **minutes** of wall-clock time.
 
-This folder is a direct port of the paper's [reference implementation](https://github.com/aalmuzairee/squint)
+This folder started as a port of the paper's [reference implementation](https://github.com/aalmuzairee/squint)
 (which already targets an SO-101 arm in ManiSkill3), retargeted onto this repo's
 frame-mounted rig and its existing calibrated `frame_wrist_camera`/`frame_overhead_camera`
-mounts and `simulation/urdf/so101_on_frame.urdf`.
+mounts and `simulation/urdf/so101_on_frame.urdf`. The SAC loop is still the paper's; the
+vision encoder is selectable, either the paper's low-resolution CNN or a frozen DINOv2
+backbone read out densely or pooled to one vector per camera. See
+**[rl/environments/maniskill/README.md](rl/environments/maniskill/README.md)**.
 
 **SAPIEN vs MuJoCo camera convention**: the two engines define a camera's local forward/right/up
 axes differently. SAPIEN uses `(forward, right, up) = (+X, -Y, +Z)` (see

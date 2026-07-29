@@ -1,8 +1,5 @@
-"""Shared scaffolding for the robot runtime and the policy operator.
-
-env loading, LiveKit token minting, and an async fps pacer -- plumbing both entry
-scripts (robot/run.py, policy/run.py) need. Pure Python over python-dotenv +
-livekit-api. Entry points add the deploy root to sys.path and `from utils.common import ...`.
+"""Shared scaffolding for the robot runtime and the policy operator: env loading, LiveKit
+token minting, an async fps pacer.
 """
 from __future__ import annotations
 
@@ -19,9 +16,8 @@ from livekit.protocol.room import RoomConfiguration
 
 
 def load_env(start: Optional[pathlib.Path] = None) -> None:
-    """Load `.env` walking up from `start` to root (plus cwd). Nearest `.env`
-    wins (`override=False`); `.env.local` always overrides. Pass the calling
-    script's directory."""
+    """Load `.env` walking up from `start` to root (plus cwd). Nearest `.env` wins;
+    `.env.local` always overrides. Pass the calling script's directory."""
     start = (start or pathlib.Path.cwd()).resolve()
     seen: set[pathlib.Path] = set()
     for d in (start, *start.parents, pathlib.Path.cwd().resolve()):
@@ -48,9 +44,9 @@ def mint_token(
     name: str | None = None,
     attributes: dict[str, str] | None = None,
 ) -> str:
-    """Mint a 6h join token for `identity` in `room`. `name` sets the display
-    name; `attributes` are published as readable participant attributes (a web-ui
-    uses them to discover the policy's control descriptor)."""
+    """Mint a 6h join token for `identity` in `room`. `name` sets the display name;
+    `attributes` are published as participant attributes, which a web UI reads to
+    discover the policy's control descriptor."""
     grants = api.VideoGrants(
         room_join=True, room=room, can_publish=True, can_publish_data=True,
         can_subscribe=True, can_update_own_metadata=True,

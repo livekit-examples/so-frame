@@ -1,7 +1,7 @@
 # SO-101-on-frame RL: pick a cube, place it in a bin
 
 Vision-based RL on [ManiSkill3](https://github.com/haosulab/ManiSkill). The policy sees only the
-frame's wrist and overhead cameras plus proprioception — no ground-truth object poses. Cube and
+frame's wrist and overhead cameras plus proprioception, with no ground-truth object poses. Cube and
 bin spawn anywhere in the workspace each episode.
 
 Implements [Squint: Fast Visual Reinforcement Learning for Sim-to-Real
@@ -17,9 +17,9 @@ backend for editing and smoke tests (`--sim_backend cpu --num_envs 1`) but not r
 
 ```bash
 uv sync
-uv run python examples/visualize_sim.py        # look at the scene before spending GPU time
 uv run python train.py                         # squint CNN
 uv run python train.py --encoder dino_patch    # frozen DINOv2 + patch head
+uv run python train.py --encoder dino_global   # same backbone, collapsed to one vector per camera
 uv run python train.py --help                  # every flag, documented
 ```
 
@@ -28,6 +28,31 @@ record their own architecture, so deploying needs no flags.
 
 Useful flags: `--num_envs`, `--total_timesteps`, `--exp_name`, `--track` (wandb),
 `--checkpoint <path>` to warm-start, `--visual_fidelity flat` for a faster shadowless render.
+
+## Commands
+
+All from `rl/environments/maniskill/`.
+
+```bash
+# look at the scene, cameras and randomization before spending GPU time
+uv run python examples/visualize_sim.py
+uv run python examples/visualize_sim.py --headless --out /tmp/frames   # no display (ssh)
+
+# reference renders to calibrate the real cameras against (then rl/deploy/utils/calibrate_camera.py)
+uv run python examples/dump_reference_views.py
+uv run python examples/dump_reference_views.py --out ../../deploy/utils/reference_views
+
+# one-off pretty render, to look at the sim only
+uv run python examples/render_realistic.py --shader rt-fast --out /tmp/realistic.png
+
+# a trained checkpoint as one continuous video, episodes back to back
+uv run python examples/render_chained_eval.py \
+    --checkpoint runs/<exp>/ckpt_best.pt --num_episodes 10 --out /tmp/chained.mp4
+
+# replay-buffer index arithmetic (CPU, seconds); host-RAM + prefetch path (needs CUDA)
+uv run --with pytest pytest tests/test_replay.py -q
+uv run --with pytest pytest tests/test_replay_cuda.py -q
+```
 
 ## Where things are
 
@@ -47,7 +72,7 @@ deploy so the network that runs on the robot is the one that trained.
 
 ## Task
 
-Reward is a monotonic ladder — each stage sits above the previous stage's maximum, so progress is
+Reward is a monotonic ladder: each stage sits above the previous stage's maximum, so progress is
 monotone and a regression falls to a lower rung on its own:
 
 ```
@@ -64,7 +89,7 @@ at the measured real servo rate (0.05 rad/step arm, 0.007 m/step rail at 10 Hz) 
 limits cap torque at the STS3215's 3 N·m stall. Nothing to trade off against the task reward.
 
 Cube (20 mm) and bin (100 mm, 96 mm opening) come from CAD in
-`simulation/assets/objects/`. Both spawn in one zone — bin first, then the cube at least 5 cm
+`simulation/assets/objects/`. Both spawn in one zone: bin first, then the cube at least 5 cm
 clear of it. The zone is the measured intersection of top-down graspable reach, the overhead
 camera's footprint, and where objects physically fit.
 
@@ -74,8 +99,14 @@ camera's footprint, and where objects physically fit.
 |---|---|---|
 | `squint` | CNN over a squinted image stack | 32 px |
 | `dino_patch` | self-attention over frozen DINOv2 patch tokens | 168 px |
+| `dino_global` | MLP over one frozen DINOv2 vector per camera (`--dino_pool cls\|mean\|cls_mean`) | 168 px |
 
-Resolution, replay size and update ratio default per encoder; see `sac/args.py`.
+`dino_global` is the collapsed-pooling control for `dino_patch`: same backbone, resolution and
+update ratio, so the only difference is whether the patch grid survives.
+
+Resolution and update ratio default per encoder; see `sac/args.py`. Replay size does NOT: it is
+`--replay_episodes * config.EPISODE_HORIZON * --num_envs` for every encoder, so a comparison
+between encoders is not confounded by how much history each one keeps.
 
 ## Sim2real notes
 

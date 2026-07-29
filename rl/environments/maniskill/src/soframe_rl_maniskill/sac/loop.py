@@ -1,17 +1,12 @@
 """The SAC training loop.
 
-Vendored from Squint (https://github.com/aalmuzairee/squint) -- autotuned entropy, distributional
-C51 critic ensemble, torch.compile + CUDA graphs, high update-to-data ratio. The algorithm is
-untouched; what changed is that it is written once here instead of copy-pasted per architecture,
-and the encoder/actor come from ``soframe_policy`` so the deployed policy is the trained one.
+Vendored from Squint (https://github.com/aalmuzairee/squint): autotuned entropy, distributional C51
+critic ensemble, torch.compile + CUDA graphs, high update-to-data ratio. The algorithm is untouched;
+the encoder/actor come from ``soframe_policy`` so the deployed policy is the trained one.
 
-Local additions kept from the old scripts: warm-start (--checkpoint) with optional --reset_alpha,
-best-checkpoint tracking, and an optional encoder LR group + grad clipping (which the transformer
-head needs and the CNN does not).
-
-Removed with the features they served: the asymmetric privileged critic (the actor and critic now
-see the same proprio) and the per-architecture DeployAgent class, replaced by the recorded
-checkpoint format in soframe_policy.checkpoint.
+Local additions: warm-start (--checkpoint) with optional --reset_alpha, best-checkpoint tracking,
+and an optional encoder LR group + grad clipping (which the transformer head needs and the CNN does
+not).
 """
 
 import os
@@ -42,12 +37,12 @@ from .replay import ObsOnlyReplay
 def train(args):
     args = args.resolve()
 
-    # Set before any env/agent is built: the controller reads config.ARM_SPEED_SCALE when the
-    # agent's controller configs are constructed.
+    # MUST precede any env/agent build: the controller reads config.ARM_SPEED_SCALE when the agent's
+    # controller configs are constructed.
     from .. import config
     config.ARM_SPEED_SCALE = args.arm_speed_scale
 
-    # Same deal: pick_place reads config.COLOR_CUBE / COLOR_BIN when it builds the scene.
+    # Same: pick_place reads config.COLOR_CUBE / COLOR_BIN when it builds the scene.
     if args.object_colors == "distinct":
         config.COLOR_CUBE = config.BLUE
         config.COLOR_BIN = config.YELLOW
@@ -97,8 +92,8 @@ def train(args):
     action_space = envs.unwrapped.single_action_space
     encoder_cls = ENCODERS[args.encoder]
 
-    # Constructor arguments beyond (num_cams, res). Recorded in the checkpoint, because
-    # dino_global's pool choice does not change any tensor shape and so cannot be inferred back.
+    # Constructor arguments beyond (num_cams, res). MUST be recorded in the checkpoint: dino_global's
+    # pool choice changes no tensor shape, so it cannot be inferred back from the weights.
     encoder_kwargs = {"pool": args.dino_pool} if args.encoder == "dino_global" else {}
 
     def new_encoder(dev=device):
@@ -220,9 +215,7 @@ def train(args):
         )
 
     # -- Update steps --------------------------------------------------------------------
-    # bf16 autocast on whichever device we're on. The reference implementation hardcoded 'cuda',
-    # which makes the loop unrunnable on a CPU box even for a smoke test; training is still
-    # GPU-only in practice (see the README), but "does it run at all" should be checkable.
+    # bf16 autocast on whichever device we are on, so the loop stays smoke-testable on a CPU box.
     amp_device = "cuda" if device.type == "cuda" else "cpu"
 
     def update_main(data):
@@ -412,9 +405,8 @@ def train(args):
 
                 d.update(out_main)
 
-        # Log. Episode metrics only exist on a truncation boundary, but the SAC losses in `d` are
-        # refreshed every iteration, so the two cadences are kept separate: waiting for a boundary
-        # to flush the losses would log them once per env_horizon iterations and lose the rest.
+        # Episode metrics only exist on a truncation boundary, but the SAC losses in `d` refresh
+        # every iteration, so the two cadences stay separate.
         episode_ended = "final_info" in infos
         if episode_ended:
             final_info = infos["final_info"]
@@ -431,8 +423,8 @@ def train(args):
             d["time/sps"] = sps
             pbar.set_description(f"{sps: 4.4f} sps, " + desc)
             logger.log(d=d, step=global_step)
-            # Cleared so the next point carries fresh losses, and so the episode metrics stay a
-            # sparse series instead of a stale value repeated until the next truncation.
+            # Cleared so the next point carries fresh losses and the episode metrics stay a sparse
+            # series rather than a stale value repeated until the next truncation.
             d = {}
 
         pbar.update(args.num_envs)

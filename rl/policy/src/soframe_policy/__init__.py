@@ -1,12 +1,12 @@
 """Policy networks shared by SO-101-on-frame training and deployment.
 
-This package is the single definition of everything that ends up in a checkpoint: the vision
-encoders, the SAC actor, and how a raw camera stack becomes encoder input. Training
-(``rl/environments/maniskill``) and deploy (``rl/deploy``) both take it as a path dependency, so there is no
-"MUST stay byte-identical" hand-copy to drift.
+Single definition of everything that ends up in a checkpoint: the vision encoders, the SAC actor,
+and how a raw camera stack becomes encoder input. Training (``rl/environments/maniskill``) and
+deploy (``rl/deploy``) both take it as a path dependency.
 
-Pure torch. Nothing here imports mani_skill, gymnasium or livekit -- the critic, replay buffer
-and training loop stay on the training side, since they never run on the robot.
+Pure torch: must not import mani_skill, gymnasium or livekit, since both the GPU box and the
+robot host install this package. The critic, replay buffer and training loop stay on the
+training side.
 """
 from .actor import Actor, Projection, weight_init
 from .encoders import ENCODERS, DinoPatchEncoder, SquintEncoder

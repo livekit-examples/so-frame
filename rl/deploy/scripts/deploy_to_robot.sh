@@ -1,32 +1,18 @@
 #!/usr/bin/env bash
-# Rsync the so-frame deploy project to a robot host over SSH, then optionally
-# provision it (uv sync). Adapted from livekit-actuate/scripts/deploy_to_robot.sh
-# for this repo's single-project layout (one uv project, robot + policy operators).
+# Rsync the so-frame deploy project to a robot host over SSH, then optionally provision
+# it (uv sync). See README for invocation.
 #
-# The remote paths are ALWAYS ~/so-frame-deploy and ~/policy -- you only
-# provide the host.
+# Remote paths are fixed: ~/so-frame-deploy and ~/policy. rl/policy (the shared
+# soframe-policy package) ships as a SIBLING of the deploy dir, because pyproject.toml
+# takes it as a path dependency at `../policy` and that string must resolve identically
+# here and on the robot: rl/policy next to rl/deploy locally, ~/policy next to
+# ~/so-frame-deploy remotely. Otherwise `uv sync` fails with
+# "Distribution not found at: file:///~/policy".
 #
-# Usage:
-#   ./scripts/deploy_to_robot.sh <host> [--sync]
-#
-#   <host>   ssh target, e.g. pi@robot.local  or  binhpham@robotbox
-#   --sync   run `uv sync` on the remote after the copy (first run is slow)
-#
-# Ships robot/ + policy/ (incl. the camera-mapping JSONs) + common.py +
-# portal.yaml + pyproject.toml + uv.lock + .env. Excludes venv/caches, model
-# weights (*.pt), and recordings -- see scripts/deploy.rsyncignore. `.env` IS
-# synced so the robot inherits LiveKit config; per-machine overrides go in
-# `.env.local`, which is NOT synced.
-#
-# rl/policy (the shared soframe-policy package) ships too, as a SIBLING of the
-# deploy dir: pyproject.toml takes it as a path dependency at `../policy`, and
-# that string has to resolve the same way here and on the robot. Locally that is
-# rl/policy next to rl/deploy; remotely it is ~/policy next to ~/so-frame-deploy.
-# Without it `uv sync` fails with "Distribution not found at: file:///~/policy".
-#
-# The trained checkpoint (*.pt) is NOT shipped (it lives on the training box).
-# On the policy host, scp the .pt over and set POLICY_CHECKPOINT, or point it at
-# a shared path.
+# Excludes venvs/caches, model weights (*.pt) and recordings, see
+# scripts/deploy.rsyncignore. `.env` IS synced so the robot inherits LiveKit config;
+# per-machine overrides go in `.env.local`, which is not synced. The checkpoint stays on
+# the training box: scp it to the policy host and set POLICY_CHECKPOINT.
 set -euo pipefail
 
 REMOTE_PATH="~/so-frame-deploy"   # fixed target on the robot host

@@ -1,18 +1,12 @@
-"""Render a trained checkpoint as one continuous video: episodes play back-to-back with
-no gaps. A successful episode cuts to a new one right away; one that hasn't succeeded
-runs for --fail_seconds before cutting, so failed attempts get a consistent amount of
-screen time. Single env, wrist + overhead cameras only (no third-person view, no
-multi-env tiling).
+"""Render a trained checkpoint as one continuous video: episodes play back-to-back with no gaps.
 
-Run from rl/environments/maniskill/:
-    uv run python examples/render_chained_eval.py \
-        --checkpoint runs/<exp>/ckpt_best.pt --num_episodes 10 --out /tmp/chained.mp4
+A successful episode cuts to a new one right away; one that has not succeeded runs for
+--fail_seconds first, so failures get consistent screen time. Only env 0 is filmed, wrist +
+overhead cameras, no third-person view.
 
---visual_fidelity picks the shading: "raster" (training default: PBR materials +
-softbox-like lighting with a faint shadow, stays on the gpu sim backend), "flat"
-(shadowless, fastest), or "raytraced" (rt-fast;
-drops to the cpu sim backend since ray tracing isn't supported on the gpu-parallelized
-sensor camera path, which is fine for a single-env render).
+--visual_fidelity picks the shading: "raster" (the training default, gpu sim backend), "flat"
+(shadowless, fastest) or "raytraced" (rt-fast, forced to the cpu sim backend since ray tracing is
+not supported on the gpu-parallelized sensor camera path).
 """
 
 import sys
@@ -40,9 +34,7 @@ parser.add_argument("--env_id", type=str, default="SOFramePickPlaceBin-v1")
 parser.add_argument("--num_episodes", type=int, default=10)
 parser.add_argument("--fail_seconds", type=float, default=5.0, help="how long an episode that hasn't succeeded runs before cutting to a fresh one")
 parser.add_argument("--render_size", type=int, default=512)
-# 10 fps = the 10 Hz control rate, so the video plays at real time. (It used to default
-# to 20, which played every rollout at 2x and made the arm/rail look twice as fast as
-# they move in sim -- and on the real robot.)
+# 10 fps = the 10 Hz control rate, so the video plays at real time.
 parser.add_argument("--fps", type=int, default=10)
 parser.add_argument("--visual_fidelity", type=str, default="raster", choices=["flat", "raster", "raytraced"])
 parser.add_argument("--overlay", action="store_true", help="composite the greenscreen background overlay. OFF matches training: the background is black by construction now that the ground plane sits beyond config.SENSOR_FAR, so the overlay (and the segmentation render that drives it) is no longer part of the training obs. Only pass this to composite a real background photo")
@@ -54,8 +46,8 @@ args = parser.parse_args()
 
 fail_step_cap = int(args.fail_seconds * args.fps)
 
-# Camera jitter is part of domain randomization (sim-to-real), but in a video it just
-# reads as shake -- keep the cameras steady here even when --domain_randomization is on.
+# Camera jitter reads as shake in a video, so keep the cameras steady even under
+# --domain_randomization.
 steady_cameras = dict(
     wrist_camera_pos_noise=(0.0, 0.0, 0.0), wrist_camera_rot_noise=(0.0, 0.0, 0.0),
     wrist_camera_fov_noise=0.0,
@@ -64,10 +56,8 @@ steady_cameras = dict(
 )
 
 env_kwargs = dict(
-    # The greenscreen overlay only engages when segmentation is in the obs mode
-    # (base_random_env skips it otherwise). Training used to always run with it, so plain
-    # "rgb" here silently fed the policy backgrounds it never saw; that is now the other way
-    # round -- training is plain "rgb" and the black background comes from the far-plane cull,
+    # The greenscreen overlay only engages when segmentation is in the obs mode (base_random_env
+    # skips it otherwise). Training is plain "rgb" with a black background from the far-plane cull,
     # so asking for the overlay is what would differ from the training obs.
     obs_mode="rgb+segmentation" if args.overlay else "rgb",
     render_mode="sensors",
@@ -89,8 +79,8 @@ else:
 env = gym.make(args.env_id, **env_kwargs)
 env = FlattenRGBDObservationWrapper(env, rgb=True, depth=False, state=True)
 
-# Policy inference stays on cuda even with raytraced fidelity (only the *sim* drops to cpu
-# there); obs are moved to this device explicitly each step.
+# Policy inference stays on cuda even with raytraced fidelity (only the sim drops to cpu there);
+# obs are moved to this device explicitly each step.
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 obs, info = env.reset(seed=args.seed)
@@ -119,8 +109,8 @@ while episode < args.num_episodes:
     obs, reward, terminated, truncated, info = env.step(action.cpu().numpy())
     step_in_episode += 1
 
-    # obs["rgb"] here is the flattened (H, W, 3*num_cams) tensor from
-    # FlattenRGBDObservationWrapper -- split back into per-camera images for display.
+    # obs["rgb"] is the flattened (H, W, 3*num_cams) tensor from FlattenRGBDObservationWrapper;
+    # split back into per-camera images for display.
     rgb = obs["rgb"][0].cpu().numpy().astype(np.uint8)
     num_channels = rgb.shape[-1]
     cams = [rgb[..., c:c + 3] for c in range(0, num_channels, 3)]

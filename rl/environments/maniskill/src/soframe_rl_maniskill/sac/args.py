@@ -1,11 +1,7 @@
 """Training configuration, one dataclass for every encoder.
 
-This replaced five near-identical copies of itself, one per train script. The only thing that
-ever genuinely varied between them was ``--encoder`` and the resolution/buffer-size defaults
-that follow from it, which ``resolve()`` derives.
-
-Flags dropped along with the features they configured: --privileged_critic (asymmetric critic),
---action_delay_max, --action_rate_penalty, --surface_penalty_weight/-gated.
+``--encoder`` and the resolution / buffer-size defaults that follow from it are the only structural
+differences between architectures; ``resolve()`` derives them.
 """
 
 from dataclasses import dataclass
@@ -13,31 +9,21 @@ from typing import Optional
 
 from soframe_policy.encoders import ENCODERS
 
-# Per-encoder defaults for the knobs that genuinely differ. `res` means the squinted image
-# size for the CNN and the per-camera DINOv2 input resolution for the patch head; `buffer_size`
-# follows from how big one cached observation is (a 32px 6-channel image is ~6 KB, a 2-camera
-# 168px token grid is ~110 KB in bf16).
+# Per-encoder defaults. `res` is the squinted image size for the CNN and the per-camera DINOv2
+# input resolution for the patch head.
 #
-# `num_updates` is the value the best run for that encoder actually used, paired with the
-# `batch_size` default of 512 and 1024 `num_envs`. Keep it that way: it is the one knob here
-# that is a tuned result rather than a structural consequence of the architecture, so a value
-# nothing has trained at is worse than no default. squint used to say 256, which no successful
-# run ever used -- 64 is what v40_squint_clean (0.688) and v42_squint_topdown (0.656) ran, and
-# 32 is what v1-dino ran to 0.743. Both are ratios against 1024 envs; changing num_envs without
-# scaling num_updates silently changes the update-to-data ratio.
+# `num_updates` is a tuned value rather than a structural consequence of the architecture, so keep
+# it paired with the `batch_size` default of 512 and 1024 `num_envs`: it is a ratio against 1024
+# envs, and changing num_envs without scaling it silently changes the update-to-data ratio.
 #
-# `buffer_size` is NOT here any more. It used to be a per-encoder constant chosen by what fit in
-# VRAM (1M for squint, 75k for dino_patch), which meant the two encoders retained wildly
-# different amounts of history -- at 1024 envs, 3.3 episodes versus 0.24 -- so any comparison
-# between them confounded architecture with replay retention. It is now derived from
-# --replay_episodes for both, and the buffer lives in host RAM to make that affordable.
+# `buffer_size` is deliberately absent: it is derived from --replay_episodes for every encoder, so
+# retention is equal and a comparison between them measures the architecture.
 ENCODER_DEFAULTS = {
     "squint":      dict(res=32,  render_size=128, num_updates=64),
     "dino_patch":  dict(res=168, render_size=168, num_updates=32),
-    # The dense-vs-collapsed control for dino_patch: same backbone, same resolution, same
-    # num_updates, so the only difference is whether the patch grid survives. Matching
-    # num_updates matters more than tuning it -- an update-ratio difference would confound the
-    # very thing the run is measuring.
+    # The dense-vs-collapsed control for dino_patch: same backbone, resolution and num_updates, so
+    # the only difference is whether the patch grid survives. num_updates MUST match dino_patch's
+    # or an update-ratio difference confounds what the run measures.
     "dino_global": dict(res=168, render_size=168, num_updates=32),
 }
 
@@ -48,8 +34,8 @@ class Args:
     """the name of this experiment"""
     encoder: str = "squint"
     """vision encoder: 'squint' (CNN over a squinted image stack) or 'dino_patch' (self-attention
-    over frozen DINOv2 patch tokens). Sets the res/buffer_size/num_updates defaults below and is
-    recorded in the checkpoint, so deploy does not need to be told which architecture it is."""
+    over frozen DINOv2 patch tokens). Sets the res/buffer_size/num_updates defaults above and is
+    recorded in the checkpoint, so deploy is not told which architecture it is."""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
@@ -87,9 +73,9 @@ class Args:
     object_colors: str = "black"
     """cube/bin colour scheme. "black" matches the real rig (both config.BLACK, ~4-5% reflectance
     matte plastic). "distinct" paints the cube blue and the bin yellow, which the squint CNN needs:
-    at res 32 the cube is one pixel, so hue is the only cue it has, and under "black" three seeds
-    scored 0.000 over 12M steps. Costs sim2real fidelity, so it is not the default -- dino_patch
-    resolves the cube as a shape at res 112/168 and should stay on "black"."""
+    at res 32 the cube is one pixel, so hue is the only cue it has. Costs sim2real fidelity, so it
+    is not the default; dino_patch resolves the cube as a shape at res 112/168 and stays on
+    "black"."""
     overhead_camera_fov: Optional[float] = None
     """override the overhead camera's base FOV, in DEGREES (measured via rl/deploy/utils/calibrate_camera.py)"""
     wrist_camera_fov: Optional[float] = None
@@ -117,18 +103,16 @@ class Args:
     eval_freq: int = 100_000
     """evaluation frequency in terms of global steps"""
     log_freq: int = 10
-    """how often, in iterations, to push the SAC losses to wandb. Needed because episode metrics
-    only exist at a truncation boundary (every env_horizon iterations, since partial_reset is
-    off), and tying loss logging to that boundary makes the curves unreadably sparse: at
-    env_horizon=300 and --num_envs 4096 that is one point per 1.2M steps, ~10 for a whole run."""
+    """how often, in iterations, to push the SAC losses to wandb. Separate from episode metrics,
+    which only exist at a truncation boundary (every env_horizon iterations, since partial_reset is
+    off): tying losses to that boundary logs one point per env_horizon iterations."""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
     obs_mode: Optional[str] = "rgb"
     """the observation output mode of the environment. Plain "rgb": the segmentation buffer only
-    ever fed the greenscreen overlay, which is off by default now that the ground plane is culled
-    by the sensor far plane (see RandomizationConfig.apply_overlay). Pass
+    feeds the greenscreen overlay, which is off (see RandomizationConfig.apply_overlay). Pass
     --obs_mode rgb+segmentation if you turn the overlay back on."""
     sim_backend: str = "gpu"
     """physics/render backend. 'gpu' for real training (needs CUDA); 'cpu' supports a single
@@ -136,8 +120,7 @@ class Args:
     by --visual_fidelity raytraced."""
     binary_gripper: bool = False
     """threshold the gripper action to fully open/closed each step (arm/rail stay continuous).
-    Off = the normal continuous gripper action space, which the openness-ramp reward needs;
-    pass --binary_gripper to reproduce the v35-era binary-jaw runs"""
+    Off = the continuous gripper action space, which the openness-ramp reward needs"""
     arm_speed_scale: float = 1.0
     """multiplier on arm/rail delta limits (gripper unscaled). 1.0 = the measured real servo
     speed (0.05 rad/step arm, 0.007 m/step rail at 10 Hz). For arm-speed ablations only."""
@@ -155,45 +138,36 @@ class Args:
 
     # Algorithm specific arguments
     total_timesteps: int = 12_000_000
-    """total timesteps of the experiments. 12M is what every real run here has used: a
-    from-scratch squint CNN does not land its first success until ~7M, so shorter budgets
-    finish before the task is learned."""
+    """total timesteps of the experiments. A from-scratch squint CNN does not land its first
+    success until ~7M, so shorter budgets finish before the task is learned."""
     dino_pool: str = "cls"
-    """--encoder dino_global only: what "one vector" means. "cls" is the CLS token, the canonical
-    global vector and what the backbone was trained to make globally informative. "mean" is the
-    mean over patch tokens, the stronger classical baseline. "cls_mean" concatenates both, giving
-    the collapsed head two vectors per camera instead of one. Ignored by other encoders."""
+    """--encoder dino_global only: what "one vector" means. "cls" is the CLS token, "mean" the mean
+    over patch tokens, "cls_mean" both concatenated (two vectors per camera instead of one).
+    Ignored by other encoders."""
     replay_episodes: float = 2.0
     """replay retention, in EPISODES per env. The buffer holds
     `replay_episodes * config.EPISODE_HORIZON * num_envs` transitions, the same formula for every
-    encoder, so squint and dino_patch see the same amount of history and a comparison between
-    them measures the architecture rather than the buffer. Expressed in episodes because that is
-    the unit the task has: at 2.0 every env keeps its last two full attempts."""
+    encoder, so a comparison between them measures the architecture rather than the buffer."""
     buffer_size: Optional[int] = None
-    """replay size in transitions. Leave unset: it is derived from --replay_episodes. Set it only
-    to override that derivation, e.g. to reproduce a pre-v4 run's absolute buffer size."""
+    """replay size in transitions. Leave unset: it is derived from --replay_episodes. Set it only to
+    override that derivation."""
     replay_storage: str = "gpu"
     """where the replay lives: "gpu" (VRAM) or "cpu" (pinned host RAM, with a prefetch thread
     overlapping the gather and the PCIe copy with training).
 
-    Default gpu, on measurement. At the standard v4 config -- dino_patch res 168, 512 envs,
-    2 episodes at a 200-step horizon -- the single-copy buffer is 42 GiB and the whole run peaks
-    at 59.5 GiB of a 97.9 GiB card, so host storage buys nothing and costs 24% throughput (267
-    vs 333 sps over a matched 100k-step smoke). It is `obs_only_replay` rather than host storage
-    that makes this fit: the two-copy layout would be 84 GiB of buffer plus ~17 GiB of model and
-    sim, which is over the card.
+    gpu by default: at dino_patch res 168, 512 envs, 2 episodes of a 200-step horizon, the
+    single-copy buffer is 42 GiB and the run peaks at 59.5 GiB of a 97.9 GiB card, while host
+    storage costs 24% throughput (267 vs 333 sps).
 
-    Use cpu when the buffer genuinely will not fit -- dino_patch at 1024 envs (84 GiB buffer,
-    ~101 GiB total) or more than 2 episodes of retention. The prefetch keeps the penalty at ~24%
-    rather than the several-fold hit a synchronous host buffer would take."""
+    Use cpu when the buffer will not fit: dino_patch at 1024 envs (84 GiB buffer, ~101 GiB total) or
+    more than 2 episodes of retention. The prefetch holds the penalty near 24%."""
     replay_prefetch: int = 2
     """batches the replay keeps in flight when --replay_storage cpu. 0 makes sampling synchronous,
-    which is the fallback if the prefetch thread is ever suspected of masking a bug."""
+    the fallback if the prefetch thread is suspected of masking a bug."""
     obs_only_replay: bool = True
     """store each observation once and recover next_obs by an index offset, halving replay memory
-    (see sac/replay.py; unit tests in tests/test_replay.py). On by default from v4: host storage
-    is only implemented in this buffer, and the torchrl two-copy layout cannot hold 2 episodes of
-    dino tokens anywhere. --no-obs_only_replay falls back to the torchrl buffer, which forces
+    (see sac/replay.py; unit tests in tests/test_replay.py). Host storage is implemented only in
+    this buffer. --no-obs_only_replay falls back to the torchrl buffer, which forces
     --replay_storage gpu."""
     batch_size: int = 512
     """the batch size of sample from the replay memory"""
@@ -209,11 +183,11 @@ class Args:
     """the learning rate of alpha for policy"""
     encoder_lr: Optional[float] = None
     """learning rate for the encoder, trained by the critic optimizer as its own param group.
-    Defaults to q_lr. Worth lowering (~1e-4) for the transformer head: the shared encoder's
-    representation must drift slowly or the critic's value estimates destabilize."""
+    Defaults to q_lr; worth lowering (~1e-4) for the transformer head, whose representation must
+    drift slowly or the critic's value estimates destabilize."""
     grad_clip: Optional[float] = None
-    """max grad norm for the critic+encoder and actor updates. None disables. 10.0 is loose
-    enough not to shrink normal transformer-head updates, tight enough to catch divergence."""
+    """max grad norm for the critic+encoder and actor updates. None disables. 10.0 is loose enough
+    not to shrink normal transformer-head updates, tight enough to catch divergence."""
     policy_frequency: int = 4
     """the frequency of training policy (delayed)"""
     target_network_frequency: int = 1
@@ -277,7 +251,7 @@ class Args:
                 "use the torchrl two-copy buffer, but note it cannot hold 2 episodes of "
                 "dino_patch tokens in VRAM."
             )
-        # Retention in episodes -> transitions. Rounded to whole iterations by the buffer itself.
+        # Retention in episodes -> transitions; the buffer rounds to whole iterations itself.
         if self.buffer_size is None:
             from .. import config
             self.buffer_size = int(self.replay_episodes * config.EPISODE_HORIZON * self.num_envs)

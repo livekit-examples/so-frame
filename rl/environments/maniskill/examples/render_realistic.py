@@ -1,14 +1,9 @@
-"""One-off high-fidelity render: ray-traced shading + softbox lighting, just to *look at*
-the sim. Never used for training -- training keeps the fast rasterizer (see
-``RandomizationConfig.visual_fidelity`` in ``envs/base_random_env.py``), since ray
-tracing is far too slow for thousands of parallel envs.
+"""One-off high-fidelity render: ray-traced shading + softbox lighting, just to look at the sim.
 
-Run from rl/environments/maniskill/:
-    uv run python examples/render_realistic.py --shader rt-fast --out /tmp/realistic.png
-
-``--shader rt`` is full path tracing (highest quality, slowest); ``rt-fast`` is a much
-quicker denoised approximation that still looks dramatically better than ``default``
-(SAPIEN's rasterizer, which has no real shadows/reflections/GI).
+Never used for training, which keeps the fast rasterizer (see
+``RandomizationConfig.visual_fidelity`` in ``envs/base_random_env.py``). ``--shader rt`` is full path
+tracing, ``rt-fast`` a quicker denoised approximation, ``default`` SAPIEN's rasterizer (no real
+shadows/reflections/GI).
 """
 
 import sys

@@ -2,11 +2,11 @@
 
 A per-camera mapping JSON turns a raw wide-FOV frame into the view the policy trained on:
 rotate -> undistort (barrel) -> centre-crop -> resize to the sim sensor size. ``apply_mapping``
-replays it every tick; ``calibrate_camera.py`` is what fits one.
+replays it every tick; ``calibrate_camera.py`` fits one.
 
-This is the only place the mapping is interpreted. The camera stack lives here too, so the
-policy operator and the debug harness cannot disagree about which real camera feeds which sim
-camera -- they used to declare that separately.
+The only place a mapping is interpreted: a fit must be replayed by the code that fit it, or
+the real view drifts off distribution. CAMERA_STACK lives here too, so every caller agrees on
+which real camera feeds which sim camera.
 """
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ import numpy as np
 # The sim renders its sensor cameras at this resolution; a mapping's default output size.
 SIM_SENSOR_SIZE = 128
 
-# Channel order of the policy's RGB input: arm camera first, then overhead, matching the sim's
-# (wrist_camera, overhead_camera) sensor order. Each entry is (portal track, mapping file).
+# Channel order of the policy's RGB input, matching the sim's (wrist_camera, overhead_camera)
+# sensor order. This ordering decides which real camera feeds which sim camera; changing it
+# silently feeds the policy swapped views. Entries are (portal track, mapping file).
 CAMERA_STACK = (
     ("arm_camera", "arm_camera_mapping.json"),            # -> sim wrist_camera
     ("overhead_camera", "overhead_camera_mapping.json"),  # -> sim overhead_camera
@@ -35,7 +36,7 @@ def load_mapping(path) -> dict:
 
 
 def apply_mapping(image: np.ndarray, mapping: dict) -> np.ndarray:
-    """Replay a saved mapping on a raw frame (rotate, undistort, crop, resize) -> square sim-sensor image."""
+    """Replay a saved mapping on a raw frame: rotate, undistort, crop, resize -> square image."""
     rot90 = mapping["rot90"]
     if rot90:
         image = np.rot90(image, k=rot90).copy()
@@ -46,8 +47,7 @@ def apply_mapping(image: np.ndarray, mapping: dict) -> np.ndarray:
         m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
         image = cv2.warpAffine(image, m, (w, h))
 
-    # Undistort with a zoomed-out output matrix: zoom < 1 shrinks the output focal
-    # so the full rectified view of a strong barrel lens fits the fixed canvas.
+    # zoom < 1 shrinks the output focal, so a strong barrel lens fits the fixed canvas.
     f = mapping["focal_px"]
     zoom = mapping.get("zoom", 1.0)
     k = np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1]], dtype=np.float64)
@@ -69,7 +69,7 @@ def apply_mapping(image: np.ndarray, mapping: dict) -> np.ndarray:
 
 def load_mappings(mappings_dir=MAPPINGS_DIR, label="camera") -> dict[str, dict | None]:
     """Load each camera's mapping. A missing one falls back to a plain resize, which is OUT OF
-    DISTRIBUTION -- the policy trained on the rectified view, so it is loudly flagged."""
+    DISTRIBUTION, so it is flagged loudly."""
     out: dict[str, dict | None] = {}
     for track, filename in CAMERA_STACK:
         path = pathlib.Path(mappings_dir) / filename

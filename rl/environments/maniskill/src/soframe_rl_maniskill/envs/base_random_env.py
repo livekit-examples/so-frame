@@ -32,14 +32,12 @@ class RandomizationConfig:
     """Noise scale for initial robot joint positions."""
     apply_overlay: bool = False
     """Composite `rgb_overlay_path` in behind the robot and the task objects, per pixel, using a
-    segmentation render. OFF: it costs a whole extra render target and readback per camera per
-    step, plus a mask and two fp32 casts over the RGB batch, and the only background geometry in
-    this scene is the ground plane -- which config.SENSOR_FAR now culls outright, so the
-    background is already the renderer's black clear colour. That is bit-for-bit what the default
-    overlay image painted (`black_overlay.png` is 128x128 of pure zeros).
+    segmentation render. OFF: it costs an extra render target and readback per camera per step, and
+    config.SENSOR_FAR already culls the only background geometry (the ground plane), leaving the
+    black clear colour the default overlay image painted anyway.
 
-    Turn this on only to composite a REAL background photo, and then also pass an obs_mode
-    including segmentation (`--obs_mode rgb+segmentation`), which is what feeds the mask."""
+    Turn on only to composite a REAL background photo, and then also pass an obs_mode including
+    segmentation (`--obs_mode rgb+segmentation`), which is what feeds the mask."""
     rgb_overlay_path: Optional[str] = os.path.join(os.path.dirname(__file__), "black_overlay.png")
     """Path to background image. If None and apply_overlay=True, uses black background."""
     visual_fidelity: str = "raster"
@@ -53,11 +51,10 @@ class RandomizationConfig:
     gripper_damping_range: Sequence[float] = (50, 200)
     """Per-episode gripper joint damping range."""
     binary_gripper: bool = False
-    """Threshold the gripper action to its sign each step (fully open/closed only); arm/rail
-    stay continuous. Makes 'release' unambiguously fully-open. Action space stays continuous.
-    OFF by default: the reward now pays a rising ramp in gripper openness while the bar is over
-    the bin (see ``PickPlaceBin.compute_dense_reward``), and that ramp only has a gradient to
-    climb if the jaw can take intermediate positions. Set True to reproduce the v35-era runs."""
+    """Threshold the gripper action to its sign each step (fully open/closed only); arm/rail stay
+    continuous, and the action space stays continuous. OFF: the reward pays a ramp in gripper
+    openness (see ``PickPlaceBin.compute_dense_reward``), which needs intermediate jaw positions to
+    have a gradient at all."""
     arm_stiffness_range: Sequence[float] = (600, 1400)
     """Per-episode stiffness range for arm + rail joints (nominal 1e3, +-40% for sim2real).
     Set (1000, 1000) to disable."""
@@ -71,10 +68,8 @@ class RandomizationConfig:
     overhead_camera_fov: float = config.OVERHEAD_CAMERA_FOV
     """Base vertical FOV of the overhead camera, calibrated against the real rig (config.py)."""
 
-    # These FOVs define the view the policy trains on. Deploy rectifies each real camera to
-    # match, using a mapping fitted in rl/deploy/utils/ -- nothing in this tree reads or writes
-    # those mappings; the only handoff is the reference renders from
-    # examples/dump_reference_views.py.
+    # These FOVs define the view the policy trains on. Deploy rectifies each real camera to match;
+    # the only handoff is the reference renders from examples/dump_reference_views.py.
 
     # Constant camera pose corrections in the camera link's local frame (+X = view direction),
     # applied before jitter (the printed holder's CAD pose vs the actual lens pose).
@@ -87,12 +82,9 @@ class RandomizationConfig:
     overhead_camera_rot_offset: Sequence[float] = (0.0, 0.0, 0.0)
     """Constant rotation offset (roll, pitch, yaw radians, camera-local)."""
 
-    # Per-env camera jitter. All four of these are drawn ONCE PER SCENE BUILD (reconfigure) and
-    # baked into each camera's local pose on its mount link, which is why they cost nothing per
-    # step. That is the same lifetime the FOV noise below has always had; pose jitter used to be
-    # redrawn every control step, which for a single-frame policy samples the same distribution
-    # but forced a full GPU state fetch/apply round trip 10 times a second. Pass
-    # --reconfiguration_freq to resample during a run.
+    # Per-env camera jitter, drawn ONCE PER SCENE BUILD (reconfigure) and baked into each camera's
+    # local pose on its mount link, so it costs nothing per step. Pass --reconfiguration_freq to
+    # resample during a run.
     wrist_camera_pos_noise: Sequence[float] = (0.002, 0.002, 0.002)
     """Max position noise (x, y, z) meters, on top of the calibrated mount pose."""
     wrist_camera_rot_noise: Sequence[float] = (np.deg2rad(1), np.deg2rad(1), np.deg2rad(1))
@@ -111,7 +103,7 @@ class RandomizationConfig:
     def resolve(cls, cfg: Union["RandomizationConfig", dict]) -> "RandomizationConfig":
         """Merge a dict of overrides into this class's defaults (instances pass through).
 
-        The parameter is `cfg`, not `config`, so it cannot shadow the module-level
+        The parameter is `cfg`, not `config`: it must not shadow the module-level
         ``from .. import config``.
         """
         if isinstance(cfg, cls):
@@ -167,10 +159,8 @@ class BaseRandomEnv(BaseEnv):
 
     @property
     def _default_human_render_camera_configs(self):
-        # A third-person camera for videos and nothing else: the policy never sees it. Its render
-        # target is allocated per sub-scene, so at 512x512 and 1024 envs it reserved about a
-        # gigabyte of VRAM for a camera that only fires when RecordEpisode asks. Sized from
-        # config so a training run pays little and --capture_video runs can raise it.
+        # Videos only; the policy never sees it. Sized from config because its render target is
+        # allocated per sub-scene (~1 GB of VRAM at 512x512 and 1024 envs).
         pose = sapien_utils.look_at([0.5, 0.3, 0.35], [0.3, 0.0, 0.1])
         size = config.HUMAN_RENDER_RESOLUTION
         return CameraConfig("render_camera", pose, size, size, 52 * np.pi / 180, 0.01, 100)
@@ -206,10 +196,9 @@ class BaseRandomEnv(BaseEnv):
             scene.render_system.ambient_light = ambient_colors[i]
 
         if fidelity == "raster":
-            # Rasterizer stand-in for the softbox: the real lightbox is essentially shadow-free,
-            # so most light is boosted ambient + shadowless vertical fill and the single
-            # shadow-casting key is faint (~0.75:1 shadowed:lit). shadow_map_size stays small
-            # (maps allocate per env; 512^2 is plenty for 128px observations).
+            # Rasterizer stand-in for the softbox: the real lightbox is essentially shadow-free, so
+            # most light is boosted ambient + shadowless vertical fill and the single
+            # shadow-casting key is faint (~0.75:1 shadowed:lit).
             self.scene.add_directional_light(
                 [0.15, 0.1, -1], [0.4, 0.39, 0.38],
                 shadow=config.RASTER_SHADOWS, shadow_scale=2.0,
@@ -227,13 +216,10 @@ class BaseRandomEnv(BaseEnv):
     def _force_limit(self, joint, idx: int) -> float:
         """The joint's configured drive force limit, snapshotted on first use.
 
-        ``set_drive_properties`` takes stiffness, damping AND force limit together, so the
-        gain randomizers below have to pass a force limit back in. They used to pass a
-        hardcoded 100, which silently overwrote the agent's real per-joint limits (the six
-        STS3215 joints are capped at their ~3 N.m stall torque in
-        ``so101_on_frame._JOINT_FORCE_LIMITS``) every time an episode reset. Training runs
-        therefore had 33x the real servo's torque available while `domain_randomization=False`
-        evals correctly ran at 3 -- the sim2real gap the effort limit exists to close.
+        ``set_drive_properties`` takes stiffness, damping AND force limit together, so the gain
+        randomizers below must pass a force limit back in. It has to be this snapshot: passing a
+        constant instead silently overwrites the agent's real per-joint limits (the six STS3215
+        joints are capped at their ~3 N.m stall torque) on every episode reset.
         """
         if not hasattr(self, "_force_limit_snapshot"):
             self._force_limit_snapshot = {}
@@ -424,10 +410,7 @@ class BaseRandomEnv(BaseEnv):
 
 
 def _jitter_pose(rand_vals: torch.Tensor, pos_noise, rot_noise) -> Pose:
-    """Per-env (position, roll/pitch/yaw) offset pose from uniforms in [-1, 1], shape (n, 6).
-
-    Composed into a mounted camera's local pose at scene-build time, so an all-zero `rand_vals`
-    gives the identity and costs nothing."""
+    """Per-env (position, roll/pitch/yaw) offset pose from uniforms in [-1, 1], shape (n, 6)."""
     dx = pos_noise[0] * rand_vals[:, 0]
     dy = pos_noise[1] * rand_vals[:, 1]
     dz = pos_noise[2] * rand_vals[:, 2]
@@ -455,20 +438,13 @@ def _jitter_pose(rand_vals: torch.Tensor, pos_noise, rot_noise) -> Pose:
 class DualCameraEnv(BaseRandomEnv):
     """Wrist camera (follows the gripper) + static overhead camera.
 
-    Both cameras are SAPIEN-mounted directly on the URDF's calibrated camera links, so their
-    world poses are derived from the link inside the render update and there is nothing to
-    maintain per step. The calibration correction and the per-env jitter are composed into each
-    camera's LOCAL pose on that link, once, when the scene is built.
+    Both are SAPIEN-mounted directly on the URDF's calibrated camera links, so their world poses
+    come from the link inside the render update and there is nothing to maintain per step. The
+    calibration correction and the per-env jitter are composed into each camera's LOCAL pose on that
+    link, once, when the scene is built.
 
-    This replaced a pair of kinematic mount actors whose poses were rewritten every control step
-    from `link.pose * offset * jitter`. Reading a link pose and writing an actor pose on the GPU
-    backend meant `scene._gpu_fetch_all()` then `scene._gpu_apply_all()` around every step: a
-    full round trip of every env's poses, velocities, qpos, qvel and contact forces, to move two
-    cameras. The jitter is now drawn per scene build instead of per step (see
-    RandomizationConfig).
-
-    `FlattenRGBDObservationWrapper` concatenates both cameras' RGB along the channel axis
-    (`rgb` becomes H x W x 6)."""
+    `FlattenRGBDObservationWrapper` concatenates both cameras' RGB along the channel axis (`rgb`
+    becomes H x W x 6)."""
 
     @property
     def _default_sensor_configs(self):
@@ -516,11 +492,9 @@ class DualCameraEnv(BaseRandomEnv):
         return sapien.Pose(p=list(pos_offset), q=euler2quat(*rot_offset))
 
     def _camera_local_pose(self, pos_offset, rot_offset, pos_noise, rot_noise) -> Pose:
-        """A camera's pose in its mount link's frame: constant calibration correction, then
-        per-env jitter. Batched over envs, drawn from the episode RNG so a seed reproduces it.
-
-        Returns a plain `sapien.Pose` when there is no jitter to apply, so the no-randomization
-        path stays a single shared pose rather than a batched one."""
+        """A camera's pose in its mount link's frame: constant calibration correction, then per-env
+        jitter. Batched over envs, drawn from the episode RNG so a seed reproduces it. Returns a
+        plain `sapien.Pose` when there is no jitter, keeping that path a single shared pose."""
         offset = self._offset_pose(pos_offset, rot_offset)
 
         jitters = any(n > 0 for n in (*pos_noise, *rot_noise))
@@ -534,7 +508,7 @@ class DualCameraEnv(BaseRandomEnv):
         ).float()
         jitter = _jitter_pose(rand_vals, pos_noise, rot_noise)
 
-        # Both operands are explicitly (num_envs, ...) so the multiply needs no broadcasting.
+        # Both operands explicitly (num_envs, ...), so the multiply needs no broadcasting.
         base = Pose.create_from_pq(
             p=common.to_tensor(offset.p, device=self.device).float().repeat(self.num_envs, 1),
             q=common.to_tensor(offset.q, device=self.device).float().repeat(self.num_envs, 1),
