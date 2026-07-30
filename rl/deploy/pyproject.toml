@@ -26,6 +26,11 @@ dependencies = [
     "python-dotenv>=1",
 ]
 
+[dependency-groups]
+# --viz only, and only ever on the operator machine. An optional group so `uv sync` on the robot
+# host skips it; the lock still resolves it for linux aarch64, so the Jetson can sync either way.
+viz = ["pyside6-essentials>=6.8"]
+
 [tool.uv.sources]
 soframe-policy = { path = "../policy", editable = true }
 lerobot_robot_so101_slider_pos = { git = "https://github.com/pham-tuan-binh/leslider", subdirectory = "packages/lerobot_robot_so101_slider_pos", rev = "c18e50fed2eb8e4343de40a3e90cbb10eb885e04" }

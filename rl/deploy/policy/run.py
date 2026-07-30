@@ -6,6 +6,11 @@ inference, integrate the normalized delta into a running sim target, and send jo
 Claims control on startup and starts PAUSED, holding the pose. --no-start-paused drives on
 launch; --no-claim stays idle until the web UI claims it.
 
+One decision per --settle seconds, not per tick: the task is quasi-static, so after each action
+the target is held until the arm has arrived and only then is a new observation used. Deciding
+every tick committed several actions from one stale frame, which showed up as the jaw closing after
+it had already passed the cube.
+
 Debug keys (terminal or --viz window): p = pause/resume, r = reset to rest then hold paused,
 0 = ramp the rail alone to wire 0 (end of travel) for re-zeroing, q = quit.
 """
@@ -31,7 +36,9 @@ from livekit.portal import (
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from utils import bridge  # noqa: E402
-from utils.camera_mapping import CAMERA_STACK, MAPPINGS_DIR, load_mappings, rectify  # noqa: E402
+from utils.camera_mapping import (  # noqa: E402
+    CAMERA_STACK, MAPPINGS_DIR, load_mappings, rectify, stack_out_size,
+)
 from utils.common import env, load_env, mint_token, pace  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -42,55 +49,33 @@ CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "portal.yaml"
 NAME = env("OPERATOR_NAME", "policy")
 TITLE = env("OPERATOR_TITLE", "RL policy")
 
-def build_rgb(obs: Observation, mappings: dict[str, dict | None]) -> np.ndarray | None:
-    """Rectify both cameras and stack them channel-wise as the sim did; None if a frame is missing."""
+CHECKPOINT_DIR = _HERE.parent / "checkpoints"
+# --arch shorthand -> (filename, expected kind, expected pool). The expectations are checked
+# after loading: this selects a FILE, it does not tell the policy what architecture to build,
+# which the checkpoint still declares for itself. So a file swapped for a different
+# architecture fails loudly here instead of running on features it was not trained on.
+CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
+    "squint":           ("squint_ckpt.pt",            "squint",      None),
+    "dino_patch":       ("dino_patch_policy_ckpt.pt", "dino_patch",  None),
+    "dino_global_mean": ("dino_global_mean_ckpt.pt",  "dino_global", "mean"),
+    "dino_cls":         ("dino_cls_ckpt.pt",          "dino_global", "cls"),
+}
+
+def build_rgb(obs: Observation, mappings: dict[str, dict | None],
+              out_size: int) -> np.ndarray | None:
+    """Rectify both cameras and stack them channel-wise as the sim did; None if a frame is missing.
+
+    ``out_size`` forces one resolution across cameras. Without it a camera on a mapping and a
+    camera on the plain-resize fallback produce different sizes and the stack fails outright.
+    """
     chans = []
     for track, _ in CAMERA_STACK:
         vf = obs.frames.get(track)
         if vf is None:
             return None
         rgb = frame_bytes_to_numpy_rgb(vf.data, vf.width, vf.height)
-        chans.append(rectify(rgb, mappings[track]))
+        chans.append(rectify(rgb, mappings[track], out_size=out_size))
     return np.concatenate(chans, axis=-1)
-
-
-VIZ_KEYS = "[r] rest  [0] rail to wire 0  [p] pause/resume  [q] quit"
-
-
-def _viz_tile(chans, label):
-    """One camera view, upscaled to a fixed panel and labelled."""
-    import cv2
-    bgr = cv2.cvtColor(np.ascontiguousarray(chans), cv2.COLOR_RGB2BGR)
-    up = cv2.resize(bgr, (256, 256), interpolation=cv2.INTER_NEAREST)
-    cv2.putText(up, label, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-    return up
-
-
-def viz_grid(rgb, status: str, net_res: int):
-    """Rectified views over what the encoder gets, or a placard saying why not (rgb=None)."""
-    import cv2
-    if rgb is None:
-        grid = np.zeros((512, 512, 3), dtype=np.uint8)
-        cv2.putText(grid, "NO FRAME INCOMING", (74, 250), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9, (60, 60, 220), 2)
-    else:
-        wrist, overhead = rgb[..., 0:3], rgb[..., 3:6]
-        src = wrist.shape[0]
-        # Lower row is the encoder's input resolution, so a mapping that does not match the
-        # checkpoint shows up as a visibly upsampled tile.
-        small = [cv2.resize(c, (net_res, net_res), interpolation=cv2.INTER_AREA)
-                 for c in (wrist, overhead)]
-        grid = np.vstack([
-            np.hstack([_viz_tile(wrist, f"wrist {src}"), _viz_tile(overhead, f"overhead {src}")]),
-            np.hstack([_viz_tile(small[0], f"wrist {net_res}"),
-                       _viz_tile(small[1], f"overhead {net_res}")]),
-        ])
-    bar = np.zeros((30, grid.shape[1], 3), dtype=np.uint8)
-    cv2.putText(bar, status, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
-    # Legend: the keys work in this window as well as the terminal.
-    legend = np.full((30, grid.shape[1], 3), 32, dtype=np.uint8)
-    cv2.putText(legend, VIZ_KEYS, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (210, 210, 210), 1)
-    return np.vstack([grid, bar, legend])
 
 
 def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> dict:
@@ -102,8 +87,8 @@ def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> d
     }
 
 
-async def main(claim: bool = True, start_paused: bool = True, max_lag: float | None = None,
-               binary_gripper: bool = False, viz: bool = False) -> None:
+async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.3,
+               binary_gripper: bool = False, viz: bool = False, arch: str | None = None) -> None:
     load_env(_HERE)
     gripper_idx = bridge.JOINT_KEYS.index("gripper.pos")
     url = env("LIVEKIT_URL", required=True)
@@ -112,7 +97,47 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
     checkpoint = env("POLICY_CHECKPOINT", required=True)
 
     policy = Policy(checkpoint, device=env("POLICY_DEVICE", "") or None)
+    if arch:
+        _, want_kind, want_pool = CHECKPOINTS[arch]
+        got_kind = policy.meta["kind"]
+        got_pool = (policy.meta.get("encoder_kwargs") or {}).get("pool")
+        if got_kind != want_kind or (want_pool is not None and got_pool != want_pool):
+            raise SystemExit(
+                f"[policy-{NAME}] --arch {arch} expects {want_kind}"
+                + (f"/pool={want_pool}" if want_pool else "")
+                + f", but {checkpoint} contains {got_kind}"
+                + (f"/pool={got_pool}" if got_pool else "")
+                + ". The file was replaced with a different architecture; pass --checkpoint "
+                  "explicitly if that is deliberate."
+            )
     mappings = load_mappings(label=f"policy-{NAME}")
+
+    net_res = policy.meta["res"]
+    # One resolution for every camera. Prefer what the mappings were fitted at; with none fitted,
+    # fall back to the checkpoint's own input size rather than a constant, so an uncalibrated run is
+    # at least not upsampling on top of being out of distribution.
+    stack_res = stack_out_size(mappings, default=net_res)
+    if stack_res != net_res:
+        print(f"[policy-{NAME}] camera views are {stack_res}px but the encoder wants {net_res}px; "
+              f"it will resample. Refit the mappings with --sim-size {net_res} to feed it natively.")
+
+    # Warm the encoder BEFORE connecting. dino_patch fetches its frozen backbone from torch.hub on
+    # the FIRST act(), which blocks for seconds; doing that mid-episode stalls the event loop and
+    # the portal stops delivering observations while it happens.
+    _t0 = time.perf_counter()
+    policy.act(np.zeros((stack_res, stack_res, 3 * policy.num_cams), np.uint8),
+               build_proprio(bridge.SIM_REST, bridge.SIM_REST))
+    first_ms = (time.perf_counter() - _t0) * 1e3
+    _t0 = time.perf_counter()
+    policy.act(np.zeros((stack_res, stack_res, 3 * policy.num_cams), np.uint8),
+               build_proprio(bridge.SIM_REST, bridge.SIM_REST))
+    steady_ms = (time.perf_counter() - _t0) * 1e3
+    budget_ms = 1000.0 / fps
+    print(f"[policy-{NAME}] encoder warm: first call {first_ms:.0f} ms, then {steady_ms:.0f} ms "
+          f"per tick of a {budget_ms:.0f} ms budget")
+    if steady_ms > 0.6 * budget_ms:
+        print(f"[policy-{NAME}] inference is using >60% of the tick budget. It runs off the event "
+              "loop so the stream stays alive, but set POLICY_DEVICE=mps for real headroom.")
 
     op = Operator(OperatorConfig.from_yaml_file(CONFIG_PATH, room))
     latest_obs: Observation | None = None
@@ -128,9 +153,19 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
     # Running integrated target (sim units), seeded from the first measured qpos on claim.
     sim_target: dict[str, float] | None = None
 
+    obs_stats = {"n": 0, "t": 0.0, "with_frames": 0}
+    # Decision clock. The loop keeps ticking at fps (stream, keys, viz); inference happens only
+    # once `settle` has elapsed since the last action landed.
+    decide = {"next": 0.0, "n": 0, "t0": 0.0}
+    last_action = None      # shown in --viz between decisions, when no new one was computed
+
     def on_observation(obs: Observation) -> None:
         nonlocal latest_obs
         latest_obs = obs
+        obs_stats["n"] += 1
+        obs_stats["t"] = time.perf_counter()
+        if all(obs.frames.get(t) is not None for t, _ in CAMERA_STACK):
+            obs_stats["with_frames"] += 1
 
     def on_active_operator_changed(identity: str | None) -> None:
         nonlocal sim_target
@@ -164,6 +199,15 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             reset_wait["ticks"], reset_wait["deadline"] = 0, 0.0
             print(f"[policy-{NAME}] RESET -- ramping to the rest pose (slider mid), "
                   "will hold PAUSED once settled (stage the scene, then p to run)")
+        elif ch == "k":
+            # PARK, not rest: a folded pose to leave the arm idle in, gripper open. Unpausing from
+            # here starts the policy outside its trained initial state, so stage with r instead.
+            goal.clear()
+            goal.update(bridge.clamp_sim(bridge.real_to_sim(bridge.PARK_REAL)))
+            mode["state"], mode["label"] = "resetting", "park"
+            reset_wait["ticks"], reset_wait["deadline"] = 0, 0.0
+            print(f"[policy-{NAME}] PARK -- ramping to the folded park pose, gripper open; "
+                  "will hold PAUSED once settled (r stages a rollout instead)")
         elif ch == "0":
             # The rail's sim low limit is wire 0, the end of travel for re-zeroing. Arm holds.
             goal.clear()
@@ -235,17 +279,25 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             stdin_fd,
             lambda: keys.put_nowait(os.read(stdin_fd, 1).decode(errors="ignore")),
         )
-        print(f"[policy-{NAME}] keys: {VIZ_KEYS}")
+        print(f"[policy-{NAME}] keys: p pause/resume  r rest  k park  0 zero rail  q quit")
 
     empty = 0
+    win = None
     if viz:
-        import cv2
-        cv2.namedWindow(f"policy-{NAME} view", cv2.WINDOW_NORMAL)
-        print(f"[policy-{NAME}] --viz: showing the two rectified camera views (press q to close)")
+        try:
+            from PySide6 import QtWidgets
 
-    net_res = policy.meta["res"]
+            import viz as vizmod          # policy/viz.py, needs `uv sync --group viz`
+        except ImportError as exc:
+            raise SystemExit(f"--viz needs the ui toolkit: uv sync --group viz  ({exc})")
+        QtWidgets.QApplication([])
+        win = vizmod.Window([t for t, _ in CAMERA_STACK],
+                            [k.split(".")[0] for k in bridge.JOINT_KEYS])
+        win.show()
+        print(f"[policy-{NAME}] --viz open")
+
     try:
-        async for _ in pace(fps):
+        async for tick in pace(fps):
             quit_requested = False
             while not keys.empty():
                 if not apply_key(keys.get_nowait()):
@@ -254,21 +306,41 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
                 break
             obs = latest_obs
             # Rectify before the early-outs so an unclaimed policy still previews its view.
-            rgb = build_rgb(obs, mappings) if obs is not None else None
+            rgb = build_rgb(obs, mappings, stack_res) if obs is not None else None
 
-            if viz:
+            if win is not None:
                 if not control["enabled"]:
-                    status = "UNCLAIMED -- waiting for the web UI to claim (--no-claim was set)"
+                    status, alarm = "Unclaimed", True
                 elif obs is None:
-                    status = "no observations -- is the robot in this room?"
+                    status, alarm = "No observations", True
                 elif rgb is None:
-                    status = "connected, waiting for both camera frames"
+                    status, alarm = "Waiting for both cameras", True
                 else:
-                    status = f"{mode['state'].upper()} -- driving at {fps} Hz"
-                cv2.imshow(f"policy-{NAME} view", viz_grid(rgb, status, net_res))
-                k = cv2.waitKey(1) & 0xFF
-                if k != 255 and not apply_key("q" if k == 27 else chr(k)):
+                    status, alarm = mode["state"].capitalize(), False
+                elapsed = time.perf_counter() - decide["t0"] if decide["t0"] else 0.0
+                rows = []
+                if sim_target is not None and obs is not None:
+                    meas = bridge.real_to_sim(dict(obs.state))
+                    rows = [
+                        (k.split(".")[0],
+                         None if last_action is None else last_action[i],
+                         (sim_target[k] - meas[k]) / bridge.DELTA_LIMIT[k] if k in meas else 0.0)
+                        for i, k in enumerate(bridge.JOINT_KEYS)
+                    ]
+                win.show_stack(rgb)
+                win.set_state(
+                    status, alarm,
+                    f"decide {decide['n']} @ "
+                    f"{decide['n']/elapsed if elapsed > 0.5 else 0:.1f}/s    "
+                    f"settle {settle:.2f}s    stack {stack_res} -> {net_res} px    "
+                    f"obs #{obs_stats['n']}",
+                    rows)
+                win.step()
+                if win.closed:
                     break
+                for ch in win.take_keys():
+                    if not apply_key(ch):
+                        raise KeyboardInterrupt
 
             if not control["enabled"]:
                 continue
@@ -281,16 +353,37 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             empty = 0
 
             sim_qpos = bridge.real_to_sim(dict(obs.state))
-            if rgb is None:
-                continue  # wait for both camera frames
 
             # Seed the target from the current pose on (re)claim/resume. Must sit AFTER
             # viz-window key handling, which can clear sim_target mid-tick.
             if sim_target is None:
                 sim_target = dict(sim_qpos)
 
+            if tick % fps == 0:
+                age = (time.perf_counter() - obs_stats["t"]) * 1e3 if obs_stats["t"] else -1
+                have = [t for t, _ in CAMERA_STACK
+                        if obs is not None and obs.frames.get(t) is not None]
+                elapsed = time.perf_counter() - decide["t0"] if decide["t0"] else 0.0
+                rate = decide["n"] / elapsed if elapsed > 0.5 else 0.0
+                print(f"[policy-{NAME}] {mode['state']:<10} obs#{obs_stats['n']} "
+                      f"({obs_stats['with_frames']} with both frames) last {age:.0f}ms ago; "
+                      f"frames now: {have or 'NONE'}; rgb={'yes' if rgb is not None else 'None'}; "
+                      f"decisions {decide['n']} @ {rate:.1f}/s")
+
             if mode["state"] == "paused":
-                continue  # servos hold the last target
+                # Hold by COMMANDING the current target every tick, not by falling silent.
+                # Silence stalled the stream: pause was the only state that never called
+                # send_action, and every action carries in_reply_to_ts_us, so with nothing
+                # replying the portal's state buffer fills ("state buffer full (5), dropped 1
+                # oldest") and stops pairing states with frames. Observations dry up, the view
+                # freezes, and it only recovers on reset because reset resumes sending.
+                # Re-sending the same target is a no-op for the servos, which already latch it.
+                op.send_action(
+                    bridge.sim_to_real(sim_target),
+                    timestamp_us=int(time.time() * 1_000_000),
+                    in_reply_to_ts_us=obs.timestamp_us,
+                )
+                continue
 
             if mode["state"] == "resetting":
                 # Ramp the goal joints at the trained per-tick speed; the rest hold their target.
@@ -329,8 +422,32 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
                           "then p to start the policy")
                 continue
 
+            # Quasi-static task: after each action, hold the target and let the arm arrive before
+            # looking again. Deciding every tick meant several actions were committed from the same
+            # stale frame, so the jaw closed after it had already passed the cube. Waiting costs
+            # nothing here and it puts each decision on a pose the arm has actually reached, which
+            # is the situation training had (sim tracks its target within one step).
+            now = time.perf_counter()
+            if now < decide["next"]:
+                op.send_action(
+                    bridge.sim_to_real(sim_target),
+                    timestamp_us=int(time.time() * 1_000_000),
+                    in_reply_to_ts_us=obs.timestamp_us,
+                )
+                continue
+
+            # Only inference needs pixels. r/k/0 are joint-only ramps and must not be blocked on
+            # a camera, or a dropped frame silently turns them into no-ops.
+            if rgb is None:
+                continue
+
             try:
-                action = policy.act(rgb, build_proprio(sim_qpos, sim_target))
+                # OFF the event loop. policy.act() is synchronous torch; on CPU it is ~90 ms of a
+                # 100 ms tick, and running it inline meant the loop never reached an await, so the
+                # portal's observation callbacks never fired and the video froze for exactly as long
+                # as the policy was driving. In a thread, callbacks keep arriving during inference.
+                action = await asyncio.to_thread(
+                    policy.act, rgb, build_proprio(sim_qpos, sim_target))
             except Exception as exc:
                 print(f"[policy-{NAME}] inference error: {exc}")
                 continue
@@ -339,6 +456,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             # trained. Off by default, matching the continuous-gripper training default.
             if binary_gripper:
                 action[gripper_idx] = 1.0 if float(action[gripper_idx]) > 0 else -1.0
+            last_action = action
 
             # Integrate the delta, clamp to joint limits, convert to real units, send.
             stepped = {
@@ -346,14 +464,11 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
                 for i, k in enumerate(bridge.JOINT_KEYS)
             }
             sim_target = bridge.clamp_sim(stepped)
-            # --max-lag: cap how far the target may lead the measured pose, per joint, in
-            # per-step deltas.
-            if max_lag is not None:
-                sim_target = {
-                    k: min(sim_qpos[k] + max_lag * bridge.DELTA_LIMIT[k],
-                           max(sim_qpos[k] - max_lag * bridge.DELTA_LIMIT[k], sim_target[k]))
-                    for k in bridge.JOINT_KEYS
-                }
+            decide["next"] = time.perf_counter() + settle
+            decide["n"] += 1
+            if not decide["t0"]:
+                decide["t0"] = time.perf_counter()
+
             real_target = bridge.sim_to_real(sim_target)
             op.send_action(
                 real_target,
@@ -367,9 +482,8 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
             import termios
             loop.remove_reader(stdin_fd)
             termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_termios)
-        if viz:
-            import cv2
-            cv2.destroyAllWindows()
+        if win is not None:
+            win.close()
         try:
             await op.disconnect()
         finally:
@@ -379,19 +493,24 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float | N
 def cli() -> None:
     """Console-script entry point."""
     parser = argparse.ArgumentParser(description="Run a trained RL policy on the real rig over LiveKit Portal.")
+    parser.add_argument("--arch", choices=sorted(CHECKPOINTS),
+                        help="run the named checkpoint from checkpoints/. Shorthand for "
+                             "--checkpoint; the loaded file still declares its own architecture, "
+                             "and a mismatch with the name is an error.")
     parser.add_argument("--checkpoint", default=os.environ.get("POLICY_CHECKPOINT"),
-                        help="path to a trained checkpoint .pt (env: POLICY_CHECKPOINT). It "
-                             "records its own architecture, resolution and proprio layout.")
+                        help="explicit path to a checkpoint .pt (env: POLICY_CHECKPOINT), for "
+                             "files outside checkpoints/. Overrides --arch.")
     parser.add_argument("--claim", action=argparse.BooleanOptionalAction, default=True,
                         help="claim control on startup, so the debug keys work with no web UI "
                              "(default). --no-claim stays idle until the web UI claims it.")
     parser.add_argument("--start-paused", action=argparse.BooleanOptionalAction, default=True,
                         help="claim but hold the pose until you press p (default). "
                              "--no-start-paused MOVES THE ROBOT as soon as frames arrive.")
-    parser.add_argument("--max-lag", type=float, default=None,
-                        help="anti-oscillation: cap how far the target may lead the measured "
-                             "pose, in per-step deltas (e.g. 2.0), so it cannot overshoot "
-                             "ahead of a slower arm.")
+    parser.add_argument("--settle", type=float, default=0.3, metavar="SECONDS",
+                        help="wait this long after each action before deciding again, holding the "
+                             "target meanwhile (default 0.3). The task is quasi-static, so waiting "
+                             "costs nothing and it makes every decision use an observation the arm "
+                             "has actually reached, as in sim. 0 decides every tick.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
                              "matching the continuous-gripper training default; must match how "
@@ -400,10 +519,21 @@ def cli() -> None:
                         help="show the two rectified camera views (what the policy sees) in an "
                              "OpenCV window while driving; press q to close")
     args = parser.parse_args()
+    # An explicit path wins over the shorthand, which wins over the env var.
     if args.checkpoint:
         os.environ["POLICY_CHECKPOINT"] = args.checkpoint
-    asyncio.run(main(claim=args.claim, start_paused=args.start_paused, max_lag=args.max_lag,
-                     binary_gripper=args.binary_gripper, viz=args.viz))
+        args.arch = None
+    elif args.arch:
+        path = CHECKPOINT_DIR / CHECKPOINTS[args.arch][0]
+        if not path.exists():
+            raise SystemExit(f"--arch {args.arch} expects {path}, which does not exist. "
+                             "Pull it from the training box or pass --checkpoint.")
+        os.environ["POLICY_CHECKPOINT"] = str(path)
+    elif not os.environ.get("POLICY_CHECKPOINT"):
+        raise SystemExit("pass --arch {" + ",".join(sorted(CHECKPOINTS))
+                         + "}, or --checkpoint <path>, or set POLICY_CHECKPOINT.")
+    asyncio.run(main(claim=args.claim, start_paused=args.start_paused, settle=args.settle,
+                     binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 
 if __name__ == "__main__":
