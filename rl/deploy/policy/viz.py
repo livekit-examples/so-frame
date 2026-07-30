@@ -173,7 +173,7 @@ class _Actions(QtWidgets.QWidget):
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names, max_lag=None, rail_step=7.0, groups=None):
+    def __init__(self, cameras, joint_names, max_lag=1.0, rail_step=7.0, gated=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -215,26 +215,21 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
-        # One budget per group, live: how far that group's target may lead its joints, which is both
-        # how fast it may glide and when the next decision fires. The bars right here are the
-        # readout, so dial each to just above where its ticks stop going red.
-        # joint name -> the group whose budget it answers to; anything unlisted is unbounded.
-        self._group_of = {n.split(".")[0]: g for g, keys in (groups or {}).items() for n in keys}
-        self._gates: dict[str, _Value] = {}
-        for group, value in dict(max_lag or {"arm": 1.0, "rail": 2.0}).items():
-            self._gates[group] = _Value(LAG_MIN, LAG_MAX, 0.05, 2, value)
-            lab = QtWidgets.QLabel(f"{group} lag")
-            lab.setStyleSheet(f"color:{MUTED};")
-            buttons.addWidget(lab)
-            buttons.addWidget(self._gates[group])
+        # Live, because the value that works depends on the arm: how far the target may lead it,
+        # which is both how far it may glide between decisions and when the next one fires. The bars
+        # right here are the readout, so dial it to just above where the ticks stop going red.
+        # Joints outside `gated` (the gripper) are unbounded and never shown red.
+        self._gated = {k.split(".")[0] for k in (gated or ())}
+        self._lag = _Value(LAG_MIN, LAG_MAX, 0.05, 2, max_lag)
         # How far one full-command action moves the carriage. Here because it is the figure in the
         # action contract that was never measured, and because moving it while watching the rail is
         # the measurement. It rescales rail lag too, since lag is counted in these steps.
         self._rail_step = _Value(1.0, 20.0, 0.5, 1, rail_step)
-        lab = QtWidgets.QLabel("rail step (mm)")
-        lab.setStyleSheet(f"color:{MUTED};")
-        buttons.addWidget(lab)
-        buttons.addWidget(self._rail_step)
+        for text, widget in (("max lag", self._lag), ("rail step (mm)", self._rail_step)):
+            lab = QtWidgets.QLabel(text)
+            lab.setStyleSheet(f"color:{MUTED};")
+            buttons.addWidget(lab)
+            buttons.addWidget(widget)
 
         inner = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(inner)
@@ -265,9 +260,9 @@ class Window(QtWidgets.QWidget):
         """Service Qt from the caller's loop. Nothing else drives this window."""
         QtWidgets.QApplication.instance().processEvents()
 
-    def max_lag(self) -> dict:
-        """Per-group lag budget in action steps, as currently dialled in."""
-        return {g: v.value() for g, v in self._gates.items()}
+    def max_lag(self) -> float:
+        """Lag budget in action steps, as currently dialled in."""
+        return self._lag.value()
 
     def rail_step(self) -> float:
         """Millimetres of carriage travel per full-command action, as currently dialled in."""
@@ -282,9 +277,8 @@ class Window(QtWidgets.QWidget):
         for i, panel in enumerate(self.panels.values()):
             panel.show_rgb(None if rgb is None else rgb[:, :, 3 * i:3 * i + 3])
 
-    def set_state(self, status: str, alarm: bool, info: str, act_rows, thresholds=None) -> None:
+    def set_state(self, status: str, alarm: bool, info: str, act_rows, threshold=1.0) -> None:
         self.status.setText(status)
         self.status.setStyleSheet(f"color:{ALARM if alarm else FG};")
         self.info.setText(info)
-        by_joint = {n: (thresholds or {}).get(g) for n, g in self._group_of.items()}
-        self.actions.set_rows(act_rows, by_joint)
+        self.actions.set_rows(act_rows, {n: threshold for n in self._gated})

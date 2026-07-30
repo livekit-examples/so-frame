@@ -29,9 +29,9 @@ until you press `p`. `--no-start-paused` drives on launch; `--no-claim` sits idl
 claims it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0` ramp the rail
 alone to wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` opens a window
 (`uv sync --group viz`) with the two rectified views the encoder is fed, a bar per joint for the
-last action and how far it lags its target, the same keys as buttons, and live **arm lag**, **rail
-lag** and **rail step** sliders. It appears even with no frames arriving, so you can tell connected
-from stalled.
+last action and how far it lags its target, the same keys as buttons, and live **max lag** and
+**rail step** sliders. It appears even with no frames arriving, so you can tell connected from
+stalled.
 
 `--arch` picks a checkpoint from `checkpoints/` by name:
 
@@ -51,60 +51,51 @@ told apart by loading alone. `--checkpoint <path>` still takes anything outside 
 An action is a delta per control period, which is to say a velocity: sim integrated one every
 100 ms step. Deploy does the same, so an action keeps being applied every tick until a new one
 replaces it, and a decision replaces the velocity rather than being the only thing that produces
-motion.
+motion. Applying it once and freezing the target meant the arm stalled between decisions.
 
-What bounds it is a per-group lag budget, `--max-lag-arm DELTAS` (default 1.0) and
-`--max-lag-rail DELTAS` (default 2.0): a group's target advances only while it is within that many
-action steps of its joints' measured pose. So the target can never run away from a slower arm, which
-is what had the jaw closing after it had already passed the cube, and it makes the target a
-velocity-clamped ramp instead. A new decision fires once every group is inside its budget.
+`--max-lag DELTAS` (default 1.0) bounds it: the target advances only while every gated joint is
+within that many action steps of its measured pose. So the target cannot run away from a slower arm,
+which is what had the jaw closing after it had already passed the cube; it is a velocity-clamped
+ramp instead. The same number is the decision gate, since a new action is computed once the arm is
+back inside the budget.
 
-Each group carries its own budget, which is the point: the rail keeps gliding at its commanded speed
-while the arm is being waited on. Timing a 0.49 m traverse at 10 Hz with the arm as the slow
-mechanism (arm joints close 15% of their gap per tick, rail 80%):
+The budget is a real bound, not advice. Timing a 0.49 m rail traverse at 10 Hz with everything
+tracking 15% of its gap per tick:
 
-| target between decisions | decisions/s | rail speed | traverse |
-|---|---|---|---|
-| frozen | 2.7 | 1.85 cm/s | 26.7 s |
-| velocity hold | 2.4 | 6.88 cm/s | 7.2 s |
-
-Same decision rate, 3.7x the rail speed, and 6.88 cm/s is the 7.0 cm/s ceiling the rail was trained
-at. A frozen target moved the carriage at `decisions/s x 7 mm`, so a slow *arm* joint throttled
-the *rail*, a coupling nothing about the mechanism justifies.
-
-When the rail is the slow mechanism its own budget is what matters, and it is a real bound rather
-than advice. Same traverse with the rail also at 15%/tick:
-
-| rail budget | rail speed | traverse | peak rail lag |
-|---|---|---|---|
-| 0.5 | 1.00 cm/s | 49.4 s | 1.25 |
-| 1.0 | 1.55 cm/s | 31.8 s | 1.68 |
-| 2.0 | 2.60 cm/s | 19.0 s | 2.54 |
-| 4.0 | 4.53 cm/s | 10.9 s | 4.12 |
+| budget | decisions/s | rail speed | traverse | peak lag |
+|---|---|---|---|---|
+| 0.5 | 1.4 | 1.00 cm/s | 49.4 s | 1.25 |
+| 1.0 | 2.3 | 1.55 cm/s | 31.8 s | 1.68 |
+| 2.0 | 3.8 | 2.60 cm/s | 19.0 s | 2.54 |
+| 4.0 | 6.8 | 4.53 cm/s | 10.9 s | 4.12 |
 
 Peak lag never exceeds the budget by more than the one step an action adds, so nothing runs away.
+Note what one budget costs: it is a single flag over all the gated joints, so while one slow arm
+joint is over budget the rail does not advance either, even though nothing about the mechanism
+couples them. Raising the budget is the lever, and it loosens the arm at the same time.
 
-A joint that physically cannot arrive (a stop, a dead servo) would leave its group's budget spent
-forever, so decisions fall back to a 1 s timeout. Motion does not stop while waiting: that is what
-the integration is. The per-second line reports `<group> lag L/MAX (joint)` per group plus
-`N gate timeouts`; steady timeouts on one joint mean its budget is stricter than the hardware.
+A joint that physically cannot arrive (a stop, a dead servo) would leave the budget spent forever,
+so decisions fall back to a 1 s timeout. The per-second line reports `lag L/MAX (joint)` plus
+`N gate timeouts`; steady timeouts on one joint mean the budget is stricter than the hardware.
 
-Two things are deliberately excluded. **The gripper gets no budget**: its whole range is 9.6 action
+Two things are deliberately excluded. **The gripper is exempt**: its whole range is 9.6 action
 steps, so a jaw closed on the object sits several steps short of its command for as long as it
-holds, and a position servo only pushes as hard as the distance it is asked to close, so holding its
-target back would bleed grip force. Its action is applied once per decision rather than sustained,
-since nothing bounds it. **Nothing advances without frames**: a lost camera must not mean the arm
-keeps gliding blind on a stale command.
+holds, and a
+position servo only pushes as hard as the distance it is asked to close, so holding its target back
+would bleed grip force. Its action applies once per decision rather than being sustained, since
+nothing bounds it. **Nothing advances without frames**: a lost camera must not mean the arm keeps
+gliding blind on a stale command.
 
 `--rail-step MM` (default 7.0, the trained value) is how far one full-command action moves the
 carriage, and therefore its top speed per control period and the unit rail lag is counted in. It is
 the one figure in the action contract that came off a control UI rather than a measurement, so the
 viz exposes it as a slider: drag it while watching the rail to find what the carriage actually does
-per step. Speed follows it linearly (3.5 mm gives 3.47 cm/s, 14 mm gives 13.53 cm/s). Changing it
-runs the policy on a different action space than it trained on, which is the trade you are making.
+per step. Changing it runs the policy on a different action space than it trained on, which the
+startup line says out loud.
 
-With `--viz` open the window's sliders take over all three values, and each joint's tick turns red
-once its group's budget is spent, so the bars show which joint the next decision is waiting on.
+With `--viz` open the window's **max lag** and **rail step** sliders take over both values, and each
+gated joint's tick turns red once the budget is spent, so the bars show which joint the next
+decision is waiting on.
 
 On a Mac set `POLICY_DEVICE=mps`: the default device pick is cuda-or-cpu, so a DINOv2 checkpoint
 would otherwise run on the CPU.

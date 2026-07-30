@@ -7,12 +7,11 @@ Claims control on startup and starts PAUSED, holding the pose. --no-start-paused
 launch; --no-claim stays idle until the web UI claims it.
 
 An action is a delta per control period, so it is a velocity: it keeps being integrated every tick
-until a new one replaces it, as sim did. What bounds it is a per-group lag budget, --max-lag-arm and
---max-lag-rail in action steps: a group's target advances only while it is within that far of the
-joint's measured pose. So the target can never run away from a slower arm, which is what had the jaw
-closing after it passed the cube, and the rail keeps gliding at its commanded speed while the arm is
-being waited on. A new decision happens once every group is inside its budget. --viz changes both
-budgets live while the arm moves.
+until a new one replaces it, as sim did. What bounds it is --max-lag, in action steps: the target
+advances only while it is within that far of the measured pose. So it can never run away from a
+slower arm, which is what had the jaw closing after it passed the cube, and the arm keeps moving
+between decisions instead of stalling. A new decision happens once the arm is back inside the
+budget. --viz changes the budget and the rail's step size live while the arm moves.
 
 Debug keys (terminal or --viz window): p = pause/resume, r = reset to rest then hold paused,
 0 = ramp the rail alone to wire 0 (end of travel) for re-zeroing, q = quit.
@@ -64,19 +63,11 @@ CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
     "dino_cls":         ("dino_cls_ckpt.pt",          "dino_global", "cls"),
 }
 
-# Which joints each lag budget covers. The rail and the arm get their own because they are
-# different mechanisms: a belt-driven carriage crossing 117 steps of travel does not converge like
-# a direct position servo moving one of 2.86 deg.
-#
-# The gripper is in NEITHER group, deliberately. Its whole range is 9.6 steps, so a jaw closed on
-# the object sits several steps short of its commanded position for as long as it holds, and no
-# useful budget would ever clear. Holding its target back would also bleed grip force, since a
-# position servo only pushes as hard as the distance it is asked to close.
-LAG_GROUPS: dict[str, tuple[str, ...]] = {
-    "rail": (bridge.RAIL,),
-    "arm": tuple(k for k in bridge.JOINT_KEYS if k not in (bridge.RAIL, "gripper.pos")),
-}
-GROUP_OF: dict[str, str] = {k: g for g, keys in LAG_GROUPS.items() for k in keys}
+# Joints the lag budget covers: everything but the gripper. Its whole range is 9.6 steps, so a jaw
+# closed on the object sits several steps short of its commanded position for as long as it holds,
+# and no useful budget would ever clear. Holding its target back would also bleed grip force, since
+# a position servo only pushes as hard as the distance it is asked to close.
+GATED: tuple[str, ...] = tuple(k for k in bridge.JOINT_KEYS if k != "gripper.pos")
 
 # The rail's trained per-step delta, in mm. A full-command action moves the carriage this far in one
 # control period, so it is also its top speed in mm per 100 ms.
@@ -98,19 +89,16 @@ def deltas(rail_step_mm: float) -> dict[str, float]:
     return out
 
 
-def joint_lag(sim_target: dict, sim_qpos: dict, delta: dict) -> dict[str, tuple[float, str]]:
-    """Worst lag per group, in action steps, with the joint responsible."""
-    out = {}
-    for group, keys in LAG_GROUPS.items():
-        worst, who = 0.0, "-"
-        for k in keys:
-            if k not in sim_qpos:
-                continue
-            d = abs(sim_target[k] - sim_qpos[k]) / delta[k]
-            if d > worst:
-                worst, who = d, k.split(".")[0]
-        out[group] = (worst, who)
-    return out
+def joint_lag(sim_target: dict, sim_qpos: dict, delta: dict) -> tuple[float, str]:
+    """Worst lag across the gated joints, in action steps, with the joint responsible."""
+    worst, who = 0.0, "-"
+    for k in GATED:
+        if k not in sim_qpos:
+            continue
+        d = abs(sim_target[k] - sim_qpos[k]) / delta[k]
+        if d > worst:
+            worst, who = d, k.split(".")[0]
+    return worst, who
 
 
 def build_rgb(obs: Observation, mappings: dict[str, dict | None],
@@ -140,11 +128,9 @@ def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> d
 
 
 async def main(claim: bool = True, start_paused: bool = True,
-               max_lag_arm: float = 1.0, max_lag_rail: float = 2.0,
-               rail_step: float = RAIL_STEP_MM,
+               max_lag: float = 1.0, rail_step: float = RAIL_STEP_MM,
                binary_gripper: bool = False, viz: bool = False, arch: str | None = None) -> None:
     load_env(_HERE)
-    max_lag = {"arm": max_lag_arm, "rail": max_lag_rail}
     delta = deltas(rail_step)
     if abs(rail_step - RAIL_STEP_MM) > 1e-6:
         print(f"[policy-{NAME}] rail step {rail_step:.1f} mm, not the trained "
@@ -220,8 +206,7 @@ async def main(claim: bool = True, start_paused: bool = True,
     # once the arm has caught up with the target it was last given. `lag` is the worst joint's
     # shortfall in action-step units, `held` counts ticks spent waiting, `timeouts` counts the
     # times a joint never got there.
-    decide = {"last": 0.0, "n": 0, "t0": 0.0, "held": 0, "timeouts": 0,
-              "lag": {g: (0.0, "-") for g in LAG_GROUPS}}
+    decide = {"last": 0.0, "n": 0, "t0": 0.0, "held": 0, "timeouts": 0, "lag": 0.0, "worst": "-"}
     last_action = None      # the velocity currently in force; integrated every tick until replaced
 
     def on_observation(obs: Observation) -> None:
@@ -361,7 +346,7 @@ async def main(claim: bool = True, start_paused: bool = True,
         QtWidgets.QApplication([])
         win = vizmod.Window([t for t, _ in CAMERA_STACK],
                             [k.split(".")[0] for k in bridge.JOINT_KEYS],
-                            max_lag=max_lag, rail_step=rail_step, groups=LAG_GROUPS)
+                            max_lag=max_lag, rail_step=rail_step, gated=GATED)
         win.show()
         print(f"[policy-{NAME}] --viz open")
 
@@ -406,12 +391,11 @@ async def main(claim: bool = True, start_paused: bool = True,
                     status, alarm,
                     f"decide {decide['n']} @ "
                     f"{decide['n']/elapsed if elapsed > 0.5 else 0:.1f}/s    "
-                    "  ".join(f"{g} {v:.2f}/{max_lag[g]:.2f} ({who})"
-                              for g, (v, who) in decide["lag"].items())
+                    f"lag {decide['lag']:.2f}/{max_lag:.2f} ({decide['worst']})"
                     + f"    waits {decide['held']}  timeouts {decide['timeouts']}"
                     + f"    rail step {rail_step:.1f} mm"
                     + f"    stack {stack_res} -> {net_res} px    obs #{obs_stats['n']}",
-                    rows, thresholds=max_lag)
+                    rows, threshold=max_lag)
                 win.step()
                 if win.closed:
                     break
@@ -446,9 +430,8 @@ async def main(claim: bool = True, start_paused: bool = True,
                       f"({obs_stats['with_frames']} with both frames) last {age:.0f}ms ago; "
                       f"frames now: {have or 'NONE'}; rgb={'yes' if rgb is not None else 'None'}; "
                       f"decisions {decide['n']} @ {rate:.1f}/s; "
-                      + ", ".join(f"{g} lag {v:.2f}/{max_lag[g]:.2f} ({who})"
-                                  for g, (v, who) in decide["lag"].items())
-                      + f", {decide['timeouts']} gate timeouts")
+                      + f"lag {decide['lag']:.2f}/{max_lag:.2f} ({decide['worst']}), "
+                      + f"{decide['timeouts']} gate timeouts")
 
             if mode["state"] == "paused":
                 # Hold by COMMANDING the current target every tick, not by falling silent.
@@ -512,15 +495,13 @@ async def main(claim: bool = True, start_paused: bool = True,
             # decisions/s, against the 7 cm/s it was trained at. Worse, the decision rate is global
             # while the mechanisms are not, so a slow arm joint throttled the rail to its rate.
             #
-            # What bounds it is the lag budget, per group: a group's target only advances while that
-            # group is within `max_lag` steps of where it was last put. So the target leads the
-            # joint by at most that much and no more, which is a velocity-clamped ramp rather than
-            # the runaway that had the jaw closing after it passed the cube. Each group keeps its
-            # own budget, so the rail glides at its commanded speed while the arm is being waited
-            # on, and stops on its own once the carriage falls behind.
-            lag = joint_lag(sim_target, sim_qpos, delta)
-            decide["lag"] = lag
-            behind = any(v > max_lag[g] for g, (v, _) in lag.items())
+            # What bounds it is the lag budget: the target only advances while every gated joint is
+            # within `max_lag` steps of where it was last put. So the target leads the arm by at
+            # most that much and no more, a velocity-clamped ramp rather than the runaway that had
+            # the jaw closing after it passed the cube.
+            lag, worst = joint_lag(sim_target, sim_qpos, delta)
+            decide["lag"], decide["worst"] = lag, worst
+            behind = lag > max_lag
             now = time.perf_counter()
 
             # Decide when every group has caught up. A joint that physically cannot arrive (a stop,
@@ -561,14 +542,13 @@ async def main(claim: bool = True, start_paused: bool = True,
             if last_action is not None and rgb is not None:
                 stepped = dict(sim_target)
                 for i, k in enumerate(bridge.JOINT_KEYS):
-                    group = GROUP_OF.get(k)
-                    if group is None:
-                        # Ungated (the gripper): applied once, on the tick it was decided. Nothing
-                        # bounds it, so sustaining it would slam the jaw shut over several ticks.
+                    if k not in GATED:
+                        # The gripper: applied once, on the tick it was decided. Nothing bounds it,
+                        # so sustaining it would slam the jaw shut over several ticks.
                         if not fresh:
                             continue
-                    elif lag[group][0] > max_lag[group]:
-                        continue    # this group has spent its budget; wait for the joint
+                    elif behind:
+                        continue    # budget spent; wait for the joints to catch up
                     stepped[k] += float(last_action[i]) * delta[k]
                 sim_target = bridge.clamp_sim(stepped)
 
@@ -608,21 +588,15 @@ def cli() -> None:
     parser.add_argument("--start-paused", action=argparse.BooleanOptionalAction, default=True,
                         help="claim but hold the pose until you press p (default). "
                              "--no-start-paused MOVES THE ROBOT as soon as frames arrive.")
-    parser.add_argument("--max-lag-arm", type=float, default=1.0, metavar="DELTAS",
-                        help="how far an ARM joint's target may lead its measured pose, in action "
-                             "steps (default 1.0). An action is a velocity and keeps being applied "
-                             "every tick, so this is what bounds it: the target cannot run away "
-                             "from a slower arm, which is what had the jaw closing after it passed "
-                             "the cube. It doubles as the decision gate, since a new action is "
-                             "computed once every group is back inside its budget. With --viz this "
-                             "is only the starting value; the window changes it live.")
-    parser.add_argument("--max-lag-rail", type=float, default=2.0, metavar="DELTAS",
-                        help="the same budget for the rail, separately (default 2.0). The carriage "
-                             "crosses 117 steps of travel at 7 mm each, so letting its target lead "
-                             "further is what keeps it gliding at the speed it was trained at; the "
-                             "wrist's last millimetre is worth more than the rail's. The gripper "
-                             "gets no budget: a jaw closed on the object never arrives, and "
-                             "holding its target back would bleed grip force.")
+    parser.add_argument("--max-lag", type=float, default=1.0, metavar="DELTAS",
+                        help="how far the target may lead the measured pose, in action steps "
+                             "(default 1.0). An action is a velocity and keeps being applied every "
+                             "tick, so this is what bounds it: the target cannot run away from a "
+                             "slower arm, which is what had the jaw closing after it passed the "
+                             "cube. It doubles as the decision gate, since a new action is computed "
+                             "once the arm is back inside the budget. The gripper is exempt: a jaw "
+                             "closed on the object never arrives, and holding its target back would "
+                             "bleed grip force. With --viz this is only the starting value.")
     parser.add_argument("--rail-step", type=float, default=RAIL_STEP_MM, metavar="MM",
                         help=f"how far one full-command action moves the carriage, in mm (default "
                              f"{RAIL_STEP_MM:.1f}, the trained value). Also its top speed per "
@@ -653,8 +627,7 @@ def cli() -> None:
         raise SystemExit("pass --arch {" + ",".join(sorted(CHECKPOINTS))
                          + "}, or --checkpoint <path>, or set POLICY_CHECKPOINT.")
     asyncio.run(main(claim=args.claim, start_paused=args.start_paused,
-                     max_lag_arm=args.max_lag_arm, max_lag_rail=args.max_lag_rail,
-                     rail_step=args.rail_step,
+                     max_lag=args.max_lag, rail_step=args.rail_step,
                      binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 
