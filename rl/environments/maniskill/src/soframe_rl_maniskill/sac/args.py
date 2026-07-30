@@ -118,9 +118,6 @@ class Args:
     """physics/render backend. 'gpu' for real training (needs CUDA); 'cpu' supports a single
     env and exists so the loop can be smoke-tested on a machine without a GPU. Forced to 'cpu'
     by --visual_fidelity raytraced."""
-    binary_gripper: bool = False
-    """threshold the gripper action to fully open/closed each step (arm/rail stay continuous).
-    Off = the continuous gripper action space, which the openness-ramp reward needs"""
     arm_speed_scale: float = 1.0
     """multiplier on arm/rail delta limits (gripper unscaled). 1.0 = the measured real servo
     speed (0.05 rad/step arm, 0.007 m/step rail at 10 Hz). For arm-speed ablations only."""

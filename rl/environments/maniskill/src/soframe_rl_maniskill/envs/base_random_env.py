@@ -50,11 +50,6 @@ class RandomizationConfig:
     """Per-episode gripper joint stiffness range."""
     gripper_damping_range: Sequence[float] = (50, 200)
     """Per-episode gripper joint damping range."""
-    binary_gripper: bool = False
-    """Threshold the gripper action to its sign each step (fully open/closed only); arm/rail stay
-    continuous, and the action space stays continuous. OFF: the reward pays a ramp in gripper
-    openness (see ``PickPlaceBin.compute_dense_reward``), which needs intermediate jaw positions to
-    have a gradient at all."""
     arm_stiffness_range: Sequence[float] = (600, 1400)
     """Per-episode stiffness range for arm + rail joints (nominal 1e3, +-40% for sim2real).
     Set (1000, 1000) to disable."""
@@ -397,16 +392,6 @@ class BaseRandomEnv(BaseEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         self._randomize_gripper_speed(env_idx)
         self._randomize_arm_gains(env_idx)
-
-    def step(self, action):
-        """Near-binary gripper (threshold to sign); see RandomizationConfig.binary_gripper."""
-        cfg = self.domain_randomization_config
-        if cfg.binary_gripper:
-            gi = self.agent.joint_names.index("gripper")
-            act = common.to_tensor(action, device=self.device).clone().float()
-            act[..., gi] = torch.where(act[..., gi] > 0, 1.0, -1.0)
-            action = act
-        return super().step(action)
 
 
 def _jitter_pose(rand_vals: torch.Tensor, pos_noise, rot_noise) -> Pose:

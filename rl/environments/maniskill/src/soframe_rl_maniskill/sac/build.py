@@ -79,7 +79,6 @@ def env_kwargs_from_args(args):
             dr_cfg["overhead_camera_pos_offset"] = list(args.overhead_camera_pos_offset)
         if args.overhead_camera_rot_offset is not None:
             dr_cfg["overhead_camera_rot_offset"] = [np.deg2rad(v) for v in args.overhead_camera_rot_offset]
-        dr_cfg["binary_gripper"] = args.binary_gripper
         if args.visual_fidelity in ("flat", "raster"):
             # passed so flat can override the raster default
             dr_cfg["visual_fidelity"] = args.visual_fidelity
