@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "so-frame-calibrate"
+version = "0.1.0"
+description = "Calibration and debug tools for the SO-101-on-frame rig: the joint bridge, the camera mapping, and sim-vs-real comparison."
+# 3.12 is the intersection: livekit-portal ships cp312 wheels only, and mani_skill/sapien have
+# cp312 wheels too, so this is the one interpreter where the robot feed and the simulator coexist.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # The deploy project, for the pieces that must be IDENTICAL to what ships: utils.bridge
+    # (sim <-> wire units), utils.camera_mapping (the mapping format and its replay), and
+    # utils.common (env loading, LiveKit tokens). Importing them rather than copying them is the
+    # whole point: a mapping fitted here has to be replayed byte-for-byte by the deploy loop.
+    "so-frame-deploy",
+    # The simulator, so the sim side can be rendered LIVE next to the real camera instead of
+    # compared against a pre-rendered PNG. This is why these tools do not live in rl/deploy:
+    # putting mani_skill in that project's lockfile would force the Jetson to resolve sapien for
+    # linux aarch64 on every `uv sync`, for a dependency it never installs.
+    "soframe-rl-maniskill",
+    "opencv-python>=4.9",
+    "numpy>=1.24",
+    "pyside6-essentials>=6.8",
+]
+
+[tool.uv.sources]
+so-frame-deploy = { path = "../deploy", editable = true }
+soframe-rl-maniskill = { path = "../environments/maniskill", editable = true }
+
+[project.scripts]
+calibrate = "debug_policy:main"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["debug_policy.py", "sim_mirror.py", "window.py"]

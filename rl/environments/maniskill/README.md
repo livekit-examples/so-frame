@@ -38,10 +38,6 @@ All from `rl/environments/maniskill/`.
 uv run python examples/visualize_sim.py
 uv run python examples/visualize_sim.py --headless --out /tmp/frames   # no display (ssh)
 
-# reference renders to calibrate the real cameras against (then rl/deploy/utils/calibrate_camera.py)
-uv run python examples/dump_reference_views.py
-uv run python examples/dump_reference_views.py --out ../../deploy/utils/reference_views
-
 # one-off pretty render, to look at the sim only
 uv run python examples/render_realistic.py --shader rt-fast --out /tmp/realistic.png
 
@@ -113,7 +109,7 @@ between encoders is not confounded by how much history each one keeps.
 - **10 Hz control**, matching the deploy loop. A policy trained at one rate and driven at another
   sees a different amount of world motion per decision.
 - **Camera FOVs are calibrated** against the real rig (overhead 38°, wrist 58°). Deploy rectifies
-  the real cameras to match; dump the reference renders with
-  `examples/dump_reference_views.py`.
+  the real cameras to match; fit the mapping in [rl/calibrate](../../calibrate/README.md), which
+  renders these cameras live beside the real ones.
 - **Domain randomization** covers camera pose/FOV jitter, arm and gripper PD gains, lighting,
   qpos noise, colour jitter and sensor-realism augmentation. On by default.

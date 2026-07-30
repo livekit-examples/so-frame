@@ -77,7 +77,7 @@ class Args:
     is not the default; dino_patch resolves the cube as a shape at res 112/168 and stays on
     "black"."""
     overhead_camera_fov: Optional[float] = None
-    """override the overhead camera's base FOV, in DEGREES (measured via rl/deploy/utils/calibrate_camera.py)"""
+    """override the overhead camera's base FOV, in DEGREES (measured via rl/calibrate)"""
     wrist_camera_fov: Optional[float] = None
     """override the wrist camera's base FOV, in DEGREES; same sourcing as overhead's"""
     overhead_camera_pos_offset: Optional[tuple[float, float, float]] = None

@@ -61,6 +61,6 @@ $( [[ "$DO_SYNC" != "1" ]] && echo "  uv sync                                   
 
   # Policy operator (on a GPU host; scp the .pt over and set POLICY_CHECKPOINT):
   #   POLICY_CHECKPOINT=/path/to/ckpt_best.pt uv run policy
-  # Verify the wiring first, no motion:  uv run python utils/debug_policy.py --bridge
+  # Verify the wiring first, no motion:  cd ../calibrate && uv run calibrate --bridge
 
 EOF

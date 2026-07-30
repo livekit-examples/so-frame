@@ -69,7 +69,7 @@ class RandomizationConfig:
     """Base vertical FOV of the overhead camera, calibrated against the real rig (config.py)."""
 
     # These FOVs define the view the policy trains on. Deploy rectifies each real camera to match;
-    # the only handoff is the reference renders from examples/dump_reference_views.py.
+    # rl/calibrate renders these cameras live to fit the real ones against.
 
     # Constant camera pose corrections in the camera link's local frame (+X = view direction),
     # applied before jitter (the printed holder's CAD pose vs the actual lens pose).
