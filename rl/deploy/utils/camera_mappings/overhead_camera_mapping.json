@@ -4,15 +4,18 @@
     640,
     480
   ],
-  "fov_deg": 41.78,
+  "fov_deg": 42.0,
   "rot90": 1,
-  "angle_deg": 2.0,
+  "angle_deg": 0.0,
   "k1": -0.33,
   "k2": 0.275,
   "focal_px": 512,
-  "zoom": 1.2,
-  "crop_cx": 83,
-  "crop_cy": 299,
-  "crop_size": 469,
-  "out_size": 128
+  "zoom": 1.221,
+  "offset_x": -42.3,
+  "offset_y": 29.4,
+  "out_size": 168,
+  "gain_r": 1.0,
+  "gain_g": 1.0,
+  "gain_b": 1.0,
+  "gamma": 0.4
 }
