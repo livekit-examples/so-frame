@@ -63,7 +63,9 @@ CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
 
 # Which joints each lag gate watches. The rail and the arm get their own tolerance because they
 # are different mechanisms: a belt-driven carriage crossing 117 steps of travel does not converge
-# like a direct position servo moving one of 2.86 deg.
+# like a direct position servo moving one of 2.86 deg. The rail's tolerance is derived from the
+# arm's by a multiplier of at least 1, so the rail is lighter by construction and cannot become
+# the joint the arm is waiting on.
 #
 # The gripper is in NEITHER group, deliberately. Its whole range is 9.6 steps, so a jaw closed on
 # the object sits several steps short of its commanded position for as long as it holds, and no
@@ -73,6 +75,15 @@ LAG_GROUPS: dict[str, tuple[str, ...]] = {
     "rail": (bridge.RAIL,),
     "arm": tuple(k for k in bridge.JOINT_KEYS if k not in (bridge.RAIL, "gripper.pos")),
 }
+
+
+def resolve_gates(arm: float, rail_scale: float) -> dict[str, float]:
+    """Per-group tolerances from the arm's, in action steps.
+
+    The rail is always the lighter gate: `rail_scale` is clamped to at least 1, so tightening the
+    arm can never make the carriage the thing being waited on.
+    """
+    return {"arm": arm, "rail": arm * max(float(rail_scale), 1.0)}
 
 
 def joint_lag(sim_target: dict, sim_qpos: dict) -> dict[str, tuple[float, str]]:
@@ -117,10 +128,10 @@ def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> d
 
 
 async def main(claim: bool = True, start_paused: bool = True,
-               max_lag_arm: float = 1.0, max_lag_rail: float = 1.0,
+               max_lag_arm: float = 1.0, rail_lag_scale: float = 3.0,
                binary_gripper: bool = False, viz: bool = False, arch: str | None = None) -> None:
     load_env(_HERE)
-    max_lag = {"arm": max_lag_arm, "rail": max_lag_rail}
+    max_lag = resolve_gates(max_lag_arm, rail_lag_scale)
     gripper_idx = bridge.JOINT_KEYS.index("gripper.pos")
     url = env("LIVEKIT_URL", required=True)
     room = env("LIVEKIT_ROOM", "so-frame")
@@ -330,7 +341,8 @@ async def main(claim: bool = True, start_paused: bool = True,
         QtWidgets.QApplication([])
         win = vizmod.Window([t for t, _ in CAMERA_STACK],
                             [k.split(".")[0] for k in bridge.JOINT_KEYS],
-                            max_lag=max_lag, groups=LAG_GROUPS)
+                            arm_lag=max_lag_arm, rail_scale=rail_lag_scale,
+                            groups=LAG_GROUPS)
         win.show()
         print(f"[policy-{NAME}] --viz open")
 
@@ -347,8 +359,8 @@ async def main(claim: bool = True, start_paused: bool = True,
             rgb = build_rgb(obs, mappings, stack_res) if obs is not None else None
 
             if win is not None:
-                # The window owns the gate once it is open, so --max-lag is the starting value.
-                max_lag = win.max_lag()
+                # The window owns the gates once it is open; the flags are starting values.
+                max_lag = resolve_gates(*win.gates())
                 if not control["enabled"]:
                     status, alarm = "Unclaimed", True
                 elif obs is None:
@@ -572,12 +584,13 @@ def cli() -> None:
                              "than a stopwatch means a long move waits and a tiny one does not. "
                              "Large values approach deciding every tick. With --viz this is only "
                              "the starting value; the window changes it live.")
-    parser.add_argument("--max-lag-rail", type=float, default=1.0, metavar="DELTAS",
-                        help="the same gate for the rail, separately (default 1.0). The carriage "
-                             "crosses 117 action steps of travel and does not converge like a "
-                             "2.86 deg servo move, so one tolerance for both means either the arm "
-                             "waits on the rail or the rail is never waited for. The gripper is "
-                             "not gated at all: a jaw closed on the object never arrives.")
+    parser.add_argument("--rail-lag-scale", type=float, default=3.0, metavar="X",
+                        help="the rail's gate as a multiple of the arm's (default 3.0, minimum "
+                             "1.0), so the rail is lighter by construction and tightening the arm "
+                             "cannot make the carriage the joint being waited on. Its last "
+                             "millimetre of a 117-step traverse is not worth a decision; the "
+                             "wrist's is. The gripper is not gated at all: a jaw closed on the "
+                             "object never arrives.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
                              "matching the continuous-gripper training default; must match how "
@@ -601,7 +614,7 @@ def cli() -> None:
         raise SystemExit("pass --arch {" + ",".join(sorted(CHECKPOINTS))
                          + "}, or --checkpoint <path>, or set POLICY_CHECKPOINT.")
     asyncio.run(main(claim=args.claim, start_paused=args.start_paused,
-                     max_lag_arm=args.max_lag_arm, max_lag_rail=args.max_lag_rail,
+                     max_lag_arm=args.max_lag_arm, rail_lag_scale=args.rail_lag_scale,
                      binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 

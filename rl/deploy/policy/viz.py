@@ -173,7 +173,7 @@ class _Actions(QtWidgets.QWidget):
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names, max_lag=None, groups=None):
+    def __init__(self, cameras, joint_names, arm_lag=1.0, rail_scale=3.0, groups=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -215,18 +215,22 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
-        # One gate per group, live: the value that works depends on the mechanism, and the bars
-        # right here are the readout. Dial each to just above where its ticks stop going red.
-        max_lag = dict(max_lag or {"arm": 1.0, "rail": 1.0})
+        # Live, because the value that works depends on the arm, and the bars right here are the
+        # readout: dial it to just above where the ticks stop going red. The rail is a multiplier on
+        # it rather than its own number, so the rail stays the lighter gate whatever the arm is set
+        # to; its resolved value is shown next to the multiplier.
         # joint name -> the group whose gate it answers to; anything unlisted is never gated.
         self._group_of = {n.split(".")[0]: g for g, keys in (groups or {}).items() for n in keys}
-        self._gates: dict[str, _Value] = {}
-        for group, value in max_lag.items():
-            self._gates[group] = _Value(LAG_MIN, LAG_MAX, 0.05, 2, value)
-            lab = QtWidgets.QLabel(f"{group} lag")
+        self._arm = _Value(LAG_MIN, LAG_MAX, 0.05, 2, arm_lag)
+        self._rail = _Value(1.0, 6.0, 0.25, 2, rail_scale)
+        self._rail_note = QtWidgets.QLabel("")
+        self._rail_note.setStyleSheet(f"color:{MUTED};")
+        for text, widget in (("arm lag", self._arm), ("rail lag x", self._rail)):
+            lab = QtWidgets.QLabel(text)
             lab.setStyleSheet(f"color:{MUTED};")
             buttons.addWidget(lab)
-            buttons.addWidget(self._gates[group])
+            buttons.addWidget(widget)
+        buttons.addWidget(self._rail_note)
 
         inner = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(inner)
@@ -257,9 +261,9 @@ class Window(QtWidgets.QWidget):
         """Service Qt from the caller's loop. Nothing else drives this window."""
         QtWidgets.QApplication.instance().processEvents()
 
-    def max_lag(self) -> dict:
-        """Per-group action steps of lag the gates tolerate, as currently dialled in."""
-        return {g: v.value() for g, v in self._gates.items()}
+    def gates(self) -> tuple[float, float]:
+        """(arm tolerance in action steps, rail multiplier) as currently dialled in."""
+        return self._arm.value(), self._rail.value()
 
     def take_keys(self) -> list[str]:
         keys, self.requests = list(self.requests), []
@@ -276,3 +280,5 @@ class Window(QtWidgets.QWidget):
         self.info.setText(info)
         by_joint = {n: (thresholds or {}).get(g) for n, g in self._group_of.items()}
         self.actions.set_rows(act_rows, by_joint)
+        rail = (thresholds or {}).get("rail")
+        self._rail_note.setText("" if rail is None else f"= {rail:.2f}")
