@@ -33,6 +33,7 @@ from lerobot_robot_so101_slider_pos import (
 )
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from utils import bridge as bridge_park  # noqa: E402  (PARK_REAL only; wire units, no sim maths)
 from utils.common import env, load_env, mint_token, pace  # noqa: E402
 
 IDENTITY = "robot"
@@ -48,24 +49,10 @@ CAMERAS = {
 FOLLOWER_SLIDER_KEY = "slider.pos"
 WIRE_SLIDER_KEY = "dof_slider.pos"
 
-# Parked rest pose the `reset_to_zero_position` RPC drives to, in REAL wire units:
-# arm degrees, gripper + rail 0..100 (rail 0 far, 100 near camera). Override any via
-# a RESET_POSE_* env var.
-# These are the sim rest keyframe (soframe_policy.rig.REST_QPOS,
-# qpos=[0,0,-0.5,0.8,0.6,0.0,1.2] rad) put through the policy's bridge, as literals: this module
-# talks wire units only and does not import sim code. Keep the two in step by hand.
-#
-# The gripper is deliberately OPEN. A parked arm must release anything it happens to be holding,
-# so this is the one value not worth rounding toward "tidy".
-REST_POSE_DEFAULTS: dict[str, float] = {
-    WIRE_SLIDER_KEY:      49.0,   # sim dof_slider=0 m -> ~mid-travel (0..100)
-    "shoulder_pan.pos":   0.0,
-    "shoulder_lift.pos": -30.0,   # sim -0.5 rad
-    "elbow_flex.pos":     45.0,   # sim 0.8 rad
-    "wrist_flex.pos":     35.0,   # sim 0.6 rad
-    "wrist_roll.pos":      0.0,
-    "gripper.pos":        68.75,  # sim 1.2 rad, ~69% open on the 0..100 jaw range
-}
+# The pose `reset_to_zero_position` drives to: the shared park pose, in wire units already.
+# Defined in utils.bridge so the policy's park key and this RPC cannot drift apart. Override any
+# joint via its RESET_POSE_* env var.
+REST_POSE_DEFAULTS: dict[str, float] = dict(bridge_park.PARK_REAL)
 REST_POSE_ENV_KEYS: dict[str, str] = {
     WIRE_SLIDER_KEY:     "RESET_POSE_SLIDER",
     "shoulder_pan.pos":  "RESET_POSE_SHOULDER_PAN",

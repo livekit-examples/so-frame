@@ -6,14 +6,14 @@ gripper) and 0..100 for the rail (0 = far from the camera, 100 = near).
 Joint order, joint limits, per-step delta caps and the rest pose come from
 ``soframe_policy.rig``, which training reads too. This file owns only the unit conversion.
 
-``OFFSET_REAL`` is 0 for the arm and gripper joints by design, not by omission: the follower runs
-lerobot's per-motor calibration (``leslider/configs/calibrate_follower_pos.yaml``), which already
-places real ``.pos`` zero at the same physical pose as the URDF zero. So real == sim after the
-unit scale, and there is nothing to measure here.
+``OFFSET_REAL`` is 0 for most joints because the follower runs lerobot's per-motor calibration
+(``leslider/configs/calibrate_follower_pos.yaml``), which places real ``.pos`` zero at the URDF zero
+pose. ``wrist_roll`` is the measured exception, see below.
 
-That leaves two assumptions, both cheap to check with ``debug_policy.py --bridge`` against a live
-arm: the calibrated zero really is the URDF zero pose, and ``SIGN`` is identity (a flipped joint
-would drive the arm the wrong way, which no offset would rescue). Re-check after re-homing a servo.
+Check both remaining assumptions against a live arm with rl/calibrate's ``uv run calibrate``:
+that each joint's calibrated zero is the URDF zero pose (an offset), and that ``SIGN`` is identity
+(a flipped joint drives the arm the wrong way, which no offset would rescue). Re-check after
+re-homing a servo.
 """
 from __future__ import annotations
 
@@ -33,6 +33,11 @@ SCALE: dict[str, float] = {f"{n}.pos": _RAD2DEG for n in rig.JOINT_NAMES}
 SIGN: dict[str, float] = {k: 1.0 for k in JOINT_KEYS}          # flip per rig
 OFFSET_REAL: dict[str, float] = {k: 0.0 for k in JOINT_KEYS}   # real .pos at sim zero
 
+# Measured on the real arm: at sim wrist_roll 0 the real wrist sat 90 deg round from where sim
+# showed it, so this joint's calibrated zero is NOT the URDF zero. The rest of the arm checked out.
+# Costs reachability at one end: see the range note below.
+OFFSET_REAL["wrist_roll.pos"] = 90.0
+
 # Rail: normalized 0..100 over its travel, affine, no sign flip, calibrated from geometry.
 # Its sim low limit is exactly wire 0 by construction, the end of travel you park the
 # carriage at to re-zero it.
@@ -46,6 +51,23 @@ DELTA_LIMIT: dict[str, float] = {f"{n}.pos": v for n, v in rig.JOINT_DELTA_LIMIT
 SIM_REST: dict[str, float] = {f"{n}.pos": v for n, v in rig.REST_QPOS.items()}
 SIM_LIMITS: dict[str, tuple[float, float]] = {
     f"{n}.pos": v for n, v in rig.JOINT_LIMITS.items()
+}
+
+# PARK is not REST. SIM_REST above is where a training episode starts, so it is what you stage a
+# rollout from. PARK is a folded pose measured on the real arm, for leaving it idle: gripper open
+# so it drops anything it is holding. Both the robot's reset RPC and the policy's park key read
+# this, so the two cannot drift apart the way they did when each kept its own copy.
+#
+# Wire units, because that is what was measured. lift and elbow sit ON their joint limits, so a
+# position controller parked here holds current against a mechanical stop.
+PARK_REAL: dict[str, float] = {
+    RAIL:                 49.0,   # mid-travel (0..100)
+    "shoulder_pan.pos":    0.0,
+    "shoulder_lift.pos": -100.0,
+    "elbow_flex.pos":     96.8,
+    "wrist_flex.pos":     88.2,
+    "wrist_roll.pos":     89.8,
+    "gripper.pos":        68.75,  # ~69% open
 }
 
 
