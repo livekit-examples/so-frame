@@ -1,15 +1,14 @@
 """Convert the task objects' 3MF sources to OBJ meshes SAPIEN can load.
 
-The 3MF files are the CAD exports (Onshape) and are the source of truth for dimensions; SAPIEN
-does not read 3MF, so this writes the OBJ that the env actually loads. Re-run after replacing a
-3MF and commit both.
+The 3MF files are the CAD exports (Onshape) and the source of truth for dimensions; SAPIEN does
+not read 3MF. Re-run after replacing a 3MF and commit both.
 
     uv run --project ../../../rl/environments/maniskill python convert.py
 
-It also prints the measurements the env needs (outer extents, interior opening, wall and floor
-thickness). Those are mirrored as constants in rl/environments/maniskill/src/soframe_rl_maniskill/config.py,
-and this script asserts they still match, so editing a 3MF without updating the config fails
-here rather than silently changing the task.
+Also prints the measurements the env needs (outer extents, interior opening, wall and floor
+thickness), mirrored as constants in
+rl/environments/maniskill/src/soframe_rl_maniskill/config.py and asserted here, so editing a 3MF
+without updating the config fails rather than silently changing the task.
 """
 
 import pathlib
@@ -28,8 +27,8 @@ EXPECTED = {
 
 def convert(name: str) -> trimesh.Trimesh:
     mesh = trimesh.load(HERE / f"{name}.3mf", force="mesh")
-    # 3MF has no material/normals worth keeping here; OBJ with recomputed normals is enough for
-    # a visual mesh, and collision is built from boxes (see pick_place._load_scene).
+    # A visual OBJ with recomputed normals is enough; collision is built from boxes
+    # (see pick_place._load_scene).
     mesh.export(HERE / f"{name}.obj")
     return mesh
 
@@ -39,10 +38,9 @@ def measure(name: str, mesh: trimesh.Trimesh) -> dict:
     out = dict(extents=tuple(np.round(mesh.extents, 6)),
                z_levels=tuple(np.round(np.unique(np.round(V[:, 2], 5)), 5)))
     if name == "bin":
-        # Measure the interior at the floor level, not the rim. The rim carries both the inner
-        # and outer profiles plus their corner fillets, so a per-vertex extent there picks up a
-        # fillet rather than the flat wall face. The z == floor_thickness level contains only
-        # the interior floor boundary, whose extent IS the interior half-extent.
+        # Measure the interior at floor level, not the rim: the rim carries both profiles plus
+        # corner fillets, so an extent there picks up a fillet. The z == floor_thickness level
+        # contains only the interior floor boundary, whose extent IS the interior half-extent.
         out["floor_thickness"] = float(out["z_levels"][1])
         floor_ring = V[np.isclose(V[:, 2], out["floor_thickness"], atol=1e-6)]
         out["interior_half"] = float(np.abs(floor_ring[:, :2]).max())

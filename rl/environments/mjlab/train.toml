@@ -1,7 +1,7 @@
 # Training configuration for the SO-101 pick-and-place task.
 #
 # Edit these values, then run:
-#   uv run soframe-train --task Mjlab-Pick-Place-Bin-SO101
+#   uv run soframe-train Mjlab-Pick-Place-Bin-SO101
 #
 # Anything here is just the default. Every value can still be overridden on the
 # command line via mjlab's tyro flags (e.g. --env.scene.num-envs 2048).

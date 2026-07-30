@@ -1,23 +1,17 @@
-"""Import simulation/mjcf/so101_on_frame.xml via Isaac Sim's real MJCF importer, producing
-a physics-correct USD (rigid bodies, joints, collision, articulation) -- using the MJCF
-already validated with real MuJoCo drop tests (see simulation/urdf/README.md and this
-repo's rl/environments/mjlab), instead of hand-authoring UsdPhysics schemas from scratch.
+"""Import simulation/mjcf/so101_on_frame.xml via Isaac Sim's MJCF importer into a physics-correct
+USD (rigid bodies, joints, collision, articulation).
 
-Also sets joint drive stiffness/damping: the importer doesn't resolve MuJoCo's
-`<default class="X"><position kp="..."/>` inheritance into its own gain/bias format, so it
-applies a DriveAPI to each joint but leaves stiffness/damping at zero, and an undriven arm
-collapses under gravity. Values below start from the MJCF's own `kp` (400 for the rail,
-20 for the arm/gripper, matching sts3215.xml) -- same stance rl/environments/mjlab and rl/environments/maniskill
-already take on actuator gains: not trusted from the raw asset, re-declared explicitly as
-tunable, sim-to-real parameters.
+Also sets joint drive stiffness/damping: the importer applies a DriveAPI to each joint but leaves
+the gains at zero (it does not resolve MuJoCo's `<default class="X"><position kp="..."/>`
+inheritance), and an undriven arm collapses under gravity. Values below start from the MJCF's own
+`kp`: 400 for the rail, 20 for the arm/gripper, matching sts3215.xml.
 
-Run on the Isaac Lab box (after `source ~/isaac/activate_isaac.sh`):
+Run on the Isaac Lab box, after `source ~/isaac/activate_isaac.sh`:
     python3 simulation/usd/import_mjcf.py
 
-Note: with these gains, the default Isaac Sim physics timestep (1/60 s) is numerically
-unstable (joint positions diverge within ~100 steps) -- it's ~8x coarser than the MJCF's
-own validated 0.002 s. Use a matching timestep (e.g. `World(physics_dt=1/500)`), or re-tune
-the gains for whatever timestep the consuming Isaac Lab environment actually runs at.
+With these gains the default Isaac Sim physics timestep (1/60 s) is unstable, diverging within
+~100 steps: it is ~8x coarser than the MJCF's validated 0.002 s. Use a matching timestep (e.g.
+`World(physics_dt=1/500)`) or re-tune the gains for the consuming environment's timestep.
 """
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": True})

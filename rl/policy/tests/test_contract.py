@@ -1,18 +1,9 @@
 """Guards on the training/deploy contract.
 
-These replace the old "MUST stay architecturally byte-identical to the training definitions"
-comment in rl/deploy/policy/nets.py. That comment was the only thing keeping two hand-copied
-sets of network definitions in sync, and it did not hold: the actor's proprio width drifted
-from 14 to 22 in training while deploy stayed at 14. The env no longer emits the fields that
-caused that drift, so 14 is the contract -- but it is still recorded per checkpoint, so the
-next change to _get_obs_agent fails loudly instead of silently.
-
-The golden signatures below are the state_dict key/shape sets of checkpoints already trained
-(verified against the pre-refactor definitions in train_squint.py and train_dino_v4.py at port
-time). Changing an architecture will fail these -- which is the point: existing checkpoints
-would stop loading, so it should be a deliberate edit with a format bump, not a silent one.
-
-    uv run --project rl/policy pytest rl/policy/tests -q
+The golden signatures below are the state_dict key/shape sets of checkpoints already trained.
+Changing an architecture fails these, so breaking existing checkpoints has to be a deliberate edit
+with a format bump rather than a silent one. The proprio layout (14) is likewise recorded per
+checkpoint, so the next change to _get_obs_agent fails loudly.
 """
 from __future__ import annotations
 
@@ -27,7 +18,7 @@ NUM_CAMS, N_ACT = 2, 7
 
 # The contract, measured from SOFramePickPlaceBin-v1's _get_obs_agent().
 LAYOUT = ProprioSpec(((QPOS, 7), (TARGET_QPOS, 7)))
-# A hypothetical extra field, used to prove a layout change is caught rather than tolerated.
+# An extra field, to prove a layout change is caught rather than tolerated.
 LAYOUT_DRIFTED = ProprioSpec(((QPOS, 7), ("qvel", 7), (TARGET_QPOS, 7)))
 
 SQUINT_ENCODER_KEYS = {
@@ -54,8 +45,8 @@ def test_squint_encoder_signature_is_frozen():
 
 @pytest.mark.parametrize("res,expected_tok", [(112, 128), (168, 288), (224, 512)])
 def test_dino_token_count_follows_resolution(res, expected_tok):
-    """n_tok = num_cams * (res/14)^2. Deploy derives it from the checkpoint's res, so this is
-    what keeps a 112px checkpoint from being fed 224px tokens."""
+    """n_tok = num_cams * (res/14)^2, derived from the checkpoint's res, so a 112px checkpoint
+    cannot be fed 224px tokens."""
     enc = DinoPatchEncoder(NUM_CAMS, res=res)
     assert enc.n_tok == expected_tok
     assert enc.pos_embed.shape == (1, expected_tok, 384)
@@ -68,23 +59,23 @@ def test_dino_encoder_signature_is_stable_and_excludes_the_backbone():
     assert keys["cam_embed"] == (NUM_CAMS, 384)
     assert keys["pos_embed"] == (1, 128, 384)
     assert keys["out.0.weight"] == (512, 384)
-    # 4 transformer layers, and crucially no frozen ViT weights in the checkpoint.
+    # 4 transformer layers, and no frozen ViT weights in the checkpoint.
     assert sum(1 for k in keys if k.startswith("transformer.layers.")) == 48
     assert not [k for k in keys if "blocks" in k or "patch_embed" in k]
 
 
 @pytest.mark.parametrize("kind,res,rgb_dim", [("squint", 32, 50), ("dino_patch", 112, 256)])
 def test_actor_projection_width_follows_the_encoder(kind, res, rgb_dim):
-    """The two encoders need different RGB widths; that used to be two copy-pasted Projection
-    classes in two train scripts. build() picks it from the encoder so they cannot mismatch."""
+    """The two encoders need different RGB widths; build() takes it from the encoder so they
+    cannot mismatch."""
     _, actor = make(kind, res, LAYOUT)
     assert actor.proj.rgb_proj[0].out_features == rgb_dim
     assert actor.proj.repr_dim == rgb_dim + 256
 
 
 def test_actor_signature_is_identical_across_encoders_except_the_projection():
-    """The whole actor was duplicated per train script; only the RGB projection ever differed,
-    plus the first trunk layer whose fan-in follows proj.repr_dim (50+256 vs 256+256)."""
+    """Only the RGB projection differs, plus the first trunk layer whose fan-in follows
+    proj.repr_dim (50+256 vs 256+256)."""
     _, squint_actor = make("squint", 32, LAYOUT)
     _, dino_actor = make("dino_patch", 112, LAYOUT)
     a, b = sig(squint_actor), sig(dino_actor)
@@ -97,7 +88,6 @@ def test_actor_signature_is_identical_across_encoders_except_the_projection():
 
 
 def test_actor_action_bounds_come_from_arrays_not_a_faked_env():
-    """Deploy used to build a SimpleNamespace env stub purely to satisfy Actor.__init__."""
     actor = Actor(64, LAYOUT.n_state, 3, [-1.0, 0.0, -2.0], [1.0, 4.0, 2.0])
     assert torch.allclose(actor.action_scale, torch.tensor([1.0, 2.0, 2.0]))
     assert torch.allclose(actor.action_bias, torch.tensor([0.0, 2.0, 0.0]))
@@ -134,9 +124,8 @@ def test_dino_head_consumes_bf16_tokens_and_returns_fp32_features():
 
 
 def test_dino_head_is_deterministic_in_eval_mode():
-    """Deploy must get the same action for the same frame. nn.TransformerEncoder uses a fused
-    kernel in eval mode that drifts ~3e-6 from the training-mode path; within eval it is exact,
-    which is what a robot control loop needs."""
+    """Deploy must get the same action for the same frame. nn.TransformerEncoder's eval-mode fused
+    kernel drifts ~3e-6 from the training-mode path, but within eval it is exact."""
     enc = DinoPatchEncoder(NUM_CAMS, res=112).eval()
     x = torch.randn(2, enc.n_tok, 384, dtype=torch.bfloat16)
     with torch.no_grad():
@@ -160,10 +149,7 @@ def test_assemble_orders_fields_as_trained():
 
 
 def test_a_layout_change_is_caught_rather_than_tolerated():
-    """The failure this module exists for: training grew a field in the middle of the vector
-    while deploy kept sending the old two. Deploy's mapping must not silently satisfy a
-    different layout -- assembling the 14-dim fields against a drifted spec has to raise, not
-    slide target_qpos into the new field's slot."""
+    """A field added mid-vector must raise, not slide target_qpos into the new field's slot."""
     with pytest.raises(KeyError, match="missing"):
         LAYOUT_DRIFTED.assemble({QPOS: np.zeros(7), TARGET_QPOS: np.zeros(7)})
     # ...and the reverse direction: an old checkpoint's layout rejects the new field set.
@@ -178,7 +164,7 @@ def test_assemble_rejects_bad_widths():
 
 def test_layout_measured_from_a_nested_obs_dict_matches_flatten_order():
     """from_obs_agent must reproduce mani_skill's flatten_state_dict order: insertion order,
-    recursing into sub-dicts (the controller state is nested under 'controller')."""
+    recursing into sub-dicts."""
     obs = {
         "noisy_qpos": torch.zeros(4, 7),
         "controller": {"target_qpos": torch.zeros(4, 7)},
@@ -208,9 +194,8 @@ def test_checkpoint_roundtrip_rebuilds_from_metadata_alone(tmp_path, kind, res):
     assert meta["proprio"] == LAYOUT and meta["n_state"] == 14
     assert sig(enc2) == sig(enc) and sig(actor2) == sig(actor)
 
-    # eval() on both sides: nn.TransformerEncoder switches to a fused kernel in eval mode, so
-    # the dino head's train- and eval-mode outputs differ by ~3e-6. Deploy always runs eval,
-    # and load() returns eval-mode modules, so eval-vs-eval is the comparison that matters.
+    # eval() on both sides: the dino head's train- and eval-mode outputs differ by ~3e-6, and both
+    # deploy and load() run eval, so eval-vs-eval is the comparison that matters.
     enc.eval(), actor.eval()
     state = torch.randn(2, LAYOUT.n_state)
     x = (torch.randint(0, 256, (2, res, res, 6), dtype=torch.uint8) if kind == "squint"

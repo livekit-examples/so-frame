@@ -38,6 +38,7 @@ same frames as the URDF/MJCF:
 ## Render
 
 ```bash
+# from this directory
 usdrecord --camera /World/Camera --imageWidth 1600 so101_on_frame.usd out.png
 # or a robot camera:
 usdrecord --camera /World/frame_wrist_camera --imageWidth 960 so101_on_frame.usd wrist.png
@@ -65,9 +66,10 @@ already has real collision on the lightbox's panels, see that folder's fix), rat
 hand-authoring UsdPhysics schemas:
 
 ```bash
-source ~/isaac/activate_isaac.sh   # or wherever Isaac Sim/Lab is installed
-python3 import_mjcf.py             # regenerate from the MJCF, sets joint drive gains too
-python3 isaac_validate.py          # drop-test the floor panel's collision
+# from the repo root: isaac_validate.py's default --usd is a repo-relative path
+source ~/isaac/activate_isaac.sh              # or wherever Isaac Sim/Lab is installed
+python3 simulation/usd/import_mjcf.py         # regenerate from the MJCF, sets joint drive gains too
+python3 simulation/usd/isaac_validate.py      # drop-test the floor panel's collision
 ```
 
 7 rigid bodies (rail + 5 arm joints + gripper; the rest of the frame collapses into one

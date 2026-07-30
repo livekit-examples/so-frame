@@ -4,8 +4,9 @@ SO-Frame is a cheap, open evaluation frame for SO101 arms (with the LeSlider add
 at [LiveKit](https://livekit.io) as a reproducible environment for debugging our robotics
 products: [Portal](https://github.com/livekit/portal) and
 [Agents](https://github.com/livekit/agents). It ships with a [simulation](#simulation)
-(URDF + MuJoCo + USD) and a complementary [reinforcement-learning](#reinforcement-learning)
-pick-and-place task, solved two ways (state-based and vision-based) built on it.
+(URDF + MuJoCo + USD), a complementary [reinforcement-learning](#reinforcement-learning)
+pick-and-place task built on it and solved two ways (state-based and vision-based), and the
+calibration and deploy tooling that takes a trained policy back onto the real arm.
 
 |                              Real                               |                                      RL in Sim                                      |
 | :-------------------------------------------------------------: | :---------------------------------------------------------------------------------: |
@@ -134,18 +135,20 @@ overhead lighting, for usdview / Blender / Omniverse. See
 
 ## Reinforcement Learning
 
-`rl/` holds the training environments, the shared policy definition, and the deploy stack:
+`rl/` holds the training environments, the shared policy definition, and the sim-to-real stack
+that calibrates the real rig and runs a checkpoint on it:
 
 ```
 rl/environments/maniskill/   vision-based RL (camera pixels only)  -- feeds deploy
 rl/environments/mjlab/       state-based RL (ground-truth poses)
 rl/policy/                   the encoder, actor and checkpoint format
+rl/calibrate/                fit the two cameras against a live sim render
 rl/deploy/                   run a checkpoint on the physical rig
 ```
 
 Both environments implement the same **pick-up-a-cube-and-place-it-in-a-bin** task, with the
 cube and bin randomized each episode; they differ in what the policy observes. See
-**[rl/README.md](rl/README.md)** for how the four fit together.
+**[rl/README.md](rl/README.md)** for how the five fit together.
 
 ### `rl/environments/mjlab/`
 
@@ -155,11 +158,15 @@ Built on [mjlab](https://github.com/mujocolab/mjlab) (Isaac Lab's manager-based 
 GPU-accelerated MuJoCo-Warp), using the [simulation](#simulation) MJCF model. Trains with
 PPO (rsl-rl) across thousands of parallel environments on ground-truth cube/bin poses.
 
-> **No trained policy ships here.** The environment is the deliverable; you train your own.
-> The action space and control rate were since reworked to match the rest of the repo
-> (10 Hz instead of 50, a per-step motion cap at the measured real servo speed, 3 N·m
-> effort limits, and no smoothness penalties), so any older checkpoint you have means
-> something different by every action it emits.
+> **No checkpoint ships with this task.** The environment is the deliverable: training starts
+> from scratch, and the reward weights have not been swept. The action space and control rate
+> were since reworked to match the rest of the repo (10 Hz instead of 50, a per-step motion cap
+> at the measured real servo speeds, 3 N·m effort limits on the arm joints, and no smoothness
+> penalties), so any older checkpoint of your own means something different by every action it
+> emits. Worth knowing what the shaping is up against: an earlier version of it produced a
+> policy that **putted the cube like a golf shot**, whacking it across the workspace and into
+> the bin rather than grasping and lifting it. A fun bit of reward hacking, and the reason the
+> `grasp_lift` term only pays out while the gripper is actually on the cube.
 
 It's a [uv](https://docs.astral.sh/uv/) project. From `rl/environments/mjlab/`:
 
@@ -180,17 +187,19 @@ manager, and config details.
 
 *Chained rollouts (wrist camera left, overhead camera right).*
 
-Trains purely from **the frame's own two cameras** — the wrist camera and the overhead
-camera: no ground-truth cube/bin poses, just RGB pixels and proprioception. Built on
-[ManiSkill3](https://github.com/haosulab/ManiSkill)
-(SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
+Trains purely from **the frame's own two cameras**, the wrist camera and the overhead camera:
+no ground-truth cube/bin poses, just RGB pixels and proprioception. Built on
+[ManiSkill3](https://github.com/haosulab/ManiSkill) (SAPIEN + PhysX, GPU-parallel), implementing [Squint: Fast Visual Reinforcement Learning for
 Sim-to-Real Robotics](https://arxiv.org/abs/2602.21203) (Almuzairee & Christensen, 2026), a
 visual Soft Actor-Critic that reaches strong success rates in **minutes** of wall-clock time.
 
-This folder is a direct port of the paper's [reference implementation](https://github.com/aalmuzairee/squint)
+This folder started as a port of the paper's [reference implementation](https://github.com/aalmuzairee/squint)
 (which already targets an SO-101 arm in ManiSkill3), retargeted onto this repo's
 frame-mounted rig and its existing calibrated `frame_wrist_camera`/`frame_overhead_camera`
-mounts and `simulation/urdf/so101_on_frame.urdf`.
+mounts and `simulation/urdf/so101_on_frame.urdf`. The SAC loop is still the paper's; the
+vision encoder is selectable, either the paper's low-resolution CNN or a frozen DINOv2
+backbone read out densely or pooled to one vector per camera. See
+**[rl/environments/maniskill/README.md](rl/environments/maniskill/README.md)**.
 
 **SAPIEN vs MuJoCo camera convention**: the two engines define a camera's local forward/right/up
 axes differently. SAPIEN uses `(forward, right, up) = (+X, -Y, +Z)` (see
@@ -206,14 +215,66 @@ It's a [uv](https://docs.astral.sh/uv/) project. From `rl/environments/maniskill
 ```bash
 uv sync
 uv run python examples/visualize_sim.py
-uv run python train.py                      # squint CNN
-uv run python train.py --encoder dino_patch # frozen DINOv2 + patch head
+uv run python train.py                       # squint CNN
+uv run python train.py --encoder dino_patch  # frozen DINOv2 + patch head
+uv run python train.py --encoder dino_global # same backbone, one vector per camera
 ```
 
 Task, robot, reward, colour and render-cost constants live in
 `rl/environments/maniskill/src/soframe_rl_maniskill/config.py`. The encoder, actor and
-checkpoint format are shared with deploy in **[rl/policy/](rl/policy/README.md)**.
+checkpoint format are shared with deploy in **[rl/policy/README.md](rl/policy/README.md)**.
 
 Needs a **Linux + NVIDIA GPU** machine (ManiSkill3/SAPIEN + CUDA; macOS can read/edit code but
 not train). See **[rl/environments/maniskill/README.md](rl/environments/maniskill/README.md)** for the task,
 observation/reward design, domain randomization, and training details.
+
+### `rl/calibrate/`
+
+A vision policy trained on a narrow, undistorted, centre-cropped view has to be shown that same
+view on the real rig, and the frame's cameras are wide-angle. `rl/calibrate` is where that
+mapping is fitted: one window that drives the real arm joint by joint and shows
+**REAL | SIM | OVERLAY** for the camera being fitted, with the other camera on a strip below, so
+the fit is judged against a live sim render of the same commanded pose instead of a saved
+screenshot. Sweeping poses is the point, because the wrist camera's view is almost entirely
+gripper jaws and a fit that holds at one arm pose says nothing about the rest.
+
+It takes both `rl/deploy` and `rl/environments/maniskill` as path dependencies, deliberately: it
+imports deploy's joint bridge and mapping code, so a mapping fitted here is replayed
+byte-for-byte by the deploy loop, and it needs ManiSkill to render the sim side live.
+
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/calibrate/`:
+
+```bash
+uv sync
+uv run calibrate                # the tool. MOVES THE ROBOT.
+uv run calibrate --bridge       # joint round-trip self-test, then exit. No robot.
+uv run calibrate --ui-smoke 5   # the window alone on synthetic frames. No robot, no simulator.
+```
+
+**The default mode moves the arm**, so keep an e-stop in reach. See
+**[rl/calibrate/README.md](rl/calibrate/README.md)** for the fitting order, the colour controls,
+and how to check the joint mapping.
+
+### `rl/deploy/`
+
+Runs a checkpoint on the physical rig over
+[LiveKit Portal](https://github.com/livekit/portal). Two processes join one LiveKit room: the
+robot side publishes 7-DOF joint state and **raw** camera frames and applies actions, the policy
+side rectifies those frames through the fitted mappings, runs inference, and sends joint targets
+back. The robot host therefore never installs a simulator, and the two halves can sit on the same
+machine or on opposite sides of a network.
+
+It's a [uv](https://docs.astral.sh/uv/) project. From `rl/deploy/`:
+
+```bash
+uv sync
+cp .env.example .env               # LIVEKIT_URL, API key/secret, LIVEKIT_ROOM
+uv run robot                       # on the robot: state + raw frames in, actions out
+uv run policy --arch dino_patch    # wherever the GPU is: rectify, infer, command
+```
+
+The policy claims control on startup and starts **paused**, holding the pose, so nothing moves
+until you press `p`. No checkpoints are tracked in the repo: `--arch` names one of your own in
+`checkpoints/`, and `--checkpoint <path>` takes a file from anywhere. See
+**[rl/deploy/README.md](rl/deploy/README.md)** for the action contract, the lag budget, and the
+camera mapping.

@@ -1,13 +1,11 @@
 """Environment construction and the per-encoder observation pipeline.
 
-This is the only place the two encoders differ structurally, and the difference is entirely in
-the wrapper stack:
+    squint       render at render_size -> downsample to res -> jitter -> sensor aug
+    dino_patch   render at render_size -> jitter -> sensor aug -> tokenize at res
+    dino_global  render at render_size -> jitter -> sensor aug -> global vectors at res
 
-    squint      render at render_size -> downsample to res -> jitter -> sensor aug
-    dino_patch  render at render_size -> jitter -> sensor aug -> tokenize at res
-
-Ordering matters in both. The augmentations need images, so they come before tokenisation;
-the tokeniser is always last, because what it emits are features, not pixels.
+Ordering matters: augmentations need images, so the tokeniser is always LAST, because what it emits
+are features, not pixels.
 """
 
 import math
@@ -81,17 +79,15 @@ def env_kwargs_from_args(args):
             dr_cfg["overhead_camera_pos_offset"] = list(args.overhead_camera_pos_offset)
         if args.overhead_camera_rot_offset is not None:
             dr_cfg["overhead_camera_rot_offset"] = [np.deg2rad(v) for v in args.overhead_camera_rot_offset]
-        dr_cfg["binary_gripper"] = args.binary_gripper
         if args.visual_fidelity in ("flat", "raster"):
-            # pass the flag so flat can override the raster default; the minimal sensor
-            # shader renders shadows/textures fine and avoids the default shader's OOM past ~384 envs
+            # passed so flat can override the raster default
             dr_cfg["visual_fidelity"] = args.visual_fidelity
         if dr_cfg:
             kw["domain_randomization_config"] = dr_cfg
 
     if args.visual_fidelity == "raytraced":
-        # ray-traced sensor cameras exist only on the cpu backend (single env), so both
-        # pools drop to cpu with rt-fast sensors; training is slow and --num_updates must scale down
+        # ray-traced sensor cameras exist only on the cpu backend (single env), so both pools drop
+        # to cpu with rt-fast sensors
         for kw in (env_kwargs, eval_env_kwargs):
             kw["sensor_configs"]["shader_pack"] = "rt-fast"
             kw["domain_randomization_config"] = dict(
@@ -115,15 +111,19 @@ def apply_obs_pipeline(env, args, device):
         if args.apply_jitter:
             env = wrappers.ColorJitterWrapper(env)
         if args.sensor_aug:
-            # after ColorJitter; applied to eval too so best-ckpt selection favors robustness
+            # after ColorJitter; applied to eval too so best-ckpt selection favours robustness
             env = wrappers.SensorAugWrapper(env)
-    elif args.encoder == "dino_patch":
+    elif args.encoder in ("dino_patch", "dino_global"):
         if args.apply_jitter:
             env = wrappers.ColorJitterWrapper(env)
         if args.sensor_aug:
             env = wrappers.SensorAugWrapper(env)
         # LAST: everything above needs pixels, and this emits features.
-        env = wrappers.DinoTokenWrapper(env, res=args.res, device=device)
+        if args.encoder == "dino_patch":
+            env = wrappers.DinoTokenWrapper(env, res=args.res, device=device)
+        else:
+            env = wrappers.DinoGlobalWrapper(env, res=args.res, device=device,
+                                             pool=args.dino_pool)
     else:
         raise ValueError(f"no observation pipeline defined for encoder {args.encoder!r}")
     return env
@@ -142,16 +142,15 @@ def make_envs(args, run_name, device):
                          reconfiguration_freq=args.eval_reconfiguration_freq, **eval_env_kwargs)
     max_episode_steps = gym_utils.find_max_episode_steps_value(envs)
 
-    # Measure the actor's proprio layout from the raw env, before flattening collapses it to a
-    # bare width. This is the contract deploy has to reproduce field-for-field.
+    # MUST be measured before flattening collapses the layout to a bare width. This is the contract
+    # deploy has to reproduce field-for-field.
     proprio = ProprioSpec.from_obs_agent(envs.unwrapped._get_obs_agent())
 
     envs = FlattenRGBDObservationWrapper(envs, rgb=True, depth=False, state=True)
     eval_envs = FlattenRGBDObservationWrapper(eval_envs, rgb=True, depth=False, state=True)
 
-    # Read the camera count here, while the observation is still pixels. After tokenisation the
-    # rgb space is (n_tok, EMBED) and the channel count is gone, so this cannot be recovered
-    # downstream -- and it must not be assumed, since it sets the encoder's camera embeddings.
+    # Read the camera count while the observation is still pixels: after tokenisation the rgb space
+    # is (n_tok, EMBED) and the channel count is gone. It sets the encoder's camera embeddings.
     n_channels = envs.unwrapped.single_observation_space['rgb'].shape[-1]
     assert n_channels % 3 == 0, f"expected 3*num_cams RGB channels, got {n_channels}"
     num_cams = n_channels // 3

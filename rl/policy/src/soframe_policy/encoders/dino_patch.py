@@ -1,18 +1,16 @@
 """Dense patch-token DINOv2 encoder ("Patch Policy" head) over a frozen ViT-S/14.
 
-Adapted from 'Patch Policy: Efficient Embodied Control via Dense Visual Representations'
-(Zhou, Cui, Langford, Tan, LeCun, Pinto, 2026): keep the dense frozen patch tokens instead of
-global-pooling them, run a small self-attention transformer over both cameras jointly, and
-read out a learned [READOUT] token.
+Head after 'Patch Policy: Efficient Embodied Control via Dense Visual Representations' (Zhou,
+Cui, Langford, Tan, LeCun, Pinto, 2026): self-attention over the dense frozen patch tokens of
+both cameras jointly, read out through a learned [READOUT] token.
 
-The frozen backbone is NOT part of this module (and so not part of the checkpoint) -- it is
-cached per device at module level and downloaded from torch.hub on first use. Only the head
-trains, which is what lets training cache tokens in the replay buffer and run the ViT once per
-env step instead of once per gradient update.
+The frozen backbone is not part of this module or the checkpoint; it is cached per device at
+module level and pulled from torch.hub on first use. Only the head trains, which lets training
+cache tokens in the replay buffer and run the ViT once per env step.
 
-``tokenize`` is the sim2real-critical function: training caches tokens through it in an obs
-wrapper, deploy calls it per tick on the rectified camera frames. One definition, so sim and
-real cannot silently disagree on resize mode, normalization, or camera ordering.
+``tokenize`` is sim2real-critical: training caches tokens through it in an obs wrapper, deploy
+calls it per tick. One definition, so sim and real cannot disagree on resize mode, normalization
+or camera ordering.
 """
 from __future__ import annotations
 
@@ -51,14 +49,14 @@ def token_count(num_cams, res):
     return num_cams * grid_size(res) ** 2
 
 
-@torch.no_grad()
-def tokenize(rgb, res, num_cams=None, device=None):
-    """(B, H, W, 3*num_cams) uint8 -> (B, num_cams*(res/PATCH)^2, EMBED) patch tokens, bf16.
+def _forward_cams(rgb, res, num_cams, device, pick):
+    """(B, H, W, 3*num_cams) uint8 -> (B, ..., EMBED) bf16, camera-major.
 
-    Each camera is bilinearly resized to ``res``, ImageNet-normalized, and pushed through
-    ``forward_features``; the per-camera token grids are concatenated camera-major, so token
-    ordering matches the channel ordering of the input stack. Runs under autocast to bf16,
-    which is also how the tokens are stored in the replay buffer.
+    The one preprocessing definition behind ``tokenize`` and ``dino_global.embed_global``, so sim
+    and real cannot disagree on resize mode, normalization or camera ordering: each camera is
+    bilinearly resized to ``res`` (skipped when already there), ImageNet-normalized and pushed
+    through the frozen backbone's ``forward_features``. ``pick(feats)`` gets that output dict per
+    camera and returns the tensors to concatenate on dim 1.
     """
     if rgb.dim() == 3:
         rgb = rgb.unsqueeze(0)
@@ -74,22 +72,32 @@ def tokenize(rgb, res, num_cams=None, device=None):
     std = torch.tensor(_STD, device=x.device).view(1, 3, 1, 1)
 
     amp_device = "cuda" if x.is_cuda else "cpu"
-    toks = []
+    out = []
     with torch.autocast(amp_device, dtype=torch.bfloat16):
         for c in range(num_cams):
             cam = x[:, 3 * c: 3 * c + 3]
             if cam.shape[-1] != res:
                 cam = F.interpolate(cam, size=(res, res), mode="bilinear", align_corners=False)
             cam = (cam - mean) / std
-            toks.append(backbone.forward_features(cam)["x_norm_patchtokens"])
-    return torch.cat(toks, dim=1).to(torch.bfloat16)
+            out.extend(pick(backbone.forward_features(cam)))
+    return torch.cat(out, dim=1).to(torch.bfloat16)
+
+
+@torch.no_grad()
+def tokenize(rgb, res, num_cams=None, device=None):
+    """(B, H, W, 3*num_cams) uint8 -> (B, num_cams*(res/PATCH)^2, EMBED) patch tokens, bf16.
+
+    The per-camera token grids are concatenated camera-major, so token order matches the input
+    stack's channel order. bf16 is also how the replay buffer stores them.
+    """
+    return _forward_cams(rgb, res, num_cams, device,
+                         lambda feats: (feats["x_norm_patchtokens"],))
 
 
 class DinoPatchEncoder(nn.Module):
     """Self-attention head over frozen DINOv2 patch tokens, reading out a learned token.
 
-    Parameter names match the ``PatchHead`` this replaces (``readout``, ``cam_embed``,
-    ``pos_embed``, ``transformer.*``, ``ln.*``, ``out.*``), so v4-era checkpoints load.
+    Input is (B, num_cams*(res/PATCH)^2, EMBED) bf16 tokens; output is (B, repr_dim) fp32.
     """
 
     KIND = "dino_patch"
@@ -125,8 +133,8 @@ class DinoPatchEncoder(nn.Module):
         nn.init.zeros_(self.cam_embed)
 
     def preprocess(self, rgb):
-        """Raw camera stack -> frozen patch tokens. Deploy calls this per tick; training does
-        it once per env step in an obs wrapper (which calls ``tokenize`` directly)."""
+        """Raw camera stack -> frozen patch tokens. Deploy calls this per tick; training calls
+        ``tokenize`` once per env step in an obs wrapper."""
         return tokenize(rgb, self.res, num_cams=self.num_cams, device=self.pos_embed.device)
 
     def forward(self, tokens):

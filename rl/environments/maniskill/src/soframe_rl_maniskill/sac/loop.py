@@ -1,17 +1,12 @@
 """The SAC training loop.
 
-Vendored from Squint (https://github.com/aalmuzairee/squint) -- autotuned entropy, distributional
-C51 critic ensemble, torch.compile + CUDA graphs, high update-to-data ratio. The algorithm is
-untouched; what changed is that it is written once here instead of copy-pasted per architecture,
-and the encoder/actor come from ``soframe_policy`` so the deployed policy is the trained one.
+Vendored from Squint (https://github.com/aalmuzairee/squint): autotuned entropy, distributional C51
+critic ensemble, torch.compile + CUDA graphs, high update-to-data ratio. The algorithm is untouched;
+the encoder/actor come from ``soframe_policy`` so the deployed policy is the trained one.
 
-Local additions kept from the old scripts: warm-start (--checkpoint) with optional --reset_alpha,
-best-checkpoint tracking, and an optional encoder LR group + grad clipping (which the transformer
-head needs and the CNN does not).
-
-Removed with the features they served: the asymmetric privileged critic (the actor and critic now
-see the same proprio) and the per-architecture DeployAgent class, replaced by the recorded
-checkpoint format in soframe_policy.checkpoint.
+Local additions: warm-start (--checkpoint) with optional --reset_alpha, best-checkpoint tracking,
+and an optional encoder LR group + grad clipping (which the transformer head needs and the CNN does
+not).
 """
 
 import os
@@ -36,15 +31,23 @@ from soframe_policy.encoders import ENCODERS
 from .build import make_envs
 from .critic import Critic
 from .logger import Logger, evaluate
+from .replay import ObsOnlyReplay
 
 
 def train(args):
     args = args.resolve()
 
-    # Set before any env/agent is built: the controller reads config.ARM_SPEED_SCALE when the
-    # agent's controller configs are constructed.
+    # MUST precede any env/agent build: the controller reads config.ARM_SPEED_SCALE when the agent's
+    # controller configs are constructed.
     from .. import config
     config.ARM_SPEED_SCALE = args.arm_speed_scale
+
+    # Same: pick_place reads config.COLOR_CUBE / COLOR_BIN when it builds the scene.
+    if args.object_colors == "distinct":
+        config.COLOR_CUBE = config.BLUE
+        config.COLOR_BIN = config.YELLOW
+        print("[config] --object_colors distinct: cube blue, bin yellow "
+              "(hue cue the res-32 squint CNN needs; costs sim2real fidelity)")
 
     run_name = args.exp_name or f"{args.env_id}__{args.encoder}__{args.seed}__{int(time.time())}"
     model_path = os.path.abspath(f"runs/{run_name}/ckpt.pt")
@@ -65,7 +68,6 @@ def train(args):
     if not args.evaluate:
         print("Running training")
         if args.track:
-            # NOT named `config`: that would shadow the config module imported above.
             wandb_config = vars(args)
             wandb_config["env_cfg"] = dict(**bundle.env_kwargs, num_envs=args.num_envs,
                                            env_id=args.env_id, reward_mode="normalized_dense",
@@ -89,8 +91,12 @@ def train(args):
     action_space = envs.unwrapped.single_action_space
     encoder_cls = ENCODERS[args.encoder]
 
+    # Constructor arguments beyond (num_cams, res). MUST be recorded in the checkpoint: dino_global's
+    # pool choice changes no tensor shape, so it cannot be inferred back from the weights.
+    encoder_kwargs = {"pool": args.dino_pool} if args.encoder == "dino_global" else {}
+
     def new_encoder(dev=device):
-        return encoder_cls(bundle.num_cams, res=args.res, device=dev)
+        return encoder_cls(bundle.num_cams, res=args.res, device=dev, **encoder_kwargs)
 
     def new_actor(dev=device):
         return Actor(encoder.repr_dim, bundle.n_state, bundle.n_act,
@@ -165,7 +171,19 @@ def train(args):
     actor_optimizer = optim.Adam(list(actor.parameters()), lr=args.policy_lr,
                                  capturable=args.cudagraphs and not args.compile)
 
-    rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
+    if args.obs_only_replay:
+        rb = ObsOnlyReplay(args.buffer_size, args.num_envs,
+                           device=device,
+                           storage_device="cpu" if args.replay_storage == "cpu" else device,
+                           prefetch=args.replay_prefetch)
+        if rb.capacity != args.buffer_size:
+            print(f"[replay] buffer_size {args.buffer_size} -> {rb.capacity} "
+                  f"(rounded down to {rb.iters} whole iterations of {args.num_envs} envs)")
+        print(f"[replay] {rb.capacity:,} transitions = {args.replay_episodes:g} episodes/env "
+              f"on {args.replay_storage}"
+              + (f", prefetch {args.replay_prefetch}" if args.replay_storage == "cpu" else ""))
+    else:
+        rb = ReplayBuffer(storage=LazyTensorStorage(args.buffer_size, device=device))
 
     print("-----------------------")
     print(args)
@@ -188,6 +206,7 @@ def train(args):
             num_cams=bundle.num_cams, res=args.res, n_act=bundle.n_act,
             action_low=action_space.low, action_high=action_space.high,
             proprio=bundle.proprio, global_step=global_step,
+            encoder_kwargs=encoder_kwargs,
             # Training-only extras; deploy ignores them, a resumed run uses them.
             extra={"critic": critic_target.state_dict(),
                    "log_alpha": log_alpha,
@@ -195,9 +214,7 @@ def train(args):
         )
 
     # -- Update steps --------------------------------------------------------------------
-    # bf16 autocast on whichever device we're on. The reference implementation hardcoded 'cuda',
-    # which makes the loop unrunnable on a CPU box even for a smoke test; training is still
-    # GPU-only in practice (see the README), but "does it run at all" should be checkable.
+    # bf16 autocast on whichever device we are on, so the loop stays smoke-testable on a CPU box.
     amp_device = "cuda" if device.type == "cuda" else "cpu"
 
     def update_main(data):
@@ -265,8 +282,6 @@ def train(args):
 
             pi, log_pi, _ = actor.get_action(obs, state)
             q_values = critic.get_q_values(obs, state, pi, detach_critic=True)
-
-            # Mean (No CDQ)
             critic_value = q_values.mean(dim=0)
 
             actor_loss = (alpha * log_pi - critic_value).mean()
@@ -296,7 +311,6 @@ def train(args):
     eval_envs.reset(seed=args.seed)
 
     global_step = 0
-    # cpu backend under raytraced training
     sim_device = torch.device("cpu") if args.visual_fidelity == "raytraced" else device
     pbar = tqdm.tqdm(total=args.total_timesteps, desc="steps")
     max_ep_ret = -float("inf")
@@ -322,7 +336,6 @@ def train(args):
                     print(f"Step {global_step}: new best (success_at_end={score[0]:.2f}, "
                           f"return={score[1]:.2f}) saved to {best_model_path}")
 
-        # fresh run explores randomly before learning_starts; a warm-started run collects with the loaded policy
         if global_step < args.learning_starts and args.checkpoint is None:
             actions = envs.action_space.sample()
             # At num_envs=1 the sampled action comes back unbatched, (n_act,) rather than
@@ -351,16 +364,23 @@ def train(args):
             real_next_obs['rgb'][need_final_obs] = infos["final_observation"]['rgb'][need_final_obs]
             real_next_obs['state'][need_final_obs] = infos["final_observation"]['state'][need_final_obs]
 
-        transition = TensorDict(
-            observations=obs,
-            next_observations=real_next_obs,
-            actions=torch.as_tensor(actions, device=device, dtype=torch.float),
-            rewards=torch.as_tensor(rewards, device=device, dtype=torch.float),
-            dones=dones,
-            batch_size=rewards.shape[0],
-            device=device,
-        )
-        rb.extend(transition)
+        act_t = torch.as_tensor(actions, device=device, dtype=torch.float)
+        rew_t = torch.as_tensor(rewards, device=device, dtype=torch.float)
+        if args.obs_only_replay:
+            # next_obs is not stored: it is the same env's observation one iteration later.
+            # `need_final_obs` is exactly the mask where that identity breaks (the real next
+            # observation is the pre-reset final_observation), so those slots get dropped.
+            rb.extend(obs['rgb'], obs['state'], act_t, rew_t, dones, need_final_obs)
+        else:
+            rb.extend(TensorDict(
+                observations=obs,
+                next_observations=real_next_obs,
+                actions=act_t,
+                rewards=rew_t,
+                dones=dones,
+                batch_size=rewards.shape[0],
+                device=device,
+            ))
 
         obs = next_obs
 
@@ -380,8 +400,10 @@ def train(args):
 
                 d.update(out_main)
 
-        # Log
-        if "final_info" in infos:
+        # Episode metrics only exist on a truncation boundary, but the SAC losses in `d` refresh
+        # every iteration, so the two cadences stay separate.
+        episode_ended = "final_info" in infos
+        if episode_ended:
             final_info = infos["final_info"]
             done_mask = infos["_final_info"]
             for k, v in final_info["episode"].items():
@@ -390,10 +412,15 @@ def train(args):
             avg_returns.extend(infos["final_info"]["episode"]["return"][done_mask])
             desc = (f"global_step={global_step}, "
                     f"episodic_return={torch.tensor(avg_returns).mean(): 4.2f} (max={max_ep_ret: 4.2f})")
+
+        if d and (episode_ended or iteration % args.log_freq == 0):
             sps = global_step / logger.wall_time
             d["time/sps"] = sps
             pbar.set_description(f"{sps: 4.4f} sps, " + desc)
             logger.log(d=d, step=global_step)
+            # Cleared so the next point carries fresh losses and the episode metrics stay a sparse
+            # series rather than a stale value repeated until the next truncation.
+            d = {}
 
         pbar.update(args.num_envs)
         global_step += args.num_envs
@@ -408,6 +435,8 @@ def train(args):
     logger.close()
     print("Starting cleanup...")
     try:
+        if hasattr(rb, "close"):
+            rb.close()      # stop the replay prefetch thread before tearing the sim down
         envs.close()
         eval_envs.close()
     except Exception:

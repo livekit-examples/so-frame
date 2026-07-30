@@ -1,23 +1,18 @@
 """Delta-from-target joint position action.
 
-mjlab ships two joint-position terms and neither matches how this rig is driven:
-
-- ``JointPositionActionCfg``: ``target = action * scale + default_qpos``. An ABSOLUTE target
- measured from the home pose, so nothing bounds per-step motion.
-- ``RelativeJointPositionActionCfg``: ``target = current_qpos + action * scale``. A real delta,
- but measured from where the joint actually IS.
-
-The maniskill twin uses ``pd_joint_target_delta_pos`` and the deploy loop integrates the same
-way: the delta is added to the PREVIOUS TARGET, not to the measured position. The difference
-matters under load. If a joint lags its target -- carrying the cube, pressing into the bin, or
-just at the servo's speed limit -- delta-from-current can never get ahead of the lag, so the
-commanded target collapses onto the measured pose and the arm stalls. Delta-from-target keeps
-integrating, exactly as the real servo's position loop is driven.
-
   target_t = clamp(target_{t-1} + action * scale, soft joint limits)
 
+Neither of mjlab's joint-position terms matches how this rig is driven.
+``JointPositionActionCfg`` is ``action * scale + default_qpos``, an absolute target from the home
+pose, so nothing bounds per-step motion. ``RelativeJointPositionActionCfg`` is a real delta but
+measures it from where the joint actually is, and under load that stalls the arm: if a joint lags
+its target, delta-from-current can never get ahead of the lag, so the commanded target collapses
+onto the measured pose. Adding the delta to the PREVIOUS TARGET keeps integrating, exactly as the
+real servo's position loop is driven, and matches the maniskill twin's
+``pd_joint_target_delta_pos`` and the deploy loop.
+
 On reset the running target is reseeded from the measured pose, so the first action of an episode
-is a no-jump delta -- the same thing rl/deploy/policy/run.py does when it (re)claims control.
+is a no-jump delta, the same thing rl/deploy/policy/run.py does when it (re)claims control.
 """
 
 from __future__ import annotations
@@ -67,7 +62,7 @@ class TargetRelativeJointPositionActionCfg(BaseActionCfg):
   """``target = previous_target + action * scale``, clamped to the soft joint limits.
 
   ``scale`` is therefore a hard per-step motion cap, in joint units. Set it from measured real
-  joint speed divided by the control rate -- see soframe_policy.rig.JOINT_DELTA_LIMITS.
+  joint speed divided by the control rate, see soframe_policy.rig.JOINT_DELTA_LIMITS.
   """
 
   def __post_init__(self):

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "so-frame-deploy"
 version = "0.1.0"
@@ -22,13 +26,24 @@ dependencies = [
     "python-dotenv>=1",
 ]
 
+[dependency-groups]
+# --viz only, and only ever on the operator machine. An optional group so `uv sync` on the robot
+# host skips it; the lock still resolves it for linux aarch64, so the Jetson can sync either way.
+viz = ["pyside6-essentials>=6.8"]
+
 [tool.uv.sources]
 soframe-policy = { path = "../policy", editable = true }
-lerobot_robot_so101_slider_pos = { git = "https://github.com/pham-tuan-binh/leslider", subdirectory = "packages/lerobot_robot_so101_slider_pos", rev = "4c1c85d4f140b1c4704cafa7624f14e844919700" }
+lerobot_robot_so101_slider_pos = { git = "https://github.com/pham-tuan-binh/leslider", subdirectory = "packages/lerobot_robot_so101_slider_pos", rev = "c18e50fed2eb8e4343de40a3e90cbb10eb885e04" }
 
 [project.scripts]
 robot = "robot.run:cli"
 policy = "policy.run:cli"
 
+# The project has to be packaged for `uv run robot` / `uv run policy` to exist:
+# with `package = false` uv skips installing project.scripts entirely (it says so
+# in a warning during sync) and the documented commands do not resolve.
 [tool.uv]
-package = false
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["robot", "policy", "utils"]

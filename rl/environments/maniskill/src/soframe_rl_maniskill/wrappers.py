@@ -1,21 +1,20 @@
 """Observation wrappers for the training obs pipeline.
 
-Adapted from Squint (https://github.com/aalmuzairee/squint): resolution downsampling and
-colour jitter, plus this repo's camera sensor-realism augmentation and DINOv2 tokenisation.
+Adapted from Squint (https://github.com/aalmuzairee/squint): resolution downsampling and colour
+jitter, plus this repo's camera sensor-realism augmentation and DINOv2 tokenisation.
 
-These run once per env step, outside the gradient update, which is the whole point: the
-expensive parts (the frozen ViT especially) are paid once per collected transition rather than
-once per minibatch, and what lands in the replay buffer is already encoder-ready.
+These run once per env step, outside the gradient update, so the expensive parts (the frozen ViT
+especially) are paid per collected transition rather than per minibatch, and what lands in the
+replay buffer is already encoder-ready.
 
-Each wrapper's transform has a deploy counterpart in ``soframe_policy``:
+Transforms with a deploy counterpart in ``soframe_policy``, which must not drift on resize mode,
+normalisation or camera ordering (the tokeniser is imported, not reimplemented):
 
     DownsampleObsWrapper  <->  SquintEncoder.preprocess     (area resize)
     DinoTokenWrapper      <->  DinoPatchEncoder.preprocess  (both call soframe_policy tokenize)
 
-The tokeniser is imported rather than reimplemented, so sim and real cannot drift on resize
-mode, normalisation or camera ordering. The jitter/augmentation wrappers have no deploy
-counterpart by design: they exist to make the policy robust to the real cameras, which supply
-their own noise.
+The jitter/augmentation wrappers have no deploy counterpart: the real cameras supply their own
+noise.
 """
 
 import gymnasium as gym
@@ -23,7 +22,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 
-from soframe_policy.encoders import dino_patch
+from soframe_policy.encoders import dino_global, dino_patch
 
 
 class DownsampleObsWrapper(gym.ObservationWrapper):
@@ -153,12 +152,12 @@ class SensorAugWrapper(gym.ObservationWrapper):
 class DinoTokenWrapper(gym.ObservationWrapper):
     """Replace RGB observations with frozen DINOv2 patch tokens, cached.
 
-    The ViT runs here, once per env step, and the tokens are what go into the replay buffer, so
-    the backbone never runs inside a gradient update. Only the head trains.
+    The ViT runs here, once per env step, so the backbone never runs inside a gradient update.
+    Only the head trains.
 
-    Input (B, H, W, 3*num_cams) uint8; output (B, n_tok, 384) bf16. Apply LAST in the pipeline
-    (after any jitter/augmentation, which need images). Tokenisation itself is
-    ``soframe_policy.encoders.dino_patch.tokenize`` -- the same call the deployed policy makes.
+    Input (B, H, W, 3*num_cams) uint8; output (B, n_tok, 384) bf16. Apply LAST in the pipeline:
+    anything above needs images, and this emits features. Tokenisation is
+    ``soframe_policy.encoders.dino_patch.tokenize``, the call the deployed policy makes.
     """
 
     def __init__(self, env, res, device=None):
@@ -170,8 +169,8 @@ class DinoTokenWrapper(gym.ObservationWrapper):
         assert C % 3 == 0, f"expected 3*num_cams channels, got {C}"
         self.num_cams = C // 3
         self.n_tok = dino_patch.token_count(self.num_cams, res)
-        # Load the backbone now rather than on the first observation, so a missing torch.hub
-        # cache fails at startup instead of mid-rollout.
+        # Load now, not on the first observation: a missing torch.hub cache must fail at startup
+        # rather than mid-rollout.
         dino_patch.load_backbone(self.device)
         self.observation_space['rgb'] = gym.spaces.Box(
             low=-3.4e38, high=3.4e38, shape=(self.n_tok, dino_patch.EMBED), dtype="float32"
@@ -184,4 +183,42 @@ class DinoTokenWrapper(gym.ObservationWrapper):
         if squeeze:
             tokens = tokens.squeeze(0)
         obs['rgb'] = tokens
+        return obs
+
+
+class DinoGlobalWrapper(gym.ObservationWrapper):
+    """Replace RGB observations with frozen DINOv2 global vectors, cached.
+
+    The collapsed counterpart of DinoTokenWrapper: one vector per camera (two under
+    pool="cls_mean") instead of a patch grid. Same placement rule, LAST in the pipeline.
+
+    Input (B, H, W, 3*num_cams) uint8; output (B, n_vec, 384) bf16, i.e. 1.5 KB per observation
+    against the patch grid's 216 KB.
+    """
+
+    def __init__(self, env, res, device=None, pool="cls"):
+        super().__init__(env)
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.res = res
+        self.pool = pool
+        shp = self.observation_space['rgb'].shape
+        C = shp[-1]
+        assert C % 3 == 0, f"expected 3*num_cams channels, got {C}"
+        self.num_cams = C // 3
+        self.n_vec = dino_global.vector_count(self.num_cams, pool)
+        # Load now, not on the first observation: a missing torch.hub cache must fail at startup
+        # rather than mid-rollout.
+        dino_global.load_backbone(self.device)
+        self.observation_space['rgb'] = gym.spaces.Box(
+            low=-3.4e38, high=3.4e38, shape=(self.n_vec, dino_global.EMBED), dtype="float32"
+        )
+
+    def observation(self, obs):
+        rgb = obs['rgb']
+        squeeze = rgb.dim() == 3
+        vecs = dino_global.embed_global(rgb, self.res, num_cams=self.num_cams,
+                                        device=self.device, pool=self.pool)
+        if squeeze:
+            vecs = vecs.squeeze(0)
+        obs['rgb'] = vecs
         return obs

@@ -35,16 +35,17 @@ for _mesh in (CUBE_MESH, BIN_MESH):
         f"task mesh not found at {_mesh}; run simulation/assets/objects/convert.py"
     )
 
-# Every tunable constant lives in ../config.py; imported by name here so the reward reads
-# cleanly. See that file for the reasoning behind the ladder spacing and the motion limits.
+# Every tunable constant lives in ../config.py; imported by name here so the reward reads cleanly.
 from ..config import (  # noqa: E402
     GOAL_CLEARANCE,
     REACH_XY_ALIGNED,
+    REACH_Z_ALIGNED,
     REWARD_SUCCESS,
     RUNG_GRASPED,
     RUNG_HOLDING,
     RUNG_RELEASED,
     SHAPE_HOLD_OPEN,
+    SHAPE_REACH_CLOSE,
     SHARP,
     WORK_SURFACE_Z,
 )
@@ -52,26 +53,21 @@ from ..config import (  # noqa: E402
 
 @dataclass
 class PickPlaceRandomizationConfig(RandomizationConfig):
-    """Domain randomization config for the pick-and-place task.
-
-    Randomization *ranges* live here rather than in config.py: they are per-run and
-    CLI-overridable, whereas config.py holds the fixed physical constants of the rig."""
+    """Domain randomization ranges for the pick-and-place task (per-run and CLI-overridable;
+    config.py holds the fixed physical constants of the rig)."""
 
     robot_qpos_noise_std: float = np.deg2rad(5)
 
-    # Object SIZE is no longer randomized: both the cube and the bin come from fixed CAD meshes
-    # (simulation/assets/objects/), so their dimensions live in config.py. Only material
-    # properties and colour vary per episode.
+    # Object SIZE is not randomized: both meshes are fixed CAD, so their dimensions live in
+    # config.py. Only material properties and colour vary per episode.
     item_friction_range: Sequence[float] = (0.5, 1.0)
     item_density_range: Sequence[float] = (400, 400)  # ~3.2 g for the 20 mm cube.
-    # Fixed colors (purple cube, yellow bin) matched to real captures. Color randomization
-    # is supported but costs sample efficiency, so it's opt-in.
+    # Colour randomization costs sample efficiency, so it is opt-in.
     randomize_item_color: bool = False
     randomize_bin_color: bool = False
 
 
-# 300 steps (30 s at 10 Hz): the slow real-servo-tracking speeds need this much runway.
-@register_env("SOFramePickPlaceBin-v1", max_episode_steps=300)
+@register_env("SOFramePickPlaceBin-v1", max_episode_steps=config.EPISODE_HORIZON)
 class PickPlaceBin(DualCameraEnv):
     """Pick up a 20 mm cube and place it in a bin, both from the CAD meshes in
     simulation/assets/objects/.
@@ -122,9 +118,8 @@ class PickPlaceBin(DualCameraEnv):
 
     def _load_scene(self, options: dict):
         super()._load_scene(options)
-        # Safety catch-all far below the lightbox floor for anything that rolls off the panels.
-        # Deliberately beyond config.SENSOR_FAR so the policy cameras never render it; see
-        # config.GROUND_ALTITUDE for why that matters.
+        # Safety catch-all for anything that rolls off the panels, beyond config.SENSOR_FAR so the
+        # policy cameras never render it (see config.GROUND_ALTITUDE).
         self.ground = build_ground(self.scene, altitude=config.GROUND_ALTITUDE)
 
         cfg = self.domain_randomization_config
@@ -136,7 +131,7 @@ class PickPlaceBin(DualCameraEnv):
                 return self._batched_episode_rng.uniform(low=value_range[0], high=value_range[1])
             return np.full(self.num_envs, (value_range[0] + value_range[1]) / 2)
 
-        # Work surface panels render near-white (~0.9); a random color too close to that is
+        # Work surface panels render near-white (~0.9); a random colour too close to that is
         # indistinguishable from the floor at training resolution, so redraw those.
         _WORK_SURFACE_RGB = 0.902
 
@@ -153,14 +148,13 @@ class PickPlaceBin(DualCameraEnv):
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
-        # Cube colour from config.COLOR_CUBE (linear base colour).
         colors = np.tile(config.COLOR_CUBE, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
         colors = np.concatenate([colors, np.ones((self.num_envs, 1))], axis=-1)
 
-        # Fixed geometry from the CAD meshes, so these are scalars broadcast per env rather than
-        # per-env samples. Kept as tensors because evaluate() and the reward index them by env.
+        # Fixed CAD geometry, so scalars broadcast per env. Kept as tensors because evaluate() and
+        # the reward index them by env.
         ones = torch.ones(self.num_envs, device=self.device)
         self.item_half_heights = ones * config.CUBE_HALF
         self.item_dimensions = torch.stack([ones * config.CUBE_HALF] * 3, dim=-1)
@@ -174,8 +168,8 @@ class PickPlaceBin(DualCameraEnv):
             material = sapien.pysapien.physx.PhysxMaterial(
                 static_friction=friction, dynamic_friction=friction, restitution=0,
             )
-            # Exact box collision: the mesh IS a 20 mm cube, so a box is identical and cheaper
-            # than a convex hull, and gives PhysX flat faces to rest on.
+            # Exact box collision: the mesh IS a 20 mm cube, so a box is identical, cheaper than a
+            # convex hull, and gives PhysX flat faces to rest on.
             builder.add_box_collision(
                 half_size=[config.CUBE_HALF] * 3, material=material, density=densities[i]
             )
@@ -183,8 +177,8 @@ class PickPlaceBin(DualCameraEnv):
             if realistic:
                 item_material.set_roughness(0.6)
                 item_material.set_metallic(0.0)
-            # Visual from the CAD mesh. Its base is at z=0 while the collision box is centred on
-            # the origin, so the mesh is lowered by a half-height to line the two up.
+            # The mesh base is at z=0 while the collision box is centred on the origin, so the mesh
+            # is lowered by a half-height to line the two up.
             builder.add_visual_from_file(
                 filename=str(CUBE_MESH),
                 pose=sapien.Pose(p=[0, 0, -config.CUBE_HALF]),
@@ -199,13 +193,11 @@ class PickPlaceBin(DualCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        # Bin colour from config.COLOR_BIN.
         bin_colors = np.tile(config.COLOR_BIN, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
 
-        self.bin_thickness = config.BIN_FLOOR_THICKNESS
         # [interior_half_x, interior_half_y, rim_height]. The z entry is the FULL rim height
         # above the work surface (the mesh base sits on it), not a half-extent.
         self.bin_dimensions = torch.stack([
@@ -223,13 +215,12 @@ class PickPlaceBin(DualCameraEnv):
                 bin_material.set_roughness(0.55)
                 bin_material.set_metallic(0.0)
 
-            # Visual: the CAD mesh, filleted corners and true 2 mm walls. Its base is at z=0 and
-            # the actor origin is the base too, so no offset.
+            # Visual: the CAD mesh, filleted corners and true 2 mm walls. Base and actor origin are
+            # both at z=0, so no offset.
             builder.add_visual_from_file(filename=str(BIN_MESH), material=bin_material)
 
-            # Collision: floor slab + 4 walls. The mesh is concave, and a convex hull would seal
-            # the opening, so collision is built from boxes instead (convex decomposition would
-            # also work but costs build time across 1024 envs for no benefit on a box tray).
+            # Collision: floor slab + 4 walls. The mesh is concave and a convex hull would seal the
+            # opening, so collision is built from boxes instead.
             floor_h = config.BIN_FLOOR_THICKNESS / 2
             builder.add_box_collision(
                 pose=sapien.Pose([0, 0, floor_h]),
@@ -258,7 +249,6 @@ class PickPlaceBin(DualCameraEnv):
 
         self.bin = Actor.merge(bins, name="bin")
         self.add_to_state_dict_registry(self.bin)
-        self.bin_radius = ones * config.BIN_FOOTPRINT_HALF * math.sqrt(2)
 
         if self.apply_greenscreen:
             self.remove_object_from_greenscreen(self.agent.robot)
@@ -269,7 +259,6 @@ class PickPlaceBin(DualCameraEnv):
             SO101OnFrame.keyframes["rest"].qpos.tolist(), device=self.device
         )
 
-        # One pass: colour scheme always, PBR relief maps only when realistic.
         self.agent.apply_materials(realistic=realistic)
 
         goal_builder = self.scene.create_actor_builder()
@@ -294,14 +283,10 @@ class PickPlaceBin(DualCameraEnv):
 
             # -- Spawn: one zone for both objects, bin placed first --------------------------
             #
-            # The bin goes anywhere in the workspace; the cube then goes anywhere in the same
-            # workspace that clears the bin by at least SPAWN_MIN_GAP. So the pair can appear in
-            # any relative arrangement, and the policy cannot learn "bar is always far, bin is
-            # always near" from the old split regions.
-            #
-            # Each object samples from the zone inset by its own footprint circumradius plus
-            # SPAWN_PADDING, so it lands fully inside the reachable area and away from the frame
-            # edge. The bin is inset much further than the cube because it is far larger.
+            # The bin goes anywhere in the workspace; the cube then goes anywhere in the same zone
+            # that clears the bin by at least SPAWN_MIN_GAP, so the pair can appear in any relative
+            # arrangement. Each object samples from the zone inset by its own footprint plus
+            # SPAWN_PADDING, so it lands fully inside the reachable area.
             origin = self.agent.robot.pose.p[env_idx, :2] + torch.tensor(
                 [self.workspace_center[0], self.workspace_center[1]]
             )
@@ -309,8 +294,8 @@ class PickPlaceBin(DualCameraEnv):
 
             # Yaw is sampled up front so the edge inset can use each object's ACTUAL rotated
             # footprint. A square of half-size h at yaw t spans h*(|cos t| + |sin t|) per axis,
-            # between h and h*sqrt(2). Insetting by the worst case instead would cost almost all
-            # of the bin's x freedom: the zone is only 200 mm wide and the bin's diagonal is 141.
+            # between h and h*sqrt(2); insetting by the worst case would cost almost all of the
+            # bin's x freedom (258 mm of zone against a 141 mm diagonal).
             item_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
             bin_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
 
@@ -329,8 +314,7 @@ class PickPlaceBin(DualCameraEnv):
             bin_fp = aabb_half(bin_qs, config.BIN_FOOTPRINT_HALF)
             cube_fp = aabb_half(item_qs, config.CUBE_HALF)
 
-            # The pairwise test stays on circumradii: conservative is the right side to err on
-            # for "do not overlap", and it is independent of both yaws.
+            # The pairwise test uses circumradii: conservative, and independent of both yaws.
             bin_r = config.BIN_FOOTPRINT_HALF * math.sqrt(2)
             cube_r = config.CUBE_HALF * math.sqrt(2)
             min_centre_dist = bin_r + cube_r + config.SPAWN_MIN_GAP
@@ -345,8 +329,8 @@ class PickPlaceBin(DualCameraEnv):
                     break
                 cube_xy[too_close] = sample_xy(origin[too_close], cube_fp[too_close])
             else:
-                # Deterministic fallback so a spawn is never left overlapping: push the stragglers
-                # to whichever end of the long (y) axis is further from their bin, at the bin's x.
+                # Deterministic fallback so a spawn is never left overlapping: push stragglers to
+                # whichever end of the long (y) axis is further from their bin, at the bin's x.
                 too_close = torch.linalg.norm(cube_xy - bin_xy, dim=-1) < min_centre_dist
                 if too_close.any():
                     limit = (zone_half[1] - cube_r - config.SPAWN_PADDING).clamp_min(0.0)
@@ -356,10 +340,9 @@ class PickPlaceBin(DualCameraEnv):
                     )
 
             # The cube's collision box is centred on the actor origin, so it rests a half-height
-            # above the surface. The bin's mesh and collision are both based at its origin.
-            # MUST reuse item_qs / bin_qs, the yaws the edge inset above was computed from.
-            # Drawing fresh ones here would let an object rotate into the zone edge it was
-            # placed to clear.
+            # above the surface; the bin's mesh and collision are both based at its origin.
+            # MUST reuse item_qs / bin_qs, the yaws the edge inset was computed from: fresh ones
+            # would let an object rotate into the zone edge it was placed to clear.
             item_xyz = torch.zeros((b, 3))
             item_xyz[:, :2] = cube_xy
             item_xyz[:, 2] = WORK_SURFACE_Z + self.item_half_heights[env_idx]
@@ -380,10 +363,9 @@ class PickPlaceBin(DualCameraEnv):
     def _get_obs_agent(self):
         """The actor's proprio: noisy measured qpos (7) then the controller's target qpos (7).
 
-        This is the deploy contract -- 14 values the real rig can always produce, in this
-        order. Anything added here changes what every deployed checkpoint expects, so keep it
-        to quantities the robot actually measures or commands. (A previous version inserted
-        action-delay fields here, which silently broke deploy; see policy/README.md.)
+        This is the deploy contract: 14 values the real rig can always produce, in this order.
+        Anything added here changes what every deployed checkpoint expects, so keep it to quantities
+        the robot actually measures or commands.
         """
         qpos = self.agent.robot.get_qpos()
         if self.domain_randomization and self.domain_randomization_config.robot_qpos_noise_std > 0:
@@ -448,8 +430,8 @@ class PickPlaceBin(DualCameraEnv):
         is_item_static = item_vel <= 2e-2
         is_robot_static = self.agent.is_static()
 
-        # Two pairwise contact queries per object, fetched once and shared. Asking the agent for
-        # `is_grasping(item)` and `is_touching(item)` separately ran the same two queries twice.
+        # Two pairwise contact queries per object, fetched once and shared: asking for
+        # `is_grasping` and `is_touching` separately would run the same queries twice.
         item_forces = self.agent.jaw_contact_forces(self.item)
         bin_forces = self.agent.jaw_contact_forces(self.bin)
         is_item_grasped = self.agent.is_grasping(self.item, forces=item_forces)
@@ -482,9 +464,8 @@ class PickPlaceBin(DualCameraEnv):
         return (self.agent.robot.get_qpos()[:, idx] - gripper_min) / (gripper_max - gripper_min)
 
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
-        """Monotonic stage ladder, no penalties. Stages are mutually exclusive, and each rung
-        sits above the previous stage's maximum, so progress is monotone and a regression falls
-        to a lower rung without needing an explicit anti-regression term."""
+        """Monotonic stage ladder, no penalties. Stages are mutually exclusive and each rung sits
+        above the previous stage's maximum, so a regression falls to a lower rung on its own."""
         tcp = self.agent.tcp_pos
         item_p = self.item.pose.p
 
@@ -494,8 +475,11 @@ class PickPlaceBin(DualCameraEnv):
             WORK_SURFACE_Z + config.BIN_HEIGHT + self.item_half_heights + GOAL_CLEARANCE
         )
 
-        # Stage 0 [0, 1]: top-down reach. xy alignment first; the z term only pays once aligned,
-        # so the tool descends from ABOVE rather than scooping from the side (which wrecked grasps).
+        # How far the jaw is open, in [0, 1]. Closing pays in the reach stage, opening in holding.
+        openness = self._gripper_qpos_openness()
+
+        # Stage 0 [0, 1.5]: top-down reach. xy alignment first; the z term only pays once aligned,
+        # so the tool descends from ABOVE rather than scooping in from the side.
         reach_d_xy = torch.linalg.norm(tcp[:, :2] - item_p[:, :2], axis=1)
         reach_d_z = torch.abs(tcp[:, 2] - item_p[:, 2])
         aligned_xy = reach_d_xy < REACH_XY_ALIGNED
@@ -503,6 +487,13 @@ class PickPlaceBin(DualCameraEnv):
             aligned_xy,
             0.5 * (1 - torch.tanh(SHARP * reach_d_z)),
             torch.zeros_like(reach_d_z),
+        )
+        # Mirror of the openness term in stage 2: once the tool is ON the cube, closing the jaw is a
+        # continuous climb toward the grasped rung. Gated on BOTH axes, so a jaw that shuts before
+        # it surrounds the cube pays nothing.
+        on_item = aligned_xy & (reach_d_z < REACH_Z_ALIGNED)
+        reward = reward + torch.where(
+            on_item, SHAPE_REACH_CLOSE * (1 - openness), torch.zeros_like(openness)
         )
 
         # Stage masks. is_item_above_bin is horizontal-only; holding vs released splits on contact.
@@ -518,14 +509,11 @@ class PickPlaceBin(DualCameraEnv):
         carry = RUNG_GRASPED + (1 - torch.tanh(SHARP * item_to_goal))
         reward = torch.where(grasped_only, carry, reward)
 
-        # Stage 2 [4, 5]: holding over the bin -- rises with how far the jaw is opened, so
-        # unclamping is a continuous climb instead of a blind jump to the released rung.
-        # Openness pays HERE only, never while carrying, so opening early (and dropping the bar
-        # short of the bin) is still worth strictly less than carrying on.
-        openness = self._gripper_qpos_openness()
+        # Stage 2 [4, 5]: holding over the bin, rising with jaw openness. Openness pays HERE only,
+        # never while carrying, so opening early and dropping short of the bin is worth less.
         reward = torch.where(holding_above, RUNG_HOLDING + SHAPE_HOLD_OPEN * openness, reward)
 
-        # Stage 3 [6]: released over the bin. Flat -- success is what pays for a clean settle.
+        # Stage 3 [6]: released over the bin. Flat: success is what pays for a clean settle.
         reward = torch.where(released_above, torch.full_like(reward, RUNG_RELEASED), reward)
 
         # Terminal success (bar settled in the bin, arm + bar static, gripper clear).

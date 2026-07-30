@@ -1,11 +1,5 @@
-"""Squint's low-resolution CNN encoder: the "squint" of the paper's title.
-
-Vendored from https://github.com/aalmuzairee/squint with the conv stack untouched, so the
-parameter names (``conv.0.weight``, ...) and therefore existing squint checkpoints are
-unchanged. The additions are ``preprocess`` (so deploy and training share one definition of
-how a raw camera stack becomes encoder input) and the ``KIND``/``RGB_PROJ_DIM`` registry
-attributes.
-"""
+"""Squint's low-resolution CNN encoder, vendored from https://github.com/aalmuzairee/squint with
+the conv stack untouched, so existing squint checkpoints load."""
 from __future__ import annotations
 
 import torch
@@ -19,8 +13,7 @@ class SquintEncoder(nn.Module):
     """Conv encoder over a heavily downsampled multi-camera RGB stack.
 
     Input is (B, res, res, 3*num_cams) uint8, cameras concatenated on the channel axis. ``res``
-    is the squinted resolution and must be 16, 32 or 64 -- the conv stack is sized per
-    resolution, exactly as in the reference implementation.
+    is the squinted resolution and must be 16, 32 or 64: the conv stack is sized per resolution.
     """
 
     KIND = "squint"
@@ -62,9 +55,8 @@ class SquintEncoder(nn.Module):
     def preprocess(self, rgb):
         """(B, H, W, 3*num_cams) uint8 at any H=W -> the same stack squinted to ``res``.
 
-        Area interpolation, matching the training-side downsample wrapper. A no-op when the
-        input is already at ``res``, so training (which downsamples once in the obs pipeline)
-        and deploy (which squints the rectified 128px camera views here) agree.
+        Area interpolation, a no-op when the input is already at ``res``. Training and deploy must
+        both go through this one definition so they cannot disagree on resize or camera order.
         """
         if rgb.shape[-2] == self.res:
             return rgb

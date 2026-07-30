@@ -1,11 +1,7 @@
 """Training configuration, one dataclass for every encoder.
 
-This replaced five near-identical copies of itself, one per train script. The only thing that
-ever genuinely varied between them was ``--encoder`` and the resolution/buffer-size defaults
-that follow from it, which ``resolve()`` derives.
-
-Flags dropped along with the features they configured: --privileged_critic (asymmetric critic),
---action_delay_max, --action_rate_penalty, --surface_penalty_weight/-gated.
+``--encoder`` and the resolution / buffer-size defaults that follow from it are the only structural
+differences between architectures; ``resolve()`` derives them.
 """
 
 from dataclasses import dataclass
@@ -13,13 +9,21 @@ from typing import Optional
 
 from soframe_policy.encoders import ENCODERS
 
-# Per-encoder defaults for the two knobs that genuinely differ. `res` means the squinted image
-# size for the CNN and the per-camera DINOv2 input resolution for the patch head; `buffer_size`
-# follows from how big one cached observation is (a 32px 6-channel image is ~6 KB, a 2-camera
-# 168px token grid is ~110 KB in bf16).
+# Per-encoder defaults. `res` is the squinted image size for the CNN and the per-camera DINOv2
+# input resolution for the patch head.
+#
+# `num_updates` is a tuned value rather than a structural consequence of the architecture, so keep
+# it paired with the `batch_size` default of 512 and 1024 `num_envs`: it is a ratio against 1024
+# envs, and changing num_envs without scaling it silently changes the update-to-data ratio.
+#
+# `buffer_size` is deliberately absent: it is derived from --replay_episodes for every encoder, so
+# retention is equal and a comparison between them measures the architecture.
 ENCODER_DEFAULTS = {
-    "squint":     dict(res=32,  render_size=128, buffer_size=1_000_000, num_updates=256),
-    "dino_patch": dict(res=168, render_size=168, buffer_size=75_000,    num_updates=32),
+    "squint":      dict(res=32,  render_size=128, num_updates=64),
+    "dino_patch":  dict(res=168, render_size=168, num_updates=32),
+    # dino_global is the dense-vs-collapsed control for dino_patch, so its num_updates MUST match
+    # dino_patch's or an update-ratio difference confounds the comparison.
+    "dino_global": dict(res=168, render_size=168, num_updates=32),
 }
 
 
@@ -29,8 +33,8 @@ class Args:
     """the name of this experiment"""
     encoder: str = "squint"
     """vision encoder: 'squint' (CNN over a squinted image stack) or 'dino_patch' (self-attention
-    over frozen DINOv2 patch tokens). Sets the res/buffer_size/num_updates defaults below and is
-    recorded in the checkpoint, so deploy does not need to be told which architecture it is."""
+    over frozen DINOv2 patch tokens). Sets the res/buffer_size/num_updates defaults above and is
+    recorded in the checkpoint, so deploy is not told which architecture it is."""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
@@ -64,9 +68,13 @@ class Args:
     env_domain_randomization: bool = True
     """adds domain randomization flag if env supports it"""
     randomize_colors: bool = False
-    """also randomize bar/bin colors per scene build (default fixed purple/yellow); pair with --reconfiguration_freq"""
+    """also randomize bar/bin colors per scene build (on top of --object_colors); pair with --reconfiguration_freq"""
+    object_colors: str = "black"
+    """cube/bin colour scheme. "black" matches the real rig (both config.BLACK). "distinct" paints
+    the cube blue and the bin yellow, which the squint CNN needs: at res 32 the cube is one pixel,
+    so hue is the only cue it has. Costs sim2real fidelity, so it is not the default."""
     overhead_camera_fov: Optional[float] = None
-    """override the overhead camera's base FOV, in DEGREES (measured via rl/deploy/utils/calibrate_camera.py)"""
+    """override the overhead camera's base FOV, in DEGREES (measured via rl/calibrate)"""
     wrist_camera_fov: Optional[float] = None
     """override the wrist camera's base FOV, in DEGREES; same sourcing as overhead's"""
     overhead_camera_pos_offset: Optional[tuple[float, float, float]] = None
@@ -77,8 +85,10 @@ class Args:
     """rendering fidelity (see envs/base_random_env.py): "raster" realistic PBR + soft shadow, "flat" fast shadowless, "raytraced" eval-only on the cpu backend"""
     num_envs: int = 1024
     """the number of parallel environments"""
-    num_eval_envs: int = 32
-    """the number of parallel evaluation environments"""
+    num_eval_envs: int = 35
+    """the number of parallel evaluation environments. 35 rather than a round 32 so the eval
+    video tiles without gaps: RecordEpisode uses nrows = int(sqrt(num_envs)), so 35 is exactly
+    5 rows x 7 columns, where 32 leaves a ragged last column."""
     partial_reset: bool = False
     """whether to let parallel environments reset upon termination instead of truncation"""
     eval_partial_reset: bool = False
@@ -89,23 +99,22 @@ class Args:
     """for benchmarking purposes we want to reconfigure the eval environment each reset to ensure objects are randomized in some tasks"""
     eval_freq: int = 100_000
     """evaluation frequency in terms of global steps"""
+    log_freq: int = 10
+    """how often, in iterations, to push the SAC losses to wandb. Separate from episode metrics,
+    which only exist at a truncation boundary, every env_horizon iterations with partial_reset
+    off."""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
     obs_mode: Optional[str] = "rgb"
-    """the observation output mode of the environment. Plain "rgb": the segmentation buffer only
-    ever fed the greenscreen overlay, which is off by default now that the ground plane is culled
-    by the sensor far plane (see RandomizationConfig.apply_overlay). Pass
+    """the observation output mode of the environment. Plain "rgb" because the segmentation buffer
+    only feeds the greenscreen overlay, which is off (see RandomizationConfig.apply_overlay). Pass
     --obs_mode rgb+segmentation if you turn the overlay back on."""
     sim_backend: str = "gpu"
     """physics/render backend. 'gpu' for real training (needs CUDA); 'cpu' supports a single
     env and exists so the loop can be smoke-tested on a machine without a GPU. Forced to 'cpu'
     by --visual_fidelity raytraced."""
-    binary_gripper: bool = False
-    """threshold the gripper action to fully open/closed each step (arm/rail stay continuous).
-    Off = the normal continuous gripper action space, which the openness-ramp reward needs;
-    pass --binary_gripper to reproduce the v35-era binary-jaw runs"""
     arm_speed_scale: float = 1.0
     """multiplier on arm/rail delta limits (gripper unscaled). 1.0 = the measured real servo
     speed (0.05 rad/step arm, 0.007 m/step rail at 10 Hz). For arm-speed ablations only."""
@@ -122,11 +131,32 @@ class Args:
     """camera sensor-realism augmentation (compression/noise/gamma) on top of color jitter"""
 
     # Algorithm specific arguments
-    total_timesteps: int = 1_500_000
-    """total timesteps of the experiments"""
+    total_timesteps: int = 12_000_000
+    """total timesteps of the experiments. A from-scratch squint CNN does not land its first
+    success until ~7M, so shorter budgets finish before the task is learned."""
+    dino_pool: str = "cls"
+    """--encoder dino_global only: what "one vector" means. "cls" is the CLS token, "mean" the mean
+    over patch tokens, "cls_mean" both concatenated (two vectors per camera instead of one).
+    Ignored by other encoders."""
+    replay_episodes: float = 2.0
+    """replay retention, in EPISODES per env. The buffer holds
+    `replay_episodes * config.EPISODE_HORIZON * num_envs` transitions, the same formula for every
+    encoder, so a comparison between them measures the architecture rather than the buffer."""
     buffer_size: Optional[int] = None
-    """the replay memory buffer size. Defaults per --encoder (cached DINOv2 tokens are far
-    larger per transition than a 32px image stack)."""
+    """replay size in transitions. Leave unset: it is derived from --replay_episodes. Set it only to
+    override that derivation."""
+    replay_storage: str = "gpu"
+    """where the replay lives: "gpu" (VRAM) or "cpu" (pinned host RAM, with a prefetch thread
+    overlapping the gather and the PCIe copy with training). gpu by default. Use cpu when the buffer
+    will not fit in VRAM; the prefetch holds the throughput penalty near 24%."""
+    replay_prefetch: int = 2
+    """batches the replay keeps in flight when --replay_storage cpu. 0 makes sampling synchronous,
+    the fallback if the prefetch thread is suspected of masking a bug."""
+    obs_only_replay: bool = True
+    """store each observation once and recover next_obs by an index offset, halving replay memory
+    (see sac/replay.py; unit tests in tests/test_replay.py). Host storage is implemented only in
+    this buffer. --no-obs_only_replay falls back to the torchrl buffer, which forces
+    --replay_storage gpu."""
     batch_size: int = 512
     """the batch size of sample from the replay memory"""
     num_updates: Optional[int] = None
@@ -141,11 +171,11 @@ class Args:
     """the learning rate of alpha for policy"""
     encoder_lr: Optional[float] = None
     """learning rate for the encoder, trained by the critic optimizer as its own param group.
-    Defaults to q_lr. Worth lowering (~1e-4) for the transformer head: the shared encoder's
-    representation must drift slowly or the critic's value estimates destabilize."""
+    Defaults to q_lr; worth lowering (~1e-4) for the transformer head, whose representation must
+    drift slowly or the critic's value estimates destabilize."""
     grad_clip: Optional[float] = None
-    """max grad norm for the critic+encoder and actor updates. None disables. 10.0 is loose
-    enough not to shrink normal transformer-head updates, tight enough to catch divergence."""
+    """max grad norm for the critic+encoder and actor updates. None disables. 10.0 is loose enough
+    not to shrink normal transformer-head updates, tight enough to catch divergence."""
     policy_frequency: int = 4
     """the frequency of training policy (delayed)"""
     target_network_frequency: int = 1
@@ -192,6 +222,27 @@ class Args:
         if self.encoder_lr is None:
             self.encoder_lr = self.q_lr
 
+        if self.object_colors not in ("black", "distinct"):
+            raise ValueError(
+                f"--object_colors must be black|distinct, got {self.object_colors!r}"
+            )
+        if self.encoder == "dino_global" and self.dino_pool not in ("cls", "mean", "cls_mean"):
+            raise ValueError(
+                f"--dino_pool must be cls|mean|cls_mean, got {self.dino_pool!r}"
+            )
+        if self.replay_storage not in ("cpu", "gpu"):
+            raise ValueError(f"--replay_storage must be cpu|gpu, got {self.replay_storage!r}")
+        if self.replay_storage == "cpu" and not self.obs_only_replay:
+            raise ValueError(
+                "--replay_storage cpu needs --obs_only_replay: host storage is implemented in "
+                "sac/replay.py only, not in the torchrl buffer. Pass --replay_storage gpu to "
+                "use the torchrl two-copy buffer, but note it cannot hold 2 episodes of "
+                "dino_patch tokens in VRAM."
+            )
+        # Retention in episodes -> transitions; the buffer rounds to whole iterations itself.
+        if self.buffer_size is None:
+            from .. import config
+            self.buffer_size = int(self.replay_episodes * config.EPISODE_HORIZON * self.num_envs)
         if self.sim_backend not in ("gpu", "cpu"):
             raise ValueError(f"--sim_backend must be gpu|cpu, got {self.sim_backend!r}")
         if self.sim_backend == "cpu" and (self.num_envs > 1 or self.num_eval_envs > 1):

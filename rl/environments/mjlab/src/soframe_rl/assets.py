@@ -1,7 +1,7 @@
 """Programmatic MjSpec assets for the pick-and-place task: a cube and a bin.
 
-Each is its own mjlab entity (kept separate from the robot so the repo's
-``simulation/`` model is imported unmodified). The cube is a floating free body;
+Each is its own mjlab entity, kept separate from the robot so the task objects are not
+baked into the shared ``simulation/`` model. The cube is a floating free body;
 the bin is a fixed-base tray (mjlab auto-wraps it as a mocap body, so it can be
 repositioned per-episode by the command but is otherwise immovable and cannot be
 knocked over).

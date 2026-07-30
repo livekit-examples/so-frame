@@ -1,7 +1,6 @@
-"""Validate so101_on_frame.usd's physics (rigid bodies, joints, collision) actually
-simulates correctly in Isaac Sim -- a real drop test, not just schema-presence checks.
+"""Drop-test so101_on_frame.usd's physics (rigid bodies, joints, collision) in Isaac Sim.
 
-Run on the Isaac Lab box (after `source ~/isaac/activate_isaac.sh`):
+Run on the Isaac Lab box, after `source ~/isaac/activate_isaac.sh`:
     python3 simulation/usd/isaac_validate.py
 """
 import argparse
@@ -25,8 +24,8 @@ world.scene.add_default_ground_plane(z_position=-1.0)  # safety catch-all, well 
 robot_path = "/World/so101_on_frame"
 add_reference_to_stage(usd_path=args.usd, prim_path=robot_path)
 
-# Test cube dropped just above the (fixed) floor panel's known surface, matching the same
-# XY used for the URDF/MJCF drop tests (see simulation/urdf/README.md).
+# Test cube dropped just above the fixed floor panel, at the same XY as the URDF/MJCF drop
+# tests (see simulation/urdf/README.md).
 test_cube = world.scene.add(
     DynamicCuboid(
         prim_path="/World/test_cube",

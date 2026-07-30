@@ -1,17 +1,21 @@
 # Hex-Nut Recess Wrist Camera (MF) Installation Guide for SO-101
 
-> **Vendored component.** This is the upstream build guide for the wrist camera mount, kept
-> because the assembly steps are the ones to follow. Only the mount STL itself is vendored:
-> **`SO-ARM101_camera_wrist_mount.stl`**, in this directory. Cross-references in the text below
-> to other upstream mount variants and to `STL/SO101/Individual/*` are upstream's own tree and
-> are not part of SO-Frame — the equivalent arm meshes here live in
-> [`../so101_arm/assets/`](../so101_arm/assets).
+> **Vendored component.** This is the upstream build guide for the wrist camera mount, taken from
+> [`Optional/SO101_Wrist_Cam_Hex-Nut_Mount_32x32_UVC_Module`](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/SO101_Wrist_Cam_Hex-Nut_Mount_32x32_UVC_Module)
+> and kept because the assembly steps are the ones to follow. Only the mount STL itself is
+> vendored: **`SO-ARM101_camera_wrist_mount.stl`**, in this directory rather than in upstream's
+> `stl/` subfolder. Cross-references in the text below to other upstream mount variants and to
+> `STL/SO101/Individual/*` are upstream's own tree and are not part of SO-Frame; the equivalent
+> arm meshes here live in [`../so101_arm/assets/`](../so101_arm/assets), and the links below have
+> been repointed at them.
 >
 > **Where it matters for simulation:** the pose this mount is installed at is what
-> `frame_wrist_camera` is calibrated to, and the sim trains against a 58° vertical FOV
-> ([`simulation/urdf/README.md`](../../README.md#wrist-camera)). If you deviate from these
-> instructions, re-run the alignment helper (`simulation/urdf/helper/wrist_camera_aligner.html`)
-> and re-fit the deploy mapping (`rl/deploy/utils/calibrate_camera.py`).
+> `frame_wrist_camera` is calibrated to (see [the URDF README](../../README.md#wrist-camera)),
+> and the sim trains against a 58° vertical FOV (`fovy="58"` on `frame_wrist_camera` in
+> [`simulation/mjcf/so101_on_frame.xml`](../../../mjcf/so101_on_frame.xml), carried into
+> ManiSkill as `WRIST_CAMERA_FOV`). If you deviate from these instructions, re-run the alignment
+> helper (`simulation/urdf/helper/wrist_camera_aligner.html`) and re-fit the camera mapping with
+> the tools in `rl/calibrate/`.
 
 <img width="300" src="https://github.com/user-attachments/assets/ef919565-230d-43b4-8363-feb26f23967c" />
 <img width="300" src="https://github.com/user-attachments/assets/ae01ce6a-a953-4787-b792-7a17e8091094" />
@@ -19,7 +23,7 @@
 ## Overview
 This guide provides step-by-step instructions for installing a **Wrist Camera** (alternate "McGartoll-Fung" design) on the SO-101 robot using a **Camera Module** and a 3D-printed **Hex-Nut Recess Camera Adapter**.
 
-It adapts upstream's Wrist Camera (MF) UVC Module and UVC Plug-on Module designs.
+This adapts the [Wrist Camera (MF) UVC Module](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/Wrist_Cam_Mount_32x32_UVC_Module) and [Wrist Camera (MF) UVC Plug‑on Module](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/Wrist_Cam_Plug_Mount_32x32_UVC_Module), which live upstream in SO-ARM100 and are not vendored here.
 
 ## Comparison to Main Design
 #### Advantages:

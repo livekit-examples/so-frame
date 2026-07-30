@@ -6,8 +6,9 @@ but instead of sampling an abstract 3D target it:
   * samples a bin (x, y) on the plane and teleports the (fixed/mocap) bin there,
   * samples a cube (x, y) elsewhere (rejecting placements too close to the bin)
     and teleports the (free) cube there,
-  * exposes ``target_pos`` = a point just above the bin opening, so the reused
-    mjlab reach/bring rewards drive the cube up over the rim and into the bin.
+  * exposes ``target_pos`` = where the cube comes to rest on the bin floor, so
+    dropping the cube in raises the reused mjlab reach/bring rewards. An
+    above-the-rim goal would fall off as the cube settles.
 
 Success = cube horizontally inside the bin footprint and below the rim.
 """
@@ -170,7 +171,9 @@ class PlaceInBinCommandCfg(CommandTermCfg):
   # Height (world z) of the work surface the bin sits on and the cube spawns above.
   surface_z: float = 0.083
 
-  # Workspace bounds (env-relative) that sampled positions are clamped to.
+  # Workspace bounds (env-relative) that sampled positions are clamped to. The arm base sits
+  # near (0, -0.49) env-relative; these bracket a patch in front of it.
+  # !!! THESE ARE ESTIMATES. Validate reachability in the viewer and adjust. !!!
   workspace_x: tuple[float, float] = (-0.35, -0.10)
   workspace_y: tuple[float, float] = (-0.65, -0.30)
   cube_z: tuple[float, float] = (0.02, 0.04)  # spawn clearance above surface_z.

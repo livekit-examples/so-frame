@@ -4,8 +4,8 @@ Vendored unchanged from Squint (https://github.com/aalmuzairee/squint), which us
 ``tensordict.from_modules`` + ``torch.vmap`` so the ensemble is one batched forward rather than
 ``num_q`` separate ones.
 
-Training-side only, deliberately. The critic never runs on the robot, so it stays out of the
-shared ``soframe_policy`` package -- what deploy needs is only the encoder and actor.
+Training-side only: the critic never runs on the robot, so it stays out of the shared
+``soframe_policy`` package.
 """
 
 import torch
@@ -28,8 +28,8 @@ class Critic(nn.Module):
         self.v_max = v_max
         self.q_support = torch.linspace(v_min, v_max, num_atoms, device=device)
 
-        # Same projection the actor uses, at the same width, so both read the encoder's
-        # features through an identically shaped fusion.
+        # Same projection and width as the actor's, so both read the encoder's features through an
+        # identically shaped fusion.
         self.proj = Projection(n_obs, n_state, device=device, rgb_dim=rgb_dim)
         self.proj.apply(weight_init)
 

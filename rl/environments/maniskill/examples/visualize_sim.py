@@ -1,15 +1,9 @@
-"""Sanity-check the SOFramePickPlaceBin-v1 scene, cameras, and domain randomization
-before spending GPU time on training. Steps a batch of environments through a scripted
-probe (rail sliding back and forth, gripper open then close -- not a policy) and shows
-each env's wrist camera | overhead camera | third-person render side by side. Also prints
-item/bin/tcp positions so reach can be checked numerically, not just by eye.
+"""Sanity-check the SOFramePickPlaceBin-v1 scene, cameras and domain randomization before spending
+GPU time on training.
 
-By default opens a cv2 window; pass --headless to write PNG frames to --out instead
-(no display needed over SSH).
-
-Run from rl/environments/maniskill/:
-    uv run python examples/visualize_sim.py
-    uv run python examples/visualize_sim.py --headless --out /tmp/frames
+Steps a batch of envs through a scripted probe (rail back and forth, gripper open then close, not a
+policy) and shows each env's wrist camera | overhead camera | third-person render side by side, plus
+item/bin/tcp positions so reach can be checked numerically. Opens a cv2 window unless --headless.
 """
 
 import sys

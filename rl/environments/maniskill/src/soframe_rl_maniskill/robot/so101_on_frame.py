@@ -28,20 +28,18 @@ SO101_ON_FRAME_URDF = (
 )
 assert SO101_ON_FRAME_URDF.exists(), f"SO-101-on-frame URDF not found at {SO101_ON_FRAME_URDF}"
 
-# All of the tunable physical constants live in ../config.py; this module reads them so there
-# is one place to edit. Imported as a module (not `from config import ...`) so a runtime
-# override of e.g. config.ARM_SPEED_SCALE is picked up when the controller is built.
+# Imported as a module (not `from config import ...`) so a runtime override of e.g.
+# config.ARM_SPEED_SCALE is picked up when the controller is built.
 from .. import config
 
 GRASP_SITE_OFFSET = config.GRASP_SITE_OFFSET
-STS3215_STALL_TORQUE = config.STS3215_STALL_TORQUE
 
 # PBR texture sets for `apply_materials` (see `RandomizationConfig.visual_fidelity`).
 _TEXTURES_ROOT = _REPO_ROOT / "simulation" / "assets" / "textures"
 
-# The URDF only defines flat `<color rgba>` materials and SAPIEN's loader keeps only the
-# resolved rgba, so `apply_materials` matches each part's baked base_color back to
-# these known URDF colors to pick a texture set.
+# The URDF only defines flat `<color rgba>` materials and SAPIEN's loader keeps only the resolved
+# rgba, so `apply_materials` matches each part's baked base_color against these known URDF colours
+# to pick a texture set.
 _ALUMINUM_BASE_COLORS = [
     (0.4, 0.4, 0.4),                 # extrusion_gray (2020 extrusion bars)
     (0.749020, 0.749020, 0.749020),  # nuts/screws/wheels/gantry plate
@@ -52,13 +50,12 @@ _WHITE_PLASTIC_BASE_COLORS = [
     (0.901961, 0.901961, 0.901961),  # light bracket parts
 ]
 
-# The lightbox's diffusing side panels: large matte surfaces, not small 3D-printed parts,
-# though they share a base color with some (see `apply_materials`).
+# The lightbox's diffusing side panels: large matte surfaces, not small 3D-printed parts, though
+# they share a base colour with some (see `apply_materials`).
 _LIGHTBOX_PANEL_LINKS = {"part_1", "part_1_1", "part_1_2", "part_1_3"}
 
-# PBR relief maps per colour group: the frame and carriage are aluminium, the arm and jaw are
-# printed plastic. Only roughness/metallic/normal are taken from these; albedo comes from the
-# colour scheme.
+# PBR relief maps per colour group. Only roughness/metallic/normal come from these; albedo comes
+# from the colour scheme.
 _GROUP_TEXTURE_SET = {
     "extrusion": "aluminum",
     "slider": "aluminum",
@@ -127,8 +124,8 @@ class SO101OnFrame(BaseAgent):
     @property
     def _controller_configs(self):
         joint_names = self.joint_names
-        # Scale arm/rail limits by config.ARM_SPEED_SCALE (gripper unscaled). Read here rather
-        # than at import so --arm_speed_scale can override it before the env is built.
+        # Scale arm/rail limits by config.ARM_SPEED_SCALE (gripper unscaled). MUST be read here
+        # rather than at import, so --arm_speed_scale can override it before the env is built.
         def _limit(name):
             lim = config.JOINT_DELTA_LIMITS[name]
             return lim if name == "gripper" else lim * config.ARM_SPEED_SCALE
@@ -188,10 +185,9 @@ class SO101OnFrame(BaseAgent):
     def jaw_contact_forces(self, object: Actor):
         """Per-jaw contact force vectors against `object`, as (fixed_jaw, moving_jaw).
 
-        The two pairwise queries are the expensive part of every contact test below, so callers
-        that need more than one flag for the same object should fetch this once and pass it in
-        rather than calling `is_touching` and `is_grasping` back to back (which issued the same
-        two queries twice)."""
+        The two pairwise queries are the expensive part of every contact test below, so a caller
+        needing more than one flag for the same object should fetch this once and pass it in rather
+        than calling `is_touching` and `is_grasping` back to back."""
         return (
             self.scene.get_pairwise_contact_forces(self.finger1_link, object),
             self.scene.get_pairwise_contact_forces(self.finger2_link, object),
@@ -241,23 +237,19 @@ class SO101OnFrame(BaseAgent):
         return None
 
     def apply_materials(self, realistic: bool):
-        """Set every render material in ONE pass: the colour scheme plus, when `realistic`, the
-        PBR relief maps.
+        """Set every render material in ONE pass: the colour scheme plus, when `realistic`, the PBR
+        relief maps.
 
-        Single pass on purpose. Colouring and texturing used to be two walks over the same parts,
-        and each material mutation makes that part's material unique, so touching every grouped
-        part twice doubled the descriptor sets and exhausted the Vulkan descriptor pool under
-        "raster" once both the train and eval env pools existed.
+        Must stay a single pass: each material mutation makes that part's material unique, so
+        touching a grouped part twice doubles the descriptor sets and exhausts the Vulkan descriptor
+        pool under "raster" once both the train and eval env pools exist.
 
         Grouped links (config.COLOR_GROUPS) get a FLAT scheme colour and, when realistic, only the
-        roughness / metallic / normal maps -- deliberately no albedo map, because SAPIEN's
-        base-colour texture replaces base_color rather than modulating it, and an albedo map would
-        simply overwrite the scheme colour (this is why the gripper stayed orange when the two were
-        applied in sequence).
+        roughness / metallic / normal maps. No albedo map: SAPIEN's base-colour texture replaces
+        base_color rather than modulating it, so it would overwrite the scheme colour.
 
-        Ungrouped links keep their baked URDF colour and get the full texture set matched from that
-        colour. That covers the lightbox panels (the work surface) and the camera holders, which are
-        not part of the scheme.
+        Ungrouped links keep their baked URDF colour and get the full texture set matched from it.
+        That covers the lightbox panels (the work surface) and the camera holders.
         """
         textures = {}
         if realistic:
@@ -293,9 +285,8 @@ class SO101OnFrame(BaseAgent):
 
                         if group is not None:
                             # A grouped link is printed structure PLUS motor hardware. Only the
-                            # structure takes the scheme colour; the motor keeps its own, and no
-                            # texture, exactly as the URDF had it. Recolouring the whole link
-                            # painted the motors too and the arm read as one white mass.
+                            # structure takes the scheme colour; the motor keeps the URDF's own
+                            # colour and no texture.
                             if _base_color_matches(material.get_base_color(),
                                                    config.MOTOR_BASE_COLORS):
                                 material.set_base_color([*config.COLOR_MOTOR, 1.0])
