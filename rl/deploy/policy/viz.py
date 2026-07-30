@@ -35,9 +35,9 @@ QScrollBar::add-line, QScrollBar::sub-line { height:0; width:0; }
 # Keys the window offers, and the run loop's existing single-character handler for each.
 KEYS = [("pause / resume", "p"), ("rest", "r"), ("park", "k"), ("zero rail", "0"), ("quit", "q")]
 
-# Gate range, in action steps of lag. Below ~0.1 the arm never gets there and every decision waits
-# for the timeout; above ~2 nothing is gated, since one action moves a joint at most one step.
-LAG_MIN, LAG_MAX = 0.05, 3.0
+# Budget range, in action steps. Below ~0.5 a group can barely glide, since one action step is the
+# whole budget; well above that the target is free to run ahead of a slower joint again.
+LAG_MIN, LAG_MAX = 0.1, 6.0
 
 
 class _Value(QtWidgets.QWidget):
@@ -162,9 +162,9 @@ class _Actions(QtWidgets.QWidget):
                            QtGui.QColor(POS if a >= 0 else NEG))
                 p.setPen(QtGui.QColor(FG))
                 p.drawText(int(x0 + span + 6), int(y + 15), f"{a:+.2f}")
-            # Tracking error in action steps, scaled so this joint's gate sits at half a bar. Red
-            # means it is over the gate: it is what the next decision is waiting on. A joint with no
-            # gate (the gripper) still shows its lag, just never in red.
+            # Lag in action steps, scaled so this joint's budget sits at half a bar. Red means the
+            # budget is spent: this group has stopped advancing and the next decision is waiting on
+            # it. A joint with no budget (the gripper) still shows its lag, just never in red.
             gate = self.thresholds.get(name)
             r = max(-1.0, min(1.0, float(resid) / (2 * max(gate or 1.0, 1e-3))))
             p.fillRect(QtCore.QRectF(mid + r * span / 2 - 1, y + 2, 2, 15),
@@ -173,7 +173,7 @@ class _Actions(QtWidgets.QWidget):
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names, arm_lag=1.0, rail_scale=3.0, groups=None):
+    def __init__(self, cameras, joint_names, max_lag=None, rail_step=7.0, groups=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -215,22 +215,26 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
-        # Live, because the value that works depends on the arm, and the bars right here are the
-        # readout: dial it to just above where the ticks stop going red. The rail is a multiplier on
-        # it rather than its own number, so the rail stays the lighter gate whatever the arm is set
-        # to; its resolved value is shown next to the multiplier.
-        # joint name -> the group whose gate it answers to; anything unlisted is never gated.
+        # One budget per group, live: how far that group's target may lead its joints, which is both
+        # how fast it may glide and when the next decision fires. The bars right here are the
+        # readout, so dial each to just above where its ticks stop going red.
+        # joint name -> the group whose budget it answers to; anything unlisted is unbounded.
         self._group_of = {n.split(".")[0]: g for g, keys in (groups or {}).items() for n in keys}
-        self._arm = _Value(LAG_MIN, LAG_MAX, 0.05, 2, arm_lag)
-        self._rail = _Value(1.0, 6.0, 0.25, 2, rail_scale)
-        self._rail_note = QtWidgets.QLabel("")
-        self._rail_note.setStyleSheet(f"color:{MUTED};")
-        for text, widget in (("arm lag", self._arm), ("rail lag x", self._rail)):
-            lab = QtWidgets.QLabel(text)
+        self._gates: dict[str, _Value] = {}
+        for group, value in dict(max_lag or {"arm": 1.0, "rail": 2.0}).items():
+            self._gates[group] = _Value(LAG_MIN, LAG_MAX, 0.05, 2, value)
+            lab = QtWidgets.QLabel(f"{group} lag")
             lab.setStyleSheet(f"color:{MUTED};")
             buttons.addWidget(lab)
-            buttons.addWidget(widget)
-        buttons.addWidget(self._rail_note)
+            buttons.addWidget(self._gates[group])
+        # How far one full-command action moves the carriage. Here because it is the figure in the
+        # action contract that was never measured, and because moving it while watching the rail is
+        # the measurement. It rescales rail lag too, since lag is counted in these steps.
+        self._rail_step = _Value(1.0, 20.0, 0.5, 1, rail_step)
+        lab = QtWidgets.QLabel("rail step (mm)")
+        lab.setStyleSheet(f"color:{MUTED};")
+        buttons.addWidget(lab)
+        buttons.addWidget(self._rail_step)
 
         inner = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(inner)
@@ -261,9 +265,13 @@ class Window(QtWidgets.QWidget):
         """Service Qt from the caller's loop. Nothing else drives this window."""
         QtWidgets.QApplication.instance().processEvents()
 
-    def gates(self) -> tuple[float, float]:
-        """(arm tolerance in action steps, rail multiplier) as currently dialled in."""
-        return self._arm.value(), self._rail.value()
+    def max_lag(self) -> dict:
+        """Per-group lag budget in action steps, as currently dialled in."""
+        return {g: v.value() for g, v in self._gates.items()}
+
+    def rail_step(self) -> float:
+        """Millimetres of carriage travel per full-command action, as currently dialled in."""
+        return self._rail_step.value()
 
     def take_keys(self) -> list[str]:
         keys, self.requests = list(self.requests), []
@@ -280,5 +288,3 @@ class Window(QtWidgets.QWidget):
         self.info.setText(info)
         by_joint = {n: (thresholds or {}).get(g) for n, g in self._group_of.items()}
         self.actions.set_rows(act_rows, by_joint)
-        rail = (thresholds or {}).get("rail")
-        self._rail_note.setText("" if rail is None else f"= {rail:.2f}")

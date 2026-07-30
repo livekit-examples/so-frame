@@ -29,8 +29,8 @@ until you press `p`. `--no-start-paused` drives on launch; `--no-claim` sits idl
 claims it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0` ramp the rail
 alone to wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` opens a window
 (`uv sync --group viz`) with the two rectified views the encoder is fed, a bar per joint for the
-last action and how far the arm still lags its target, the same keys as buttons, and live **arm
-lag** and **rail lag x** sliders. It appears even with no frames arriving, so you can tell connected
+last action and how far it lags its target, the same keys as buttons, and live **arm lag**, **rail
+lag** and **rail step** sliders. It appears even with no frames arriving, so you can tell connected
 from stalled.
 
 `--arch` picks a checkpoint from `checkpoints/` by name:
@@ -48,80 +48,63 @@ contents disagree with the name it was loaded under is an error. That check earn
 two `dino_global` entries, whose pooling modes produce identical tensor shapes and so cannot be
 told apart by loading alone. `--checkpoint <path>` still takes anything outside `checkpoints/`.
 
-`--max-lag-arm DELTAS` (default 1.0) decides how long the target is held after each action: until
-every arm joint is within that many action steps of where it was put. `--rail-lag-scale X` (default
-3.0, minimum 1.0) is the rail's tolerance as a multiple of it, so the rail is always the lighter
-gate and tightening the arm cannot make the carriage the joint being waited on.
+An action is a delta per control period, which is to say a velocity: sim integrated one every
+100 ms step. Deploy does the same, so an action keeps being applied every tick until a new one
+replaces it, and a decision replaces the velocity rather than being the only thing that produces
+motion.
 
-The task is quasi-static, so waiting is free, and it means every inference runs on an observation
-the arm has actually reached rather than one from two steps ago, which is the situation training
-had.
+What bounds it is a per-group lag budget, `--max-lag-arm DELTAS` (default 1.0) and
+`--max-lag-rail DELTAS` (default 2.0): a group's target advances only while it is within that many
+action steps of its joints' measured pose. So the target can never run away from a slower arm, which
+is what had the jaw closing after it had already passed the cube, and it makes the target a
+velocity-clamped ramp instead. A new decision fires once every group is inside its budget.
 
-The gate is the arm's measured lag, not a stopwatch, because a fixed wait is wrong in both
-directions. Measured against a simulated arm at 10 Hz:
+Each group carries its own budget, which is the point: the rail keeps gliding at its commanded speed
+while the arm is being waited on. Timing a 0.49 m traverse at 10 Hz with the arm as the slow
+mechanism (arm joints close 15% of their gap per tick, rail 80%):
 
-| case | fixed 0.3 s | lag gate 0.5 |
-|---|---|---|
-| arm closes 80% of the gap per tick, full-step actions | 3.3 dec/s | 10.0 dec/s |
-| arm closes 20% per tick, full-step actions | 3.3 dec/s | 2.1 dec/s |
-| arm closes 20% per tick, 0.05-step actions | 3.3 dec/s | 10.0 dec/s |
+| target between decisions | decisions/s | rail speed | traverse |
+|---|---|---|---|
+| frozen | 2.7 | 1.85 cm/s | 26.7 s |
+| velocity hold | 2.4 | 6.88 cm/s | 7.2 s |
 
-The last row is the case the stopwatch cannot express: the action is already finished, and waiting
-is pure dead time. The middle row is the opposite, a move that needs longer than 0.3 s.
+Same decision rate, 3.7x the rail speed, and 6.88 cm/s is the 7.0 cm/s ceiling the rail was trained
+at. A frozen target moved the carriage at `decisions/s x 7 mm`, so a slow *arm* joint throttled
+the *rail*, a coupling nothing about the mechanism justifies.
 
-A joint that physically cannot arrive (a mechanical stop, a dead servo) would wedge the loop, so the
-gate gives up after 1 s and decides anyway. The per-second line reports `<group> lag L/MAX (joint)`
-for each group plus `N gate timeouts`; steady timeouts on one joint mean the gate is stricter than
-the hardware, not that the policy is stuck.
+When the rail is the slow mechanism its own budget is what matters, and it is a real bound rather
+than advice. Same traverse with the rail also at 15%/tick:
 
-Sensible values are roughly 0.1 to 2.0: one action moves a joint at most one step, so above ~2
-nothing is ever gated, and below ~0.1 the joint may never get there and every decision waits out the
-timeout. With `--viz` open the window's sliders take over the values and each joint's tick turns red
-above its own gate, so the bars show which joint the next decision is waiting on. Tune them while
-the arm moves rather than restarting the run per guess.
+| rail budget | rail speed | traverse | peak rail lag |
+|---|---|---|---|
+| 0.5 | 1.00 cm/s | 49.4 s | 1.25 |
+| 1.0 | 1.55 cm/s | 31.8 s | 1.68 |
+| 2.0 | 2.60 cm/s | 19.0 s | 2.54 |
+| 4.0 | 4.53 cm/s | 10.9 s | 4.12 |
 
-### Why the rail's tolerance is lighter, and what that can and cannot fix
+Peak lag never exceeds the budget by more than the one step an action adds, so nothing runs away.
 
-One action step means a different physical thing on each mechanism: 0.85% of travel for the
-belt-driven carriage, 2.86° for a direct position servo. The carriage crosses 117 steps end to end,
-so its last fraction of a step is a millimetre no policy cares about, while the wrist's is the
-difference between the jaw being where the frame says it is or not. Hence a multiplier rather than a
-second independent number: whatever precision you demand of the arm, the rail is allowed three times
-the slack, and the rail can never be what the arm is waiting on.
+A joint that physically cannot arrive (a stop, a dead servo) would leave its group's budget spent
+forever, so decisions fall back to a 1 s timeout. Motion does not stop while waiting: that is what
+the integration is. The per-second line reports `<group> lag L/MAX (joint)` per group plus
+`N gate timeouts`; steady timeouts on one joint mean its budget is stricter than the hardware.
 
-Rail speed is `decisions/s x 7 mm`, because one action advances the target by one step. The gate's
-decision rate *is* the rail's speed, so where that rate comes from decides whether a lighter rail
-tolerance helps at all. Simulated at 10 Hz, asking for full-speed rail throughout:
+Two things are deliberately excluded. **The gripper gets no budget**: its whole range is 9.6 action
+steps, so a jaw closed on the object sits several steps short of its command for as long as it
+holds, and a position servo only pushes as hard as the distance it is asked to close, so holding its
+target back would bleed grip force. Its action is applied once per decision rather than sustained,
+since nothing bounds it. **Nothing advances without frames**: a lost camera must not mean the arm
+keeps gliding blind on a stale command.
 
-**When the rail is the slow mechanism** (closes 15% of its gap per tick, arm 80%) the multiplier is
-the whole fix:
+`--rail-step MM` (default 7.0, the trained value) is how far one full-command action moves the
+carriage, and therefore its top speed per control period and the unit rail lag is counted in. It is
+the one figure in the action contract that came off a control UI rather than a measurement, so the
+viz exposes it as a slider: drag it while watching the rail to find what the carriage actually does
+per step. Speed follows it linearly (3.5 mm gives 3.47 cm/s, 14 mm gives 13.53 cm/s). Changing it
+runs the policy on a different action space than it trained on, which is the trade you are making.
 
-| arm gate | rail x | rail gate | decisions/s | rail speed |
-|---|---|---|---|---|
-| 1.0 | 1.0 | 1.00 | 2.3 | 1.6 cm/s |
-| 1.0 | 3.0 | 3.00 | 5.1 | 3.5 cm/s |
-| 1.0 | 6.0 | 6.00 | 10.0 | 6.9 cm/s |
-
-At x6 the rail is never the blocker and reaches the 7 cm/s it was trained at.
-
-**When the arm is the slow mechanism** (rail 80%, arm 15%) the multiplier does nothing at all:
-
-| arm gate | rail x | rail gate | decisions/s | rail speed |
-|---|---|---|---|---|
-| 1.0 | 1.0 | 1.00 | 2.3 | 1.6 cm/s |
-| 1.0 | 3.0 | 3.00 | 2.3 | 1.6 cm/s |
-| 1.0 | 6.0 | 6.00 | 2.3 | 1.6 cm/s |
-
-There is one decision for all seven joints, so while the arm is holding it the rail gets no new
-target either, whatever its own tolerance says. The viz distinguishes the two cases directly: the
-info line names the joint holding each group, and only red ticks are over their gate. If the red
-ticks are arm joints, raising `rail lag x` will not help and the levers are `arm lag` or accepting
-the rate.
-
-**The gripper is not gated at all.** Its whole range is 9.6 action steps, so a jaw closed on the
-object sits several steps short of its commanded position for as long as it holds, and no useful
-tolerance would ever clear. Gating on it would drop every grasp to the timeout rate, during the part
-of the task that matters most. Its lag still shows in the viz, just never in red.
+With `--viz` open the window's sliders take over all three values, and each joint's tick turns red
+once its group's budget is spent, so the bars show which joint the next decision is waiting on.
 
 On a Mac set `POLICY_DEVICE=mps`: the default device pick is cuda-or-cpu, so a DINOv2 checkpoint
 would otherwise run on the CPU.
