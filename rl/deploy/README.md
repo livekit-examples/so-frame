@@ -74,7 +74,7 @@ utils/debug_policy.py --bridge` prints the current state and flags this.
 | `camera_mapping.py` | fit replay + the camera stack (which real camera feeds which sim camera) |
 | `calibrate_camera.py` | fit a mapping against a sim reference render |
 | `pull_frames.py` | grab raw frames off the live robot (passive; safe while a policy drives) |
-| `debug_policy.py` | check the wiring with no policy: `--frame`, `--bridge`, `--live`, `--snapshot`, `--control` |
+| `debug_policy.py` | check the wiring with no policy: `--frame`, `--bridge`, `--live`, `--snapshot`, `--control`, `--cli` |
 | `common.py` | env loading, LiveKit tokens, fps pacer |
 
 Only `debug_policy.py --control` and `policy/run.py` move the robot.

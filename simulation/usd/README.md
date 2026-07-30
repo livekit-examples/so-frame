@@ -50,6 +50,12 @@ usdrecord --camera /World/frame_wrist_camera --imageWidth 960 so101_on_frame.usd
 Baked from `../urdf/so101_on_frame.urdf` (default/calibrated pose) with material assignment
 by part, vertex welding, and the light + camera rig added.
 
+> The shipped `.usd` predates the URDF's visual-geometry trim, so it still contains the
+> handles, M5 screws and rail drive internals that the URDF has since dropped (see
+> [the URDF README](../urdf/README.md#visual-geometry)). Re-baking from the current URDF
+> will produce a lighter asset without them. The physics asset below is imported from the
+> MJCF instead, which was never trimmed, so it is unaffected.
+
 ## Physics-enabled asset (Isaac Lab)
 
 `so101_on_frame.usd` above is visual-only (no rigid bodies, joints, or collision). For
