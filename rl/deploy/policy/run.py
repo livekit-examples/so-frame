@@ -9,7 +9,7 @@ launch; --no-claim stays idle until the web UI claims it.
 One decision per --settle seconds, not per tick: the task is quasi-static, so after each action
 the target is held until the arm has arrived and only then is a new observation used. Deciding
 every tick committed several actions from one stale frame, which showed up as the jaw closing after
-it had already passed the cube.
+it had already passed the cube. --viz can change it live, so --settle is only the starting value.
 
 Debug keys (terminal or --viz window): p = pause/resume, r = reset to rest then hold paused,
 0 = ramp the rail alone to wire 0 (end of travel) for re-zeroing, q = quit.
@@ -156,7 +156,7 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
     obs_stats = {"n": 0, "t": 0.0, "with_frames": 0}
     # Decision clock. The loop keeps ticking at fps (stream, keys, viz); inference happens only
     # once `settle` has elapsed since the last action landed.
-    decide = {"next": 0.0, "n": 0, "t0": 0.0}
+    decide = {"last": 0.0, "n": 0, "t0": 0.0}
     last_action = None      # shown in --viz between decisions, when no new one was computed
 
     def on_observation(obs: Observation) -> None:
@@ -292,7 +292,7 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
             raise SystemExit(f"--viz needs the ui toolkit: uv sync --group viz  ({exc})")
         QtWidgets.QApplication([])
         win = vizmod.Window([t for t, _ in CAMERA_STACK],
-                            [k.split(".")[0] for k in bridge.JOINT_KEYS])
+                            [k.split(".")[0] for k in bridge.JOINT_KEYS], settle=settle)
         win.show()
         print(f"[policy-{NAME}] --viz open")
 
@@ -309,6 +309,8 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
             rgb = build_rgb(obs, mappings, stack_res) if obs is not None else None
 
             if win is not None:
+                # The window owns settle once it is open, so --settle is only the starting value.
+                settle = win.settle()
                 if not control["enabled"]:
                     status, alarm = "Unclaimed", True
                 elif obs is None:
@@ -427,8 +429,10 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
             # stale frame, so the jaw closed after it had already passed the cube. Waiting costs
             # nothing here and it puts each decision on a pose the arm has actually reached, which
             # is the situation training had (sim tracks its target within one step).
+            # Measured from the last decision rather than as a precomputed deadline, so dragging
+            # the viz slider takes effect on this tick instead of after the wait already in flight.
             now = time.perf_counter()
-            if now < decide["next"]:
+            if now - decide["last"] < settle:
                 op.send_action(
                     bridge.sim_to_real(sim_target),
                     timestamp_us=int(time.time() * 1_000_000),
@@ -464,7 +468,7 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
                 for i, k in enumerate(bridge.JOINT_KEYS)
             }
             sim_target = bridge.clamp_sim(stepped)
-            decide["next"] = time.perf_counter() + settle
+            decide["last"] = time.perf_counter()
             decide["n"] += 1
             if not decide["t0"]:
                 decide["t0"] = time.perf_counter()
@@ -510,7 +514,8 @@ def cli() -> None:
                         help="wait this long after each action before deciding again, holding the "
                              "target meanwhile (default 0.3). The task is quasi-static, so waiting "
                              "costs nothing and it makes every decision use an observation the arm "
-                             "has actually reached, as in sim. 0 decides every tick.")
+                             "has actually reached, as in sim. 0 decides every tick. With --viz "
+                             "this is only the starting value; the window changes it live.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
                              "matching the continuous-gripper training default; must match how "

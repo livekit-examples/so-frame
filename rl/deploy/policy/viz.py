@@ -22,6 +22,10 @@ QLabel#status { font-size:17px; padding:2px 0; }
 QLabel#info, QLabel#hint { font-family:Menlo,monospace; color:#7e8797; }
 QPushButton { background:#242932; border:1px solid #333a45; border-radius:3px; padding:5px 11px; }
 QPushButton:hover { background:#2e3440; }
+QDoubleSpinBox { background:#1f232b; border:1px solid #2d333d; border-radius:3px; padding:2px 4px; }
+QSlider::groove:horizontal { height:3px; background:#2d333d; border-radius:2px; }
+QSlider::handle:horizontal { width:10px; margin:-6px 0; border-radius:2px; background:#8a93a3; }
+QSlider::handle:horizontal:hover { background:#c3cad6; }
 QScrollArea { border:0; }
 QScrollBar:vertical, QScrollBar:horizontal { background:#14161a; width:10px; height:10px; }
 QScrollBar::handle { background:#333a45; border-radius:5px; min-height:30px; min-width:30px; }
@@ -30,6 +34,48 @@ QScrollBar::add-line, QScrollBar::sub-line { height:0; width:0; }
 
 # Keys the window offers, and the run loop's existing single-character handler for each.
 KEYS = [("pause / resume", "p"), ("rest", "r"), ("park", "k"), ("zero rail", "0"), ("quit", "q")]
+
+SETTLE_MAX = 2.0      # seconds between decisions; past this the arm is just standing still
+
+
+class _Value(QtWidgets.QWidget):
+    """One number as a slider and a spin box: drag to search, type to land on an exact value."""
+
+    TICKS = 400
+
+    def __init__(self, lo, hi, step, decimals, value):
+        super().__init__()
+        self.lo, self.hi = float(lo), float(hi)
+        self.spin = QtWidgets.QDoubleSpinBox()
+        self.spin.setRange(self.lo, self.hi)
+        self.spin.setDecimals(decimals)
+        self.spin.setSingleStep(step)
+        self.spin.setKeyboardTracking(False)
+        self.spin.setFixedWidth(76)
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setRange(0, self.TICKS)
+        self.slider.setMinimumWidth(110)
+        box = QtWidgets.QHBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(6)
+        box.addWidget(self.slider, 1)
+        box.addWidget(self.spin)
+        self.slider.valueChanged.connect(self._from_slider)
+        self.spin.valueChanged.connect(self._to_slider)
+        self.spin.setValue(float(value))
+
+    def _from_slider(self, i):
+        self.spin.blockSignals(True)
+        self.spin.setValue(self.lo + (self.hi - self.lo) * i / self.TICKS)
+        self.spin.blockSignals(False)
+
+    def _to_slider(self, v):
+        self.slider.blockSignals(True)
+        self.slider.setValue(int(round((v - self.lo) / (self.hi - self.lo) * self.TICKS)))
+        self.slider.blockSignals(False)
+
+    def value(self) -> float:
+        return self.spin.value()
 
 
 class _Panel(QtWidgets.QLabel):
@@ -120,7 +166,7 @@ class _Actions(QtWidgets.QWidget):
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names):
+    def __init__(self, cameras, joint_names, settle=0.3):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -161,6 +207,13 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
+        # Live, because the right value depends on what the arm is doing: too short and decisions
+        # ride stale frames, too long and the rollout crawls. The run loop reads it every tick.
+        self._settle = _Value(0.0, SETTLE_MAX, 0.05, 2, settle)
+        lab = QtWidgets.QLabel("settle (s)")
+        lab.setStyleSheet(f"color:{MUTED};")
+        buttons.addWidget(lab)
+        buttons.addWidget(self._settle)
 
         inner = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(inner)
@@ -190,6 +243,10 @@ class Window(QtWidgets.QWidget):
     def step(self) -> None:
         """Service Qt from the caller's loop. Nothing else drives this window."""
         QtWidgets.QApplication.instance().processEvents()
+
+    def settle(self) -> float:
+        """Seconds to hold the target between decisions, as currently dialled in."""
+        return self._settle.value()
 
     def take_keys(self) -> list[str]:
         keys, self.requests = list(self.requests), []

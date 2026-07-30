@@ -29,8 +29,8 @@ until you press `p`. `--no-start-paused` drives on launch; `--no-claim` sits idl
 claims it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0` ramp the rail
 alone to wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` opens a window
 (`uv sync --group viz`) with the two rectified views the encoder is fed, a bar per joint for the
-last action and how far the arm still lags its target, and the same keys as buttons. It appears even
-with no frames arriving, so you can tell connected from stalled.
+last action and how far the arm still lags its target, the same keys as buttons, and a live
+**settle** slider. It appears even with no frames arriving, so you can tell connected from stalled.
 
 `--arch` picks a checkpoint from `checkpoints/` by name:
 
@@ -51,7 +51,9 @@ told apart by loading alone. `--checkpoint <path>` still takes anything outside 
 decision. The task is quasi-static, so waiting is free, and it means every inference runs on an
 observation the arm has actually reached rather than one from two steps ago. `--settle 0` decides
 every tick, which is what training did, but training also had the arm tracking its target within a
-single step. Watch the `decisions N @ R/s` line to see the rate you are actually getting.
+single step. Watch the `decisions N @ R/s` line to see the rate you are actually getting. With
+`--viz` open the window's slider takes over this value, so you can find it while the arm moves
+instead of restarting the run per guess.
 
 On a Mac set `POLICY_DEVICE=mps`: the default device pick is cuda-or-cpu, so a DINOv2 checkpoint
 would otherwise run on the CPU.
