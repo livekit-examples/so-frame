@@ -173,7 +173,7 @@ class _Actions(QtWidgets.QWidget):
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names, max_lag=1.0, rail_step=7.0, gated=None):
+    def __init__(self, cameras, joint_names, max_lag=3.0, rail_step=7.0, gated=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -247,10 +247,29 @@ class Window(QtWidgets.QWidget):
         self.resize(1120, 620)
 
         self._closed = False
+        # Take focus so key presses land here and not nowhere. A child that wants a key still wins,
+        # which is the point: click into a spin box and digits type into it, including 0.
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.setFocus()
 
     def closeEvent(self, ev):          # noqa: N802 - Qt naming
         self._closed = True
         ev.accept()
+
+    def keyPressEvent(self, ev):       # noqa: N802 - Qt naming
+        """Queue a debug key for the caller, same characters the terminal accepts.
+
+        Without this the window swallowed every press: the buttons were the only way into the run
+        loop from a focused window, and the terminal only hears keys while IT has focus, which it
+        does not while you are watching the views. Qt sends a key to the focused child first and
+        only walks up to here if that child ignores it, so typing into the sliders still works.
+        """
+        ch = ev.text().lower()
+        if ch in {c for _, c in KEYS}:
+            self.requests.append(ch)
+            ev.accept()
+            return
+        super().keyPressEvent(ev)
 
     @property
     def closed(self) -> bool:
