@@ -48,32 +48,26 @@ JOINT_DAMPING = 1e2
 # =====================================================================================
 # Solver cost
 # =====================================================================================
-# PhysX solver effort: pure cost/fidelity knobs, no physical constant. ManiSkill's defaults are
-# 15 position / 1 velocity iterations with friction every iteration; these cut the physics stage
-# from 105 to 65 ms/step at 512 envs on an RTX 5090.
+# PhysX solver effort: pure cost/fidelity knobs, no physical constant, set below ManiSkill's
+# defaults of 15 position / 1 velocity iterations with friction every iteration.
 #
 # 8 is the floor. What bounds it is the residual speed of a cube that should be sitting still:
-# 0.37 mm/s at 15 position iterations, 1.33 at 8, 5.29 at 4 (where it starts buzzing). Lower these
-# only after re-checking that plus cube tunnelling through the bin's 5 mm collision walls.
+# 1.33 mm/s here, 5.29 at 4 iterations (where it starts buzzing). Lower these only after
+# re-checking that plus cube tunnelling through the bin's 5 mm collision walls.
 SOLVER_POSITION_ITERATIONS = 8
 SOLVER_VELOCITY_ITERATIONS = 0
-# No measurable difference to either check. Would matter for an object held by friction alone; the
-# cube is gripped between two jaws at static_friction 2.0 and weighs 3.2 g.
+# Off: it would matter for an object held by friction alone, but the cube is gripped between two
+# jaws at static_friction 2.0 and weighs 3.2 g.
 FRICTION_EVERY_ITERATION = False
 
 
 # =====================================================================================
 # Render cost
 # =====================================================================================
-# A shadow-casting light costs a whole extra geometry pass per camera per step: 96.6 -> 67.4
-# ms/step, the largest single render lever there is.
-#
-# OFF, because the sim's cast shadow is a sim-only artifact. The real rig's overhead captures
-# (rl/deploy/utils/captures/) show only soft contact darkening at an object's base, about -10/255
-# for the bin and -26/255 for the bar, never a directional shadow displaced from its caster.
-#
-# Set True to get it back; SHADOW_MAP_SIZE only matters then. With it off, --visual_fidelity flat
-# is no longer a speed option: 87.0 ms/step against raster-without-shadow at 87.3.
+# OFF: a shadow-casting light costs a whole extra geometry pass per camera per step, and the sim's
+# cast shadow is a sim-only artifact anyway. The real rig's overhead captures
+# (rl/deploy/utils/captures/) show only soft contact darkening at an object's base, never a
+# directional shadow displaced from its caster. SHADOW_MAP_SIZE matters only when this is True.
 RASTER_SHADOWS = False
 SHADOW_MAP_SIZE = 512
 
@@ -104,10 +98,9 @@ BIN_FOOTPRINT_HALF = 0.050
 BIN_INTERIOR_HALF = 0.048
 BIN_HEIGHT = 0.030
 BIN_FLOOR_THICKNESS = 0.002
-BIN_WALL_THICKNESS = 0.002
-# The real 2 mm walls are thin enough that a fast cube tunnels through in one 10 ms step, so
-# collision walls are thickened OUTWARD, inner faces left on the true interior: the opening stays
-# honest, the collision footprint is wider than the visual by (this - BIN_WALL_THICKNESS)/side.
+# The true 2 mm walls are thin enough that a fast cube tunnels through in one 10 ms step, so the
+# collision walls are thickened OUTWARD from them, inner faces left on the true interior: the
+# opening stays honest, the collision footprint is wider than the visual by (this - 2 mm) per side.
 BIN_WALL_COLLISION_THICKNESS = 0.005
 
 
@@ -126,9 +119,9 @@ WORK_SURFACE_Z = 0.0
 #      policy is vision-only, so anything outside this is unlearnable.
 #   3. Where the bin physically settles on the panels: x [-0.34, 0.00], y [-0.80, -0.05].
 #
-# Consequence: the arm is in the zone too, so at reset the cube is occluded by it in ~12% of
-# spawns (measured over 300), concentrated in y [-0.37, -0.10] where the arm parks. All of them
-# clear once the gantry moves, so this is transient, not unobservable state.
+# The arm is in the zone too, so at reset it occludes the cube in a minority of spawns,
+# concentrated where the arm parks. All of them clear once the gantry moves, so the occlusion is
+# transient, not unobservable state.
 WORKSPACE_CENTER = (-0.141, -0.405)
 WORKSPACE_HALF = (0.129, 0.355)
 
@@ -153,10 +146,9 @@ GOAL_CLEARANCE = 0.05
 # transitions (sac/args.py: --replay_episodes), so the two must agree: a buffer quoted as "2
 # episodes of retention" is 2 * this * num_envs transitions.
 #
-# 200 steps = 20 s per attempt at CONTROL_HZ. Sized against rail travel, which dominates: park to
-# cube then cube to bin, at the measured 0.007 m/step over the workspace's 0.71 m y span, costs 58
-# steps at the median spawn, 110 at p90, 139 at p99 (over 200k sampled spawns), leaving the worst
-# decile 45% of the episode to descend, grasp, lift, release and settle.
+# 200 steps = 20 s per attempt at CONTROL_HZ, sized against rail travel, which dominates: park to
+# cube then cube to bin costs about 110 steps at a p90 spawn, leaving the worst decile 45% of the
+# episode to descend, grasp, lift, release and settle.
 EPISODE_HORIZON = 200
 
 
@@ -208,16 +200,14 @@ assert (
 # SAPIEN's RenderMaterial takes.
 #
 # Never pure 0 or 1: pure black returns no light and renders as a flat silhouette with no shape
-# cues, pure white clips under the softbox and loses its edges the same way. 0.04 and 0.88 read as
-# black and white while keeping the shading gradients the vision policy localizes from, and real
-# matte black plastic reflects ~4-5% anyway.
+# cues, pure white clips under the softbox and loses its edges the same way. Real matte black
+# plastic reflects ~4-5% anyway.
 BLACK = (0.04, 0.04, 0.04)
 WHITE = (0.88, 0.88, 0.88)
 
 # Hue-separated task-object colours, selected by --object_colors distinct. The squint CNN needs
-# them: at res 32 the 20 mm cube is a SINGLE pixel, so hue is its only cue, and under the black
-# scheme it never finds a success. dino_patch resolves the cube as a shape at res 112/168 and does
-# not. Same no-pure-0-or-1 rule as above.
+# them: at res 32 the 20 mm cube is a SINGLE pixel, so hue is its only cue. dino_patch resolves
+# the cube as a shape at res 112/168 and does not. Same no-pure-0-or-1 rule as above.
 YELLOW = (0.80, 0.62, 0.04)
 BLUE = (0.04, 0.12, 0.60)
 
@@ -291,12 +281,10 @@ SENSOR_NEAR = 0.01
 SENSOR_FAR = 3.0
 
 # Safety catch-all plane for anything that rolls off the panels. MUST sit beyond SENSOR_FAR so
-# neither policy camera renders it: the background is then the renderer's black clear colour,
-# matching what the greenscreen overlay used to paint at the cost of a segmentation pass per camera
-# per step.
+# neither policy camera renders it: the background is then the renderer's black clear colour.
 GROUND_ALTITUDE = -5.0
 
 # The third-person video camera; the policy never sees it. Its render target is allocated per
-# sub-scene, so at 512x512 and 1024 envs it reserved ~1 GB of VRAM. Raise it for a --capture_video
-# eval; training does not read it.
+# sub-scene, so the size costs VRAM per env. Raise it for a --capture_video eval; training does not
+# read it.
 HUMAN_RENDER_RESOLUTION = 128

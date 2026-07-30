@@ -11,8 +11,9 @@ Qt event loop, no threads, so it drops into the existing `async for _ in pace(fp
 """
 from __future__ import annotations
 
-import numpy as np
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
+
+from utils import qt
 
 REAL, SIM, ALARM, MUTED = "#d9a521", "#4a6cf7", "#e5484d", "#7e8797"
 
@@ -38,119 +39,26 @@ BUTTONS = [("go to rest", "rest"), ("go to park", "park"),
            ("match colour to sim", "match_colour"), ("reset zoom + offset", "recentre"),
            ("save mapping", "save")]
 
-STYLE = """
-QWidget { background:#14161a; color:#e4e7ec; font-size:13px; }
+STYLE = qt.STYLE + """
 QGroupBox { border:1px solid #262b34; border-radius:3px; margin-top:14px; padding-top:10px; }
 QGroupBox::title { subcontrol-origin:margin; left:8px; color:#7e8797; }
-QDoubleSpinBox, QComboBox { background:#1f232b; border:1px solid #2d333d;
-    border-radius:3px; padding:2px 4px; }
-QPushButton { background:#242932; border:1px solid #333a45; border-radius:3px; padding:5px 9px; }
-QPushButton:hover { background:#2e3440; }
-QSlider::groove:horizontal { height:3px; background:#2d333d; border-radius:2px; }
-QSlider::handle:horizontal { width:10px; margin:-6px 0; border-radius:2px; background:#8a93a3; }
-QSlider::handle:horizontal:hover { background:#c3cad6; }
-QScrollArea { border:0; }
-QScrollBar:vertical, QScrollBar:horizontal { background:#14161a; width:10px; height:10px; }
-QScrollBar::handle { background:#333a45; border-radius:5px; min-height:30px; min-width:30px; }
-QScrollBar::add-line, QScrollBar::sub-line { height:0; width:0; }
 QLabel#mono { font-family:Menlo,monospace; }
 """
 
 _TICKS = 2000     # slider resolution; finer than the eye on a 300px groove
 
 
-class _Field(QtWidgets.QWidget):
-    """One value, as a slider and a spin box over the same number.
-
-    The slider is for searching (drag and watch the overlay), the spin box for landing on a value
-    you can write down. They are two views of one number, so each mirrors the other.
-    """
-
-    def __init__(self, lo, hi, step, decimals):
-        super().__init__()
-        self.lo, self.hi = float(lo), float(hi)
-        self.spin = QtWidgets.QDoubleSpinBox()
-        self.spin.setRange(self.lo, self.hi)
-        self.spin.setDecimals(decimals)
-        self.spin.setSingleStep(step)
-        self.spin.setKeyboardTracking(False)     # commit on Enter/focus-out, not per keystroke
-        self.spin.setFixedWidth(84 if decimals < 4 else 96)
-        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider.setRange(0, _TICKS)
-        self.slider.setMinimumWidth(70)
-        box = QtWidgets.QHBoxLayout(self)
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(6)
-        box.addWidget(self.slider, 1)
-        box.addWidget(self.spin)
-        self.slider.valueChanged.connect(self._from_slider)
-        self.spin.valueChanged.connect(self._to_slider)
-        self._to_slider(self.spin.value())
-
-    def _from_slider(self, i):
-        v = self.lo + (self.hi - self.lo) * i / _TICKS
-        self.spin.blockSignals(True)
-        self.spin.setValue(v)
-        self.spin.blockSignals(False)
-
-    def _to_slider(self, v):
-        i = round((v - self.lo) / (self.hi - self.lo) * _TICKS)
-        self.slider.blockSignals(True)
-        self.slider.setValue(int(i))
-        self.slider.blockSignals(False)
-
-    def value(self) -> float:
-        return self.spin.value()
-
-    def setValue(self, v) -> None:      # noqa: N802 - matches the Qt spelling it stands in for
-        self.spin.setValue(float(v))    # valueChanged moves the slider
-
-
-class _Panel(QtWidgets.QLabel):
-    """An image that fills whatever the layout gives it, keeping its aspect ratio.
-
-    Both size policies are Ignored so the pixmap's own size never feeds back into the layout;
-    without that, setting a large frame grows the panel, which grows the window.
-    """
-
-    def __init__(self, title, colour, minimum, maximum=None):
-        super().__init__()
-        self._rgb = None
-        self.title = title
-        self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setStyleSheet(f"border:2px solid {colour}; background:#0f1115; color:#7e8797;")
-        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
-        self.setMinimumSize(minimum, minimum)
-        if maximum:
-            self.setMaximumHeight(maximum)
-        self.setText("no frame")
-
-    def show_rgb(self, rgb):
-        self._rgb = rgb
-        self._render()
-
-    def resizeEvent(self, ev):         # noqa: N802 - Qt naming
-        super().resizeEvent(ev)
-        self._render()
-
-    def _render(self):
-        if self._rgb is None:
-            self.setText("no frame")
-            return
-        rgb = np.ascontiguousarray(self._rgb)
-        h, w = rgb.shape[:2]
-        img = QtGui.QImage(rgb.tobytes(), w, h, 3 * w, QtGui.QImage.Format_RGB888)
-        side = max(min(self.width(), self.height()) - 6, 16)
-        self.setPixmap(QtGui.QPixmap.fromImage(img).scaled(
-            side, side, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation))
+def _field(lo, hi, step, decimals) -> qt.Value:
+    """One value as a slider and a spin box, at this window's resolution and column widths."""
+    return qt.Value(lo, hi, step, decimals, ticks=_TICKS,
+                    spin_width=84 if decimals < 4 else 96, slider_width=70)
 
 
 def _scroll(inner: QtWidgets.QWidget, minimum: int) -> QtWidgets.QScrollArea:
     """Wrap a widget so it scrolls instead of clipping when the window gets small.
 
-    `minimum` is deliberately below what the contents need. Without it the pane refuses to shrink
-    past its contents and takes the space from its neighbour instead of scrolling, which is how the
-    control rail ends up crushing the images on a small screen.
+    `minimum` is deliberately below what the contents need, or the pane takes space from its
+    neighbour instead of scrolling.
     """
     area = QtWidgets.QScrollArea()
     area.setWidgetResizable(True)
@@ -177,7 +85,7 @@ def _pairs(rows, cols: int) -> QtWidgets.QGridLayout:
     return grid
 
 
-class Window(QtWidgets.QWidget):
+class Window(qt.Driven, QtWidgets.QWidget):
     def __init__(self, cameras, sim_names, joint_limits):
         super().__init__()
         self.setWindowTitle("so-frame calibrate")
@@ -186,11 +94,11 @@ class Window(QtWidgets.QWidget):
         self.sim_names = sim_names
 
         # -- images ---------------------------------------------------------------------------
-        self.panels = {k: _Panel(k, c, 140) for k, c in
+        self.panels = {k: qt.Panel("no frame", 140, colour=c, border=2) for k, c in
                        (("real", REAL), ("sim", SIM), ("blend", MUTED))}
         # The other camera is a reference strip, not a working view: capped so it cannot take
         # height from the camera actually being fitted.
-        self.others = {k: _Panel(k, c, 80, maximum=150) for k, c in
+        self.others = {k: qt.Panel("no frame", 80, colour=c, border=2, maximum=150) for k, c in
                        (("real", REAL), ("sim", SIM), ("blend", MUTED))}
 
         grid = QtWidgets.QGridLayout()
@@ -233,15 +141,15 @@ class Window(QtWidgets.QWidget):
         self.camera = QtWidgets.QComboBox()
         self.camera.addItems(cameras)
 
-        self.joints: dict[str, _Field] = {}
+        self.joints: dict[str, qt.Value] = {}
         for k, (lo, hi) in joint_limits.items():
-            self.joints[k] = _Field(lo, hi, (hi - lo) / 200, 4)
+            self.joints[k] = _field(lo, hi, (hi - lo) / 200, 4)
         arm = QtWidgets.QGroupBox("arm  (sim units, ranged to the urdf limits)")
         arm.setLayout(_pairs([(k.split(".")[0], f) for k, f in self.joints.items()], 1))
 
-        self.fields: dict[str, _Field] = {}
+        self.fields: dict[str, qt.Value] = {}
         for key, label, lo, hi, step, dec in MAP_FIELDS:
-            self.fields[key] = _Field(lo, hi, step, dec)
+            self.fields[key] = _field(lo, hi, step, dec)
         cam = QtWidgets.QGroupBox("camera mapping")
         cam.setLayout(_pairs([(lab, self.fields[key]) for key, lab, *_ in MAP_FIELDS], 2))
 
@@ -282,24 +190,10 @@ class Window(QtWidgets.QWidget):
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(split)
-        # setSizes only after the resize: on a splitter that is still at its default height the
-        # sizes get clamped and then rescaled, and the images end up with less than the controls.
+        # setSizes only after the resize, or a splitter still at its default height clamps and
+        # rescales them.
         self.resize(1480, 1000)
         split.setSizes([660, 340])
-
-        self._closed = False
-
-    def closeEvent(self, ev):          # noqa: N802 - Qt naming
-        self._closed = True
-        ev.accept()
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    def step(self) -> None:
-        """Service Qt from the caller's loop. Nothing else drives this window."""
-        QtWidgets.QApplication.instance().processEvents()
 
     # -- called by the loop ---------------------------------------------------------------
     def track(self) -> str:

@@ -33,7 +33,6 @@ assert SO101_ON_FRAME_URDF.exists(), f"SO-101-on-frame URDF not found at {SO101_
 from .. import config
 
 GRASP_SITE_OFFSET = config.GRASP_SITE_OFFSET
-STS3215_STALL_TORQUE = config.STS3215_STALL_TORQUE
 
 # PBR texture sets for `apply_materials` (see `RandomizationConfig.visual_fidelity`).
 _TEXTURES_ROOT = _REPO_ROOT / "simulation" / "assets" / "textures"

@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from ..actor import weight_init
-from .dino_patch import EMBED, _MEAN, _STD, load_backbone
+from .dino_patch import EMBED, _forward_cams
+# Re-exported: the training obs wrapper warms the backbone as ``dino_global.load_backbone``.
+from .dino_patch import _MEAN, _STD, load_backbone  # noqa: F401
 
 POOLS = ("cls", "mean", "cls_mean")
 
@@ -34,42 +35,24 @@ def vector_count(num_cams, pool="cls"):
 def embed_global(rgb, res, num_cams=None, device=None, pool="cls"):
     """(B, H, W, 3*num_cams) uint8 -> (B, vector_count, EMBED) global vectors, bf16.
 
-    Each camera is bilinearly resized to ``res``, ImageNet-normalized and pushed through
-    ``forward_features``; the per-camera vectors are stacked camera-major, so ordering matches
-    the input stack's channel order, as the patch encoder's token grids do.
+    The per-camera vectors are stacked camera-major, so ordering matches the input stack's channel
+    order, as the patch encoder's token grids do.
 
     ``pool`` is what "global" means: ``cls`` (default, what the backbone was trained to make
     globally informative), ``mean`` over patch tokens, or ``cls_mean`` for both concatenated.
     """
     if pool not in POOLS:
         raise ValueError(f"pool must be one of {POOLS}, got {pool!r}")
-    if rgb.dim() == 3:
-        rgb = rgb.unsqueeze(0)
-    device = device or rgb.device
-    if num_cams is None:
-        num_cams = rgb.shape[-1] // 3
-    assert rgb.shape[-1] == 3 * num_cams, \
-        f"expected {3 * num_cams} channels for {num_cams} cameras, got {rgb.shape[-1]}"
 
-    backbone = load_backbone(device)
-    x = rgb.to(device).permute(0, 3, 1, 2).float() / 255.0
-    mean = torch.tensor(_MEAN, device=x.device).view(1, 3, 1, 1)
-    std = torch.tensor(_STD, device=x.device).view(1, 3, 1, 1)
+    def pick(feats):
+        vecs = []
+        if pool in ("cls", "cls_mean"):
+            vecs.append(feats["x_norm_clstoken"].unsqueeze(1))
+        if pool in ("mean", "cls_mean"):
+            vecs.append(feats["x_norm_patchtokens"].mean(dim=1, keepdim=True))
+        return vecs
 
-    amp_device = "cuda" if x.is_cuda else "cpu"
-    vecs = []
-    with torch.autocast(amp_device, dtype=torch.bfloat16):
-        for c in range(num_cams):
-            cam = x[:, 3 * c: 3 * c + 3]
-            if cam.shape[-1] != res:
-                cam = F.interpolate(cam, size=(res, res), mode="bilinear", align_corners=False)
-            cam = (cam - mean) / std
-            feats = backbone.forward_features(cam)
-            if pool in ("cls", "cls_mean"):
-                vecs.append(feats["x_norm_clstoken"].unsqueeze(1))
-            if pool in ("mean", "cls_mean"):
-                vecs.append(feats["x_norm_patchtokens"].mean(dim=1, keepdim=True))
-    return torch.cat(vecs, dim=1).to(torch.bfloat16)
+    return _forward_cams(rgb, res, num_cams, device, pick)
 
 
 class DinoGlobalEncoder(nn.Module):

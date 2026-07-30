@@ -11,110 +11,24 @@ threads, so it drops into the existing `async for tick in pace(fps)` without tou
 """
 from __future__ import annotations
 
-import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
+
+from utils import qt
 
 FG, MUTED, ALARM, POS, NEG = "#e4e7ec", "#7e8797", "#e5484d", "#4a6cf7", "#d9a521"
 
-STYLE = """
-QWidget { background:#14161a; color:#e4e7ec; font-size:13px; }
+STYLE = qt.STYLE + """
+QPushButton { padding:5px 11px; }
 QLabel#status { font-size:17px; padding:2px 0; }
 QLabel#info, QLabel#hint { font-family:Menlo,monospace; color:#7e8797; }
-QPushButton { background:#242932; border:1px solid #333a45; border-radius:3px; padding:5px 11px; }
-QPushButton:hover { background:#2e3440; }
-QDoubleSpinBox { background:#1f232b; border:1px solid #2d333d; border-radius:3px; padding:2px 4px; }
-QSlider::groove:horizontal { height:3px; background:#2d333d; border-radius:2px; }
-QSlider::handle:horizontal { width:10px; margin:-6px 0; border-radius:2px; background:#8a93a3; }
-QSlider::handle:horizontal:hover { background:#c3cad6; }
-QScrollArea { border:0; }
-QScrollBar:vertical, QScrollBar:horizontal { background:#14161a; width:10px; height:10px; }
-QScrollBar::handle { background:#333a45; border-radius:5px; min-height:30px; min-width:30px; }
-QScrollBar::add-line, QScrollBar::sub-line { height:0; width:0; }
 """
 
-# Keys the window offers, and the run loop's existing single-character handler for each.
+# Keys the window offers, and the run loop's single-character handler for each.
 KEYS = [("pause / resume", "p"), ("rest", "r"), ("park", "k"), ("zero rail", "0"), ("quit", "q")]
 
 # Budget range, in action steps. Below ~0.5 a group can barely glide, since one action step is the
 # whole budget; well above that the target is free to run ahead of a slower joint again.
 LAG_MIN, LAG_MAX = 0.1, 6.0
-
-
-class _Value(QtWidgets.QWidget):
-    """One number as a slider and a spin box: drag to search, type to land on an exact value."""
-
-    TICKS = 400
-
-    def __init__(self, lo, hi, step, decimals, value):
-        super().__init__()
-        self.lo, self.hi = float(lo), float(hi)
-        self.spin = QtWidgets.QDoubleSpinBox()
-        self.spin.setRange(self.lo, self.hi)
-        self.spin.setDecimals(decimals)
-        self.spin.setSingleStep(step)
-        self.spin.setKeyboardTracking(False)
-        self.spin.setFixedWidth(76)
-        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider.setRange(0, self.TICKS)
-        self.slider.setMinimumWidth(110)
-        box = QtWidgets.QHBoxLayout(self)
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(6)
-        box.addWidget(self.slider, 1)
-        box.addWidget(self.spin)
-        self.slider.valueChanged.connect(self._from_slider)
-        self.spin.valueChanged.connect(self._to_slider)
-        self.spin.setValue(float(value))
-
-    def _from_slider(self, i):
-        self.spin.blockSignals(True)
-        self.spin.setValue(self.lo + (self.hi - self.lo) * i / self.TICKS)
-        self.spin.blockSignals(False)
-
-    def _to_slider(self, v):
-        self.slider.blockSignals(True)
-        self.slider.setValue(int(round((v - self.lo) / (self.hi - self.lo) * self.TICKS)))
-        self.slider.blockSignals(False)
-
-    def value(self) -> float:
-        return self.spin.value()
-
-
-class _Panel(QtWidgets.QLabel):
-    """An image that fills whatever the layout gives it, keeping its aspect ratio.
-
-    Both size policies are Ignored so the pixmap's own size never feeds back into the layout;
-    without that, setting a frame grows the panel, which grows the window.
-    """
-
-    def __init__(self, title, minimum=140):
-        super().__init__()
-        self._rgb = None
-        self.title = title
-        self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setStyleSheet("border:1px solid #2d333d; background:#0f1115; color:#7e8797;")
-        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
-        self.setMinimumSize(minimum, minimum)
-        self.setText(f"{title}\nno frame")
-
-    def show_rgb(self, rgb):
-        self._rgb = rgb
-        self._render()
-
-    def resizeEvent(self, ev):         # noqa: N802 - Qt naming
-        super().resizeEvent(ev)
-        self._render()
-
-    def _render(self):
-        if self._rgb is None:
-            self.setText(f"{self.title}\nno frame")
-            return
-        rgb = np.ascontiguousarray(self._rgb)
-        h, w = rgb.shape[:2]
-        img = QtGui.QImage(rgb.tobytes(), w, h, 3 * w, QtGui.QImage.Format_RGB888)
-        side = max(min(self.width(), self.height()) - 4, 16)
-        self.setPixmap(QtGui.QPixmap.fromImage(img).scaled(
-            side, side, QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation))
 
 
 class _Actions(QtWidgets.QWidget):
@@ -152,7 +66,6 @@ class _Actions(QtWidgets.QWidget):
             act, resid = (self.rows[i][1], self.rows[i][2]) if i < len(self.rows) else (None, 0.0)
             p.setPen(QtGui.QColor(MUTED))
             p.drawText(4, int(y + 15), name[:11])
-            # the track
             p.fillRect(QtCore.QRectF(x0, y + 8, span, 3), QtGui.QColor("#22272f"))
             p.fillRect(QtCore.QRectF(mid - 0.5, y + 4, 1, 11), QtGui.QColor("#39404b"))
             if act is not None:
@@ -163,8 +76,7 @@ class _Actions(QtWidgets.QWidget):
                 p.setPen(QtGui.QColor(FG))
                 p.drawText(int(x0 + span + 6), int(y + 15), f"{a:+.2f}")
             # Lag in action steps, scaled so this joint's budget sits at half a bar. Red means the
-            # budget is spent: this group has stopped advancing and the next decision is waiting on
-            # it. A joint with no budget (the gripper) still shows its lag, just never in red.
+            # budget is spent; a joint with no budget (the gripper) still shows its lag, never red.
             gate = self.thresholds.get(name)
             r = max(-1.0, min(1.0, float(resid) / (2 * max(gate or 1.0, 1e-3))))
             p.fillRect(QtCore.QRectF(mid + r * span / 2 - 1, y + 2, 2, 15),
@@ -172,7 +84,7 @@ class _Actions(QtWidgets.QWidget):
         p.end()
 
 
-class Window(QtWidgets.QWidget):
+class Window(qt.Driven, QtWidgets.QWidget):
     def __init__(self, cameras, joint_names, max_lag=3.0, rail_step=7.0, gated=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
@@ -187,7 +99,7 @@ class Window(QtWidgets.QWidget):
 
         # Views left, actions right, on one row: the two are read together, and side by side keeps
         # the window from growing taller than the images are wide.
-        self.panels = {c: _Panel(c) for c in cameras}
+        self.panels = {c: qt.Panel(f"{c}\nno frame", 140) for c in cameras}
         views = QtWidgets.QGridLayout()
         for col, (name, panel) in enumerate(self.panels.items()):
             lab = QtWidgets.QLabel(name)
@@ -215,16 +127,14 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
-        # Live, because the value that works depends on the arm: how far the target may lead it,
-        # which is both how far it may glide between decisions and when the next one fires. The bars
-        # right here are the readout, so dial it to just above where the ticks stop going red.
-        # Joints outside `gated` (the gripper) are unbounded and never shown red.
+        # How far the target may lead the arm, which is both how far it may glide between decisions
+        # and when the next one fires. Joints outside `gated` (the gripper) are unbounded, and the
+        # bars are the readout: dial it to just above where the ticks stop going red.
         self._gated = {k.split(".")[0] for k in (gated or ())}
-        self._lag = _Value(LAG_MIN, LAG_MAX, 0.05, 2, max_lag)
-        # How far one full-command action moves the carriage. Here because it is the figure in the
-        # action contract that was never measured, and because moving it while watching the rail is
-        # the measurement. It rescales rail lag too, since lag is counted in these steps.
-        self._rail_step = _Value(1.0, 20.0, 0.5, 1, rail_step)
+        self._lag = qt.Value(LAG_MIN, LAG_MAX, 0.05, 2, max_lag)
+        # How far one full-command action moves the carriage. It rescales rail lag too, since lag
+        # is counted in these steps.
+        self._rail_step = qt.Value(1.0, 20.0, 0.5, 1, rail_step)
         for text, widget in (("max lag", self._lag), ("rail step (mm)", self._rail_step)):
             lab = QtWidgets.QLabel(text)
             lab.setStyleSheet(f"color:{MUTED};")
@@ -246,23 +156,16 @@ class Window(QtWidgets.QWidget):
         outer.addWidget(area)
         self.resize(1120, 620)
 
-        self._closed = False
-        # Take focus so key presses land here and not nowhere. A child that wants a key still wins,
-        # which is the point: click into a spin box and digits type into it, including 0.
+        # Take focus so key presses land here. A child that wants a key still wins, so digits type
+        # into a spin box you have clicked into, including 0.
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.setFocus()
-
-    def closeEvent(self, ev):          # noqa: N802 - Qt naming
-        self._closed = True
-        ev.accept()
 
     def keyPressEvent(self, ev):       # noqa: N802 - Qt naming
         """Queue a debug key for the caller, same characters the terminal accepts.
 
-        Without this the window swallowed every press: the buttons were the only way into the run
-        loop from a focused window, and the terminal only hears keys while IT has focus, which it
-        does not while you are watching the views. Qt sends a key to the focused child first and
-        only walks up to here if that child ignores it, so typing into the sliders still works.
+        Qt offers a key to the focused child first and only walks up to here if that child ignores
+        it, so typing into the sliders still works.
         """
         ch = ev.text().lower()
         if ch in {c for _, c in KEYS}:
@@ -270,14 +173,6 @@ class Window(QtWidgets.QWidget):
             ev.accept()
             return
         super().keyPressEvent(ev)
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    def step(self) -> None:
-        """Service Qt from the caller's loop. Nothing else drives this window."""
-        QtWidgets.QApplication.instance().processEvents()
 
     def max_lag(self) -> float:
         """Lag budget in action steps, as currently dialled in."""

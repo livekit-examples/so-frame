@@ -1,6 +1,6 @@
 """SO-101-on-frame robot definition for mjlab.
 
-Wraps the existing, unmodified ``simulation/mjcf/so101_on_frame.xml`` as an mjlab
+Wraps the shared ``simulation/mjcf/so101_on_frame.xml`` as an mjlab
 ``EntityCfg``. Following mjlab's own robot assets (see i2rt_yam), the model's XML
 actuators are stripped and re-declared here in Python so their gains/effort limits
 are first-class, tunable, sim-to-real knobs.
@@ -71,26 +71,22 @@ def get_spec() -> mujoco.MjSpec:
 #
 # NOTE: These are reasonable *starting* PD gains, mirroring the generic values in
 # the XML's <default> classes. They are NOT calibrated STS3215 (arm/gripper) or
-# rail-drive (slider) parameters. Tune them and randomize them via domain-
-# randomization events before trusting sim-to-real transfer. See the repo's
-# MJCF README, which flags the same caveat.
+# rail-drive (slider) parameters. Tune and randomize them before trusting
+# sim-to-real transfer. The repo's MJCF README flags the same caveat.
 ##
 
 _ARM_STIFFNESS = 18.0
 _ARM_DAMPING = 0.6
 _ARM_ARMATURE = 0.02
 # The STS3215's ~3 N.m stall torque, matching the joints' actuatorfrcrange in the XML and
-# so101_on_frame._JOINT_FORCE_LIMITS on the maniskill side. This was 10.0, which is also what
-# get_spec() throws away: it deletes the XML actuators, and sts3215.xml's position class had
-# already capped them correctly at forcerange="-3.0 3.0". Re-declaring at 10 handed the policy
-# 3.3x the torque the real servo can deliver, which shows up on hardware as a stall mid-lift.
+# soframe_policy.rig.JOINT_FORCE_LIMITS (authoritative) on the maniskill/deploy side.
 _ARM_EFFORT = 3.0
 
 _SLIDER_STIFFNESS = 400.0
 _SLIDER_DAMPING = 8.0
 _SLIDER_ARMATURE = 0.1
-# Linear force (N) on the belt-driven rail, not an STS3215 torque. Set to match the value the
-# maniskill side has trained against; not independently calibrated.
+# Linear force (N) on the belt-driven rail, not an STS3215 torque. Matches
+# soframe_policy.rig.RAIL_FORCE_LIMIT (authoritative); functional, not calibrated.
 _SLIDER_EFFORT = 100.0
 
 # `damping` is the active PD derivative gain (kv). `viscous_damping=0.0` zeroes the
@@ -132,7 +128,7 @@ ARTICULATION = EntityArticulationInfoCfg(
 #
 # pos z=0.09 sets the frame's leg bottoms on mjlab's terrain plane (z=0) with the
 # lightbox body raised on them, matching the real rig. Objects rest on the added
-# white work floor at WORK_SURFACE_Z (0.08), inside the lightbox and in reach.
+# white work floor at WORK_SURFACE_Z, inside the lightbox and in reach.
 # joint_pos is a gentle "arm folded toward the workspace, gripper open" pose.
 ##
 
@@ -173,15 +169,15 @@ def get_so101_robot_cfg() -> EntityCfg:
 #   rail    0.07 m/s    -> 7 cm/s
 #   gripper 2.0  rad/s  (deliberately quicker; the jaw has to open and close within a reach)
 # Divided by the control rate to get per-step deltas, so these stay correct if CONTROL_HZ moves.
-#
-# Replaces mjlab's yam heuristic, scale = 0.25 * effort_limit / stiffness, which tied step size
-# to torque through a relationship with no physical meaning: it gave the arm 0.14 rad/step
-# (~7 rad/s at 50 Hz, 14x the real servo), and dropping the effort limit to 3 would have
-# "fixed" it to 0.042 only by coincidence.
 ##
 
 # Control rate (Hz). Matches the maniskill twin and the deploy loop's 10 Hz portal tick, so a
 # policy trained here sees the same action cadence it will run at on hardware.
+#
+# CONTROL_HZ and the speed table below are a hand-maintained copy of
+# soframe_policy.rig.CONTROL_HZ / REAL_JOINT_SPEED, which is authoritative because deploy shares
+# it. This project has its own lockfile and cannot import soframe_policy, so edit rig.py first
+# and mirror the change here.
 CONTROL_HZ = 10.0
 
 _REAL_JOINT_SPEED: dict[str, float] = {   # rad/s, or m/s for the rail
@@ -193,16 +189,3 @@ _REAL_JOINT_SPEED: dict[str, float] = {   # rad/s, or m/s for the rail
 SO101_ACTION_SCALE: dict[str, float] = {
   name: speed / CONTROL_HZ for name, speed in _REAL_JOINT_SPEED.items()
 }
-
-
-##
-# Workspace (env-relative, on the terrain plane).
-#
-# !!! THESE ARE ESTIMATES. Validate reachability in the viewer and adjust. !!!
-# Ranges are relative to each environment's origin. The arm base sits near
-# (0, -0.49) env-relative; these bracket a patch in front of it on the plane.
-##
-
-WORKSPACE_X = (-0.35, -0.10)
-WORKSPACE_Y = (-0.65, -0.30)
-CUBE_Z = (0.02, 0.03)  # spawn just above the plane so it settles.

@@ -2,9 +2,7 @@
 
 MOVES THE ROBOT. The joint fields span the sim range and leave through the same bridge the policy
 uses; the sim is rendered at the commanded qpos beside the live rectified real view, so a mapping
-is fitted against sim as it is NOW rather than against a dumped PNG. That matters for the wrist
-camera, whose view is almost entirely jaws: a fit checked at one arm pose says nothing about
-whether it holds as the arm moves.
+is fitted and checked at whatever pose the arm is in.
 
 Imports the deploy project's bridge, camera stack and mapping code, so what is fitted here is
 replayed byte-for-byte by the deploy loop. `--bridge` prints the joint self-test and exits.
@@ -49,7 +47,7 @@ def _mapping_for(track: str) -> dict | None:
         try:
             return load_mapping(path)
         except ValueError as exc:
-            # Must not be fatal: this IS the tool that refits it.
+            # Not fatal: this is the tool that refits it.
             print(f"[debug] {track}: {exc}")
             return None
     print(f"[debug] {track}: NO mapping ({fname} missing) -- using a plain "
@@ -111,7 +109,7 @@ def run_ui_smoke(seconds: float, sim_size: int) -> int:
     tile = lambda: rng.integers(30, 220, (sim_size, sim_size, 3), dtype=np.uint8)  # noqa: E731
 
     QtWidgets.QApplication([])
-    # Named inline rather than imported from sim_mirror, so the smoke test never loads the sim.
+    # Named inline rather than imported from sim_mirror, which would pull in mani_skill and SAPIEN.
     sim_names = {t: ("wrist_camera" if "arm" in t else "overhead_camera") for t in tracks}
     win = winmod.Window(tracks, sim_names,
                         {k: bridge.SIM_LIMITS[k] for k in bridge.JOINT_KEYS})
@@ -145,8 +143,8 @@ async def run_calibrate(sim_size: int = 168) -> int:
     room = env("LIVEKIT_ROOM", "so-frame")
     fps = int(env("PORTAL_FPS", "10"))
 
-    # Loaded before the robot is claimed: SAPIEN takes seconds to start, and holding control while
-    # it does is worse than waiting.
+    # Loaded before the robot is claimed: SAPIEN takes seconds to start, so don't hold control
+    # while it does.
     from sim_mirror import REAL_TO_SIM_CAM, SimMirror
     print(f"[debug] loading the simulator ({sim_size}px) ...")
     mirror = SimMirror(sim_size)
@@ -188,7 +186,7 @@ async def run_calibrate(sim_size: int = 168) -> int:
     seeded = None   # which camera the mapping fields currently hold
 
     # Peak measured joint speed against what the trained action limit allows, so you can see
-    # whether the real arm actually keeps up with the rate the policy was trained at.
+    # whether the real arm keeps up with the rate the policy was trained at.
     sim_max_speed = {k: bridge.DELTA_LIMIT[k] * abs(bridge.SCALE[k]) * fps
                      for k in bridge.JOINT_KEYS}
     max_real_speed = {k: 0.0 for k in bridge.JOINT_KEYS}
@@ -229,8 +227,8 @@ async def run_calibrate(sim_size: int = 168) -> int:
                 raw[track] = (frame_bytes_to_numpy_rgb(vf.data, vf.width, vf.height)
                               if vf is not None else None)
 
-            # Sim renders at the COMMANDED target, the same value on the wire, so both sides are
-            # the same pose up to whatever the real arm has actually tracked.
+            # Sim renders at the COMMANDED target, the same value on the wire, so both sides show
+            # the same pose up to whatever the real arm has tracked.
             sim_frames = mirror.render({k.split(".")[0]: v for k, v in target.items()})
 
             sel = win.track()
@@ -330,7 +328,6 @@ async def run_calibrate(sim_size: int = 168) -> int:
             op.close()
     print("[debug] released control.")
     return 0
-
 
 
 def main() -> int:

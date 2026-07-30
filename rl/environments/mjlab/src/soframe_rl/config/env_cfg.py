@@ -21,7 +21,7 @@ def so101_pick_place_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg = make_pick_place_env_cfg()
   cfg.scene.num_envs = PARAMS["runner"]["num_envs"]
 
-  # Entities: imported (unmodified) robot + programmatic cube + bin.
+  # Entities: robot from the shared MJCF + programmatic cube + bin.
   cfg.scene.entities = {
     "robot": get_so101_robot_cfg(),
     "cube": EntityCfg(spec_fn=get_cube_spec),

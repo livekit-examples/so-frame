@@ -33,7 +33,7 @@ from lerobot_robot_so101_slider_pos import (
 )
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from utils import bridge as bridge_park  # noqa: E402  (PARK_REAL only; wire units, no sim maths)
+from utils import bridge  # noqa: E402  (PARK_REAL only; wire units, no sim maths)
 from utils.common import env, load_env, mint_token, pace  # noqa: E402
 
 IDENTITY = "robot"
@@ -52,7 +52,7 @@ WIRE_SLIDER_KEY = "dof_slider.pos"
 # The pose `reset_to_zero_position` drives to: the shared park pose, in wire units already.
 # Defined in utils.bridge so the policy's park key and this RPC cannot drift apart. Override any
 # joint via its RESET_POSE_* env var.
-REST_POSE_DEFAULTS: dict[str, float] = dict(bridge_park.PARK_REAL)
+REST_POSE_DEFAULTS: dict[str, float] = dict(bridge.PARK_REAL)
 REST_POSE_ENV_KEYS: dict[str, str] = {
     WIRE_SLIDER_KEY:     "RESET_POSE_SLIDER",
     "shoulder_pan.pos":  "RESET_POSE_SHOULDER_PAN",

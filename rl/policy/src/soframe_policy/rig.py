@@ -83,12 +83,3 @@ JOINT_FORCE_LIMITS = {
 
 assert set(JOINT_NAMES) == set(REAL_JOINT_SPEED) == set(JOINT_LIMITS) == set(REST_QPOS), \
     "every rig table must cover exactly JOINT_NAMES"
-
-
-def clamp(qpos: dict) -> dict:
-    """Clamp a sim-unit joint dict to the joint limits."""
-    out = {}
-    for name, value in qpos.items():
-        lo, hi = JOINT_LIMITS[name]
-        out[name] = min(hi, max(lo, float(value)))
-    return out

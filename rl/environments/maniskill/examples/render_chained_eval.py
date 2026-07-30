@@ -37,7 +37,7 @@ parser.add_argument("--render_size", type=int, default=512)
 # 10 fps = the 10 Hz control rate, so the video plays at real time.
 parser.add_argument("--fps", type=int, default=10)
 parser.add_argument("--visual_fidelity", type=str, default="raster", choices=["flat", "raster", "raytraced"])
-parser.add_argument("--overlay", action="store_true", help="composite the greenscreen background overlay. OFF matches training: the background is black by construction now that the ground plane sits beyond config.SENSOR_FAR, so the overlay (and the segmentation render that drives it) is no longer part of the training obs. Only pass this to composite a real background photo")
+parser.add_argument("--overlay", action="store_true", help="composite the greenscreen background overlay. OFF matches training, where the background is black because the ground plane sits beyond config.SENSOR_FAR. Only pass this to composite a real background photo")
 parser.add_argument("--sim_envs", type=int, default=16, help="number of parallel sim envs; only env 0 is filmed. Policies trained in batched GPU physics measurably degrade when rolled out in a lone env (contact dynamics resolve differently in a single-scene solver), so render with a training-sized batch. Forced to 1 for raytraced (cpu backend).")
 parser.add_argument("--domain_randomization", action="store_true")
 parser.add_argument("--seed", type=int, default=0)
@@ -56,9 +56,8 @@ steady_cameras = dict(
 )
 
 env_kwargs = dict(
-    # The greenscreen overlay only engages when segmentation is in the obs mode (base_random_env
-    # skips it otherwise). Training is plain "rgb" with a black background from the far-plane cull,
-    # so asking for the overlay is what would differ from the training obs.
+    # The overlay only engages when segmentation is in the obs mode (base_random_env skips it
+    # otherwise); training is plain "rgb".
     obs_mode="rgb+segmentation" if args.overlay else "rgb",
     render_mode="sensors",
     num_envs=1 if args.visual_fidelity == "raytraced" else args.sim_envs,
@@ -85,7 +84,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 obs, info = env.reset(seed=args.seed)
 # The checkpoint states its own encoder, resolution, camera count and proprio layout, so there is
-# nothing to pass and nothing to keep in sync with the run that produced it.
+# nothing here to keep in sync with the run that produced it.
 encoder, actor, meta = ckpt_io.load(args.checkpoint, device=device)
 print(f"loaded {meta['kind']} @ res {meta['res']}, {meta['num_cams']} cameras, "
       f"step {meta['global_step']}")

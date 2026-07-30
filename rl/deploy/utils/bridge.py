@@ -10,10 +10,9 @@ Joint order, joint limits, per-step delta caps and the rest pose come from
 (``leslider/configs/calibrate_follower_pos.yaml``), which places real ``.pos`` zero at the URDF zero
 pose. ``wrist_roll`` is the measured exception, see below.
 
-Check both remaining assumptions against a live arm with rl/calibrate's ``uv run calibrate``:
-that each joint's calibrated zero is the URDF zero pose (an offset), and that ``SIGN`` is identity
-(a flipped joint drives the arm the wrong way, which no offset would rescue). Re-check after
-re-homing a servo.
+Two assumptions to re-check against a live arm with rl/calibrate's ``uv run calibrate`` after
+re-homing a servo: that each joint's calibrated zero is the URDF zero pose (an offset), and that
+``SIGN`` is identity (a flipped joint drives the arm the wrong way, which no offset would rescue).
 """
 from __future__ import annotations
 
@@ -35,7 +34,6 @@ OFFSET_REAL: dict[str, float] = {k: 0.0 for k in JOINT_KEYS}   # real .pos at si
 
 # Measured on the real arm: at sim wrist_roll 0 the real wrist sat 90 deg round from where sim
 # showed it, so this joint's calibrated zero is NOT the URDF zero. The rest of the arm checked out.
-# Costs reachability at one end: see the range note below.
 OFFSET_REAL["wrist_roll.pos"] = 90.0
 
 # Rail: normalized 0..100 over its travel, affine, no sign flip, calibrated from geometry.
@@ -55,8 +53,7 @@ SIM_LIMITS: dict[str, tuple[float, float]] = {
 
 # PARK is not REST. SIM_REST above is where a training episode starts, so it is what you stage a
 # rollout from. PARK is a folded pose measured on the real arm, for leaving it idle: gripper open
-# so it drops anything it is holding. Both the robot's reset RPC and the policy's park key read
-# this, so the two cannot drift apart the way they did when each kept its own copy.
+# so it drops anything it is holding. Both the robot's reset RPC and the policy's park key read it.
 #
 # Wire units, because that is what was measured. lift and elbow sit ON their joint limits, so a
 # position controller parked here holds current against a mechanical stop.

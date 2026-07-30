@@ -68,14 +68,7 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
   # hard per-step motion cap and the real servo's speed is enforced structurally.
   #
   # Integrating from the previous target (not the measured position) is what the maniskill twin's
-  # pd_joint_target_delta_pos and the deploy loop both do. See mdp/actions.py for why that matters
-  # under load: delta-from-current cannot get ahead of a lagging joint, so the target collapses
-  # onto the measured pose and the arm stalls.
-  #
-  # This was JointPositionActionCfg(use_default_offset=True), i.e. target = action * scale +
-  # default_joint_pos -- an ABSOLUTE target from the home pose. Nothing bounded per-step motion:
-  # one step could command the full +-scale swing from home. The comment called it "delta joint
-  # position", which it never was, and the smoothness penalties existed to paper over that.
+  # pd_joint_target_delta_pos and the deploy loop both do. See mdp/actions.py.
   actions: dict[str, ActionTermCfg] = {
     "joint_pos": TargetRelativeJointPositionActionCfg(
       entity_name="robot",
@@ -162,10 +155,8 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=10.0,
       params={"command_name": "place"},
     ),
-    # No speed or smoothness penalties. They were standing in for a rate limit the action space
-    # did not have: joint_vel_hinge's max_vel was 0.5, literally the real arm's 0.5 rad/s, and
-    # action_rate_l2 taxed jerk. Both are now enforced structurally by the relative action
-    # space's per-step cap, which needs no weight tuned against the task rewards.
+    # No speed or smoothness penalties: the relative action space's per-step cap enforces the
+    # rate limit structurally, with no weight to tune against the task rewards.
     "joint_pos_limits": RewardTermCfg(
       func=mdp.joint_pos_limits,
       weight=-10.0,
@@ -177,31 +168,22 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
   }
 
-  # Curriculum. `common_step_counter` increments once per env step, i.e.
-  # iterations * num_steps_per_env (24). Thresholds below are in that unit
-  # (iteration count shown in comments), independent of num_envs.
+  # Curriculum. `step` below is applied once per curriculum tick, which is once per env
+  # step (iterations * num_steps_per_env), so it is independent of num_envs.
   curriculum = {
-    # Placement curriculum: hold a fixed cube-next-to-bin layout while the policy
-    # learns pick->carry->place, then ramp to full workspace randomization.
+    # Performance-gated placement curriculum: hold the fixed cube-next-to-bin layout until the
+    # policy places well, then widen toward full workspace randomization only as fast as
+    # success allows, backing off if it drops.
     "placement_spread": CurriculumTermCfg(
       func=task_mdp.command_spread_curriculum,
       params={
         "command_name": "place",
-        # Performance-gated: hold the fixed layout until the policy places well,
-        # then widen randomization only as fast as success allows (back off if it
-        # drops). Self-paces to competence instead of a fixed schedule.
         "up_threshold": 0.4,
         "down_threshold": 0.2,
         "step": 1.0e-4,
         "ema_alpha": 0.01,
       },
     ),
-    # The smoothness-penalty ramp that used to live here is gone with the penalty it tuned.
-    # Its own comment was the argument against the approach: the weight had to be ramped
-    # linearly because a step change "yanks the reward landscape and can collapse a trained
-    # policy", and it had to stay under ~-0.06 or "the penalty starts outbidding the task
-    # rewards and carrying stops paying". A per-step cap in the action space has no weight, no
-    # ramp, and no window to fall out of.
   }
 
   return ManagerBasedRlEnvCfg(
@@ -237,9 +219,8 @@ def make_pick_place_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     # 0.005 s timestep x 20 = 10 Hz control, matching so101_constants.CONTROL_HZ, the maniskill
-    # twin, and the deploy loop's 10 Hz portal tick. This was decimation=4 (50 Hz): the action
-    # cadence a policy trains at is part of the sim2real contract, and a 50 Hz policy driven at
-    # 10 Hz on hardware sees 5x its trained step size per decision.
+    # twin, and the deploy loop's 10 Hz portal tick. The action cadence a policy trains at is
+    # part of the sim2real contract.
     decimation=20,
     # 30 s at 10 Hz. The real-servo speeds need this much runway to reach, carry and place;
     # the maniskill twin uses the same 300-step horizon.

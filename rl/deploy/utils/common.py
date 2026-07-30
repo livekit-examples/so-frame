@@ -77,9 +77,7 @@ async def pace(fps: int) -> AsyncIterator[int]:
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
         else:
-            # Behind schedule. Still yield: without this the loop never awaits, so the event loop
-            # never gets to run its callbacks, and on a portal Operator that means observations
-            # stop being delivered entirely. It presents as the video freezing only while the
-            # policy is inferring, since that is the tick that overruns 1/fps.
+            # Behind schedule. MUST still await, or the event loop never runs its callbacks and a
+            # portal Operator stops receiving observations entirely.
             next_tick = time.perf_counter()
             await asyncio.sleep(0)

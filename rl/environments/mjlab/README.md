@@ -1,10 +1,11 @@
 # SO-101-on-frame RL: pick a cube, place it in a bin
 
 A [mjlab](https://github.com/mujocolab/mjlab) reinforcement-learning task where the
-SO-101-on-frame arm picks up a cube and drops it into a bin. Cube and bin start at
-randomized positions on the workspace each episode.
+SO-101-on-frame arm picks up a cube and drops it into a bin. Cube and bin are repositioned
+every episode, starting from a fixed nominal layout and widening toward full workspace
+randomization as the curriculum advances.
 
-The robot model comes from `../../simulation/mjcf/so101_on_frame.xml`, imported with two
+The robot model comes from `../../../simulation/mjcf/so101_on_frame.xml`, imported with two
 small edits: a `grasp_site` on the gripper, and collision boxes on the lightbox's panels
 (otherwise visual-only).
 
@@ -41,31 +42,18 @@ Training parameters (parallel envs, iterations, PPO hyperparameters, network siz
 **[`train.toml`](train.toml)**. Edit that file rather than the Python. Any value can still
 be overridden per run on the CLI (e.g. `--env.scene.num-envs 2048`).
 
-### Pretrained checkpoint
-
-A trained policy ships in **[`checkpoints/model_best.pt`](checkpoints/model_best.pt)**
-(~4 MB): **55.6% place-success at 94% workspace randomization**, trained with the full
-recipe described below. Try it without training anything:
-
-```bash
-# interactive viewer
-uv run soframe-play Mjlab-Pick-Place-Bin-SO101 --checkpoint-file checkpoints/model_best.pt
-
-# fleet video (one arm -> endless field); vary --seed for different rollouts
-uv run soframe-render --checkpoint-file checkpoints/model_best.pt --seed 0 --out fleet.mp4
-```
-
-Both run best on GPU but also work on CPU (slowly; pass `--device cpu` to
-`soframe-render`).
+No pretrained checkpoint ships with this task: training starts from scratch. `soframe-play`
+and `soframe-render` both need a `--checkpoint-file` from a run of your own.
 
 ### Fleet render
 
 `soframe-render` rolls out a trained checkpoint across many environments (default 400) and
 renders a single camera move: it starts behind one arm at its lightbox, then eases back to a
 low, wide shot where the grid of rigs overflows the frame and reads as an endless field.
-Episodes auto-reset continuously so every arm stays active for the whole clip. Framing is
-tunable via `--azimuth`, `--elevation-close/-wide`, `--wide-dist-frac`; runs on CPU or GPU
-(`--device`).
+Episodes auto-reset continuously (`--episode-seconds`, default 6) so every arm stays active
+for the whole clip. Framing is tunable via `--azimuth`, `--elevation-close/-wide`,
+`--wide-dist-frac`; `--seed` varies the layouts and rollouts. It defaults to `cuda:0` and
+also runs on CPU, slowly, via `--device cpu`.
 
 ## Layout
 
@@ -74,7 +62,6 @@ rl/environments/mjlab/
 ├── pyproject.toml            uv project; mjlab dep + console scripts
 ├── .python-version           pinned to 3.13
 ├── train.toml                training params (edit this to tune runs)
-├── checkpoints/model_best.pt pretrained policy (55.6% success @ 94% randomization)
 └── src/soframe_rl/
     ├── __init__.py           imports config -> registers the task
     ├── train.py / play.py    thin wrappers around mjlab's CLIs
@@ -85,6 +72,8 @@ rl/environments/mjlab/
     ├── assets.py             get_cube_spec (free box) + get_bin_spec (fixed tray)
     ├── pick_place_env_cfg.py robot-agnostic manager wiring (obs/act/reward/etc.)
     ├── mdp/
+    │   ├── actions.py        TargetRelativeJointPositionAction: delta from the
+    │   │                     previous target, clamped to the soft joint limits
     │   ├── commands.py       PlaceInBinCommand: spread-scaled cube+bin placement,
     │   │                     goal inside the bin, carry-progress tracking
     │   ├── rewards.py        grasp_lift, potential-based transport, in_bin_bonus
@@ -117,53 +106,61 @@ The scene has three entities:
 
 The rig sits at a height where the frame's legs rest on the ground plane and the lightbox's
 bottom panel sits at the workspace surface height, with the cube and bin placed on that
-panel in the arm's reach. Physics runs at `timestep=0.005` with `decimation=4` (policy acts
-at 50 Hz).
+panel in the arm's reach. Physics runs at `timestep=0.005` with `decimation=20`, so the
+policy acts at 10 Hz, matching `so101_constants.CONTROL_HZ`, the maniskill twin, and the
+deploy loop's 10 Hz tick. The action cadence is part of the sim-to-real contract, so it is
+not a free knob. Episodes are `episode_length_s=30.0`, i.e. 300 decisions, which is the
+runway the real-servo speeds need to reach, carry and place.
 
 ### Managers
 
 | Manager | What ours does |
 |---|---|
 | **Observation** | Two groups: `actor` (27-dim, with input noise) and `critic` (same, no noise). Joint pos (7) + joint vel (7) + `ee_to_cube` (3) + `cube_to_goal` (3) + last action (7). |
-| **Action** | One `JointPositionActionCfg` over all 7 actuators (slider + 5 arm + gripper): delta position targets, per-actuator scale, added to the current pose and clipped to joint limits. |
-| **Command** | `PlaceInBinCommand`. On each episode reset it samples a bin and cube position (keeping them apart), teleports both, and publishes a target point just above the bin opening. |
-| **Event** | Resets the robot to its home pose plus a small jitter. Domain-randomization events are a TODO. |
+| **Action** | One `TargetRelativeJointPositionActionCfg` (ours, `mdp/actions.py`) over all 7 actuators (slider + 5 arm + gripper): `target = previous_target + action * scale`, clamped to the soft joint limits. Integrating from the previous target rather than the measured pose is what the maniskill twin and the deploy loop do; delta-from-current stalls under load. |
+| **Command** | `PlaceInBinCommand`. On each episode reset it samples a bin and cube position (keeping them apart), teleports both, and publishes a target at the cube's resting place on the bin floor, so putting the cube in *increases* the place reward. |
+| **Event** | Resets the robot to its home pose plus a small joint jitter (+/- 0.05). Domain-randomization events are a TODO. |
 | **Reward** | The staged terms below. |
 | **Termination** | Time-out only (episode length cap); no early failure termination. |
-| **Curriculum** | Ramps the placement spread and the joint-velocity penalty over training. |
+| **Curriculum** | One term: it widens the placement spread as success allows. |
+
+The action `scale` is per actuator and is the only thing that enforces real speed in sim: it
+is `SO101_ACTION_SCALE`, the joint speeds measured on the real rig divided by `CONTROL_HZ`
+(arm 0.5 rad/s, rail 0.07 m/s, gripper 2.0 rad/s, deliberately quicker so the jaw can open
+and close within a reach). Effort limits bound torque, not velocity, so they cannot do this
+job. Because `scale` is a hard per-step cap, the rate limit is structural.
 
 ### Reward
 
 A **staged decomposition** (reach → grasp/lift → carry → place → in-bin), each stage a
 dense term plus a milestone bonus:
 
-| Term | Purpose |
-|---|---|
-| `reach_and_bring` | Reach the cube; once reached, also rewards closing on the target. |
-| `grasp_lift` | Rewards lifting the cube only while the gripper is actually on it, so it shapes a real grasp. |
-| `transport` | Potential-based carry: rewards only the per-step reduction in the lifted cube's distance to the bin, so it can't be farmed by hovering. |
-| `place_precise` | Sharpens placement once the cube is near the target. |
-| `in_bin_bonus` | Milestone bonus for landing the cube in the bin. |
-| `action_rate_l2` | Penalizes jerky action changes. |
-| `joint_pos_limits` | Keeps the arm off its joint end-stops. |
-| `joint_vel_hinge` | Penalizes joint speeds above a threshold; curriculum-ramped. |
+| Term | Weight | Purpose |
+|---|---|---|
+| `reach_and_bring` | 1.0 | Reach the cube; once reached, also rewards closing on the target. |
+| `grasp_lift` | 15.0 | Rewards lifting the cube only while the gripper is actually on it, so it shapes a real grasp. |
+| `transport` | 40.0 | Potential-based carry: rewards only the per-step reduction in the lifted cube's distance to the bin, so it can't be farmed by hovering. Gated on the cube clearing ~rim height. |
+| `place_precise` | 5.0 | Sharpens placement once the cube is near the target. |
+| `in_bin_bonus` | 10.0 | Milestone bonus for landing the cube in the bin. |
+| `joint_pos_limits` | -10.0 | Keeps the arm off its joint end-stops. |
+
+`joint_pos_limits` is the only penalty. There is no action-rate or joint-velocity term: the
+action space's per-step cap already limits speed and jerk structurally, so there is no
+penalty weight to tune against the task rewards. The weights above have not been swept, they
+are the values the current wiring uses.
 
 **Success** (a metric, not a reward) means the cube's center is inside the bin footprint,
 below the rim.
 
 ### Curriculum
 
-Two terms ramp with training progress:
-
-- **Placement spread**: the key one. The cube/bin layout scales from fixed and easy
-  (a short hop between them) to full workspace randomization. It's performance-gated: a
-  smoothed success rate drives it, so it holds the easy layout until the policy can place,
-  then widens randomization as fast as the policy keeps up, and backs off if it starts
-  failing.
-- **Smoothness**: the joint-velocity penalty ramps up linearly over training, so the
-  policy can explore freely early on and is pushed toward smooth, hardware-safe motion
-  later. The ramp is gradual and capped, since too sharp or too large a penalty can make
-  the policy stop moving altogether.
+One term, `placement_spread`, ramps with training progress. The cube/bin layout scales from
+fixed and easy (a short hop between them) to full workspace randomization. It's
+performance-gated: a smoothed success rate (EMA, `alpha=0.01`) drives it, raising spread
+above 0.4 success and lowering it below 0.2, by `1e-4` per env step. So it holds the easy
+layout until the policy can place, then widens randomization as fast as the policy keeps up,
+and backs off if it starts failing. `soframe-play` disables the curriculum and pins
+`initial_spread = 1.0`, i.e. it always shows the hard, fully randomized case.
 
 ### Configs
 
@@ -173,6 +170,26 @@ Two terms ramp with training progress:
 - **Python cfg modules**: `pick_place_env_cfg.py` wires the managers; `config/env_cfg.py`
   fills in the SO-101 specifics; `so101_constants.py` and `assets.py` define the entities;
   `config/__init__.py` registers the task.
+
+### What is measured and what is a guess
+
+Be honest about which numbers you can lean on:
+
+- **Measured**: the per-joint speeds behind `SO101_ACTION_SCALE` and `CONTROL_HZ`. These are a
+  hand-maintained copy of `soframe_policy.rig.REAL_JOINT_SPEED` / `rig.CONTROL_HZ`, which is
+  authoritative because deploy shares it. This project has its own lockfile and cannot import
+  `soframe_policy`, so edit `rig.py` first and mirror the change here.
+- **Functional but not calibrated**: the PD gains in `so101_constants.py`. They mirror the
+  generic values in the XML's `<default>` classes, not measured STS3215 (arm/gripper) or
+  rail-drive (slider) parameters. The effort limits do track `rig.JOINT_FORCE_LIMITS` (3 N.m
+  arm, 100 N rail), but the rail figure is itself functional rather than measured.
+- **Estimates**: the workspace bounds. `workspace_x`/`workspace_y` on
+  `PlaceInBinCommandCfg` (`mdp/commands.py`) carry an explicit warning: they have not been
+  checked for reachability in the viewer. The same goes for the nominals and `spread_xy` next
+  to them, and for the gripper's open/closed sign in `HOME_KEYFRAME`.
+
+There is no domain randomization yet, so nothing here has been stress-tested for
+sim-to-real transfer.
 
 ## TODO
 

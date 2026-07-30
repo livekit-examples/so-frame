@@ -49,13 +49,14 @@ def token_count(num_cams, res):
     return num_cams * grid_size(res) ** 2
 
 
-@torch.no_grad()
-def tokenize(rgb, res, num_cams=None, device=None):
-    """(B, H, W, 3*num_cams) uint8 -> (B, num_cams*(res/PATCH)^2, EMBED) patch tokens, bf16.
+def _forward_cams(rgb, res, num_cams, device, pick):
+    """(B, H, W, 3*num_cams) uint8 -> (B, ..., EMBED) bf16, camera-major.
 
-    Each camera is bilinearly resized to ``res``, ImageNet-normalized and pushed through
-    ``forward_features``; the per-camera token grids are concatenated camera-major, so token
-    order matches the input stack's channel order. bf16 is also how the replay buffer stores them.
+    The one preprocessing definition behind ``tokenize`` and ``dino_global.embed_global``, so sim
+    and real cannot disagree on resize mode, normalization or camera ordering: each camera is
+    bilinearly resized to ``res`` (skipped when already there), ImageNet-normalized and pushed
+    through the frozen backbone's ``forward_features``. ``pick(feats)`` gets that output dict per
+    camera and returns the tensors to concatenate on dim 1.
     """
     if rgb.dim() == 3:
         rgb = rgb.unsqueeze(0)
@@ -71,15 +72,26 @@ def tokenize(rgb, res, num_cams=None, device=None):
     std = torch.tensor(_STD, device=x.device).view(1, 3, 1, 1)
 
     amp_device = "cuda" if x.is_cuda else "cpu"
-    toks = []
+    out = []
     with torch.autocast(amp_device, dtype=torch.bfloat16):
         for c in range(num_cams):
             cam = x[:, 3 * c: 3 * c + 3]
             if cam.shape[-1] != res:
                 cam = F.interpolate(cam, size=(res, res), mode="bilinear", align_corners=False)
             cam = (cam - mean) / std
-            toks.append(backbone.forward_features(cam)["x_norm_patchtokens"])
-    return torch.cat(toks, dim=1).to(torch.bfloat16)
+            out.extend(pick(backbone.forward_features(cam)))
+    return torch.cat(out, dim=1).to(torch.bfloat16)
+
+
+@torch.no_grad()
+def tokenize(rgb, res, num_cams=None, device=None):
+    """(B, H, W, 3*num_cams) uint8 -> (B, num_cams*(res/PATCH)^2, EMBED) patch tokens, bf16.
+
+    The per-camera token grids are concatenated camera-major, so token order matches the input
+    stack's channel order. bf16 is also how the replay buffer stores them.
+    """
+    return _forward_cams(rgb, res, num_cams, device,
+                         lambda feats: (feats["x_norm_patchtokens"],))
 
 
 class DinoPatchEncoder(nn.Module):

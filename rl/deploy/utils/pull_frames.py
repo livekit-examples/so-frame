@@ -15,11 +15,12 @@ import numpy as np
 from livekit.portal import Observation, Operator, OperatorConfig, frame_bytes_to_numpy_rgb
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from utils.camera_mapping import CAMERA_STACK  # noqa: E402
 from utils.common import env, load_env, mint_token  # noqa: E402
 
 _HERE = pathlib.Path(__file__).resolve().parent
 CONFIG_PATH = _HERE.parent / "portal.yaml"
-CAMERAS = ("arm_camera", "overhead_camera")
+CAMERAS = tuple(track for track, _ in CAMERA_STACK)
 
 
 async def main(out: pathlib.Path, prefix: str, timeout: float) -> None:

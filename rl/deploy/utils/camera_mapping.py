@@ -36,9 +36,8 @@ def load_mapping(path) -> dict:
     if "crop_size" in m or "crop_cx" in m:
         raise ValueError(
             f"{path} is a pre-offset mapping (crop_cx/crop_cy/crop_size). Framing is now "
-            "offset_x/offset_y on the undistort output, which is not a rename: the old movable "
-            "crop was pinned in the narrow axis and its size fought `zoom` for field of view. "
-            "There is no exact conversion, so refit this camera in rl/calibrate."
+            "offset_x/offset_y on the undistort output, and there is no exact conversion, "
+            "so refit this camera in rl/calibrate."
         )
     return m
 
@@ -60,8 +59,7 @@ def build_mapping(camera, raw_shape, rot90, angle, k1, k2, focal, *,
         # Angular span of the kept square, recorded for reference. This is the REAL camera's span
         # and may differ from the sim FOV; the fit is what reconciles the two.
         fov_deg=round(float(np.rad2deg(2 * np.arctan(size / (2 * focal * zoom)))), 2),
-        # Rounded only to keep the JSON readable, and never below what the UI lets you dial in:
-        # a fit that snaps back a decimal place when reloaded is worse than a long number.
+        # Rounded only to keep the JSON readable, never below what the UI lets you dial in.
         rot90=int(rot90), angle_deg=round(float(angle), 2),
         k1=round(float(k1), 4), k2=round(float(k2), 4),
         focal_px=round(float(focal), 2), zoom=round(float(zoom), 4),
@@ -76,9 +74,7 @@ def build_mapping(camera, raw_shape, rot90, angle, k1, k2, focal, *,
 def match_colour_gains(real_rgb: np.ndarray, sim_rgb: np.ndarray, clip=(0.5, 2.0)) -> list[float]:
     """Per-channel gains that bring `real` channel means onto `sim`'s.
 
-    Matching the SIM render is the point: neutralising to grey would only make the real camera
-    self-consistent, while the policy needs it to look like what it trained on. Both frames must
-    be the same scene, so hold the arm still and keep the objects consistent.
+    Both frames MUST be the same scene, so hold the arm still and keep the objects consistent.
     """
     out = []
     for c in range(3):
@@ -103,13 +99,7 @@ def apply_mapping(image: np.ndarray, mapping: dict) -> np.ndarray:
 
     # zoom and offset both live in the undistort OUTPUT matrix. zoom scales the output focal
     # (< 1 shrinks, so a strong barrel lens fits the canvas); the offset shifts the principal
-    # point, which translates the content within the canvas. Positive x moves it right, positive
-    # y moves it down.
-    #
-    # Panning used to be a movable crop window, which could not work: the crop was the largest
-    # square that fits, so in the narrow axis there was zero slack and its centre was pinned.
-    # Shifting the principal point has no such limit, and it leaves exactly one control for field
-    # of view instead of two that fought each other.
+    # point, translating the content within the canvas. Positive x moves it right, positive y down.
     f = mapping["focal_px"]
     zoom = mapping.get("zoom", 1.0)
     ox, oy = mapping.get("offset_x", 0.0), mapping.get("offset_y", 0.0)
@@ -120,7 +110,7 @@ def apply_mapping(image: np.ndarray, mapping: dict) -> np.ndarray:
     dist = np.array([mapping["k1"], mapping["k2"], 0, 0, 0], dtype=np.float64)
     image = cv2.undistort(image, k, dist, None, new_k)
 
-    # Always the centred largest square: framing is the offset's job now.
+    # Always the centred largest square: framing is the offset's job.
     size = min(h, w)
     x0, y0 = (w - size) // 2, (h - size) // 2
     crop = image[y0:y0 + size, x0:x0 + size]
@@ -134,12 +124,8 @@ def apply_colour(view: np.ndarray, mapping: dict) -> np.ndarray:
     """Per-channel gain and gamma, in the CHANNEL ORDER OF THE ARRAY.
 
     Deploy hands rectify() RGB frames, so gain_r is channel 0 there. Applied after the resize
-    because it is per-pixel and the output is far smaller than the raw frame.
-
-    This exists because a colour cast is invisible to everything else here: rectification is
-    geometry and never touches pixel values, so a camera that reads warm stays warm all the way
-    into the encoder. The policy trained under SensorAugWrapper's +-10% per-channel gain and
-    0.7-1.4 gamma, so the target is to land inside that envelope, not to be perfectly neutral.
+    because it is per-pixel. The policy trained under SensorAugWrapper's +-10% per-channel gain
+    and 0.7-1.4 gamma, so the target is to land inside that envelope, not to be perfectly neutral.
     """
     gains = [float(mapping.get(k, 1.0)) for k in ("gain_r", "gain_g", "gain_b")]
     gamma = float(mapping.get("gamma", 1.0))
@@ -167,8 +153,6 @@ def load_mappings(mappings_dir=MAPPINGS_DIR, label="camera") -> dict[str, dict |
                 print(f"[{label}] {track}: mapping {filename}")
                 continue
             except ValueError:
-                # An unusable mapping is the same situation as a missing one: fall back rather
-                # than refusing to start, or you could not run the tool that fixes it.
                 why = f"{filename} is a pre-offset mapping and needs a refit"
         out[track] = None
         print(f"[{label}] {track}: NO mapping ({why}) -- falling back to a "
@@ -181,8 +165,7 @@ def rectify(frame_rgb: np.ndarray, mapping: dict | None, out_size=None) -> np.nd
     """Rectify one raw frame, or plain-resize it if this camera has no mapping.
 
     ``out_size`` is the fallback resolution for the no-mapping case. It matters because the
-    per-camera views get concatenated channel-wise: one camera on a 168px mapping and another on a
-    128px fallback cannot stack at all.
+    per-camera views get concatenated channel-wise, so every camera MUST land on one size.
     """
     if mapping is not None:
         return apply_mapping(frame_rgb, mapping)
@@ -194,9 +177,8 @@ def stack_out_size(mappings: dict, default=None) -> int:
     """The resolution every camera's view must share to be stackable.
 
     Taken from whichever mappings exist, so a camera falling back to a plain resize still lands on
-    the same size as its neighbours. Disagreeing mappings are a configuration error, not something
-    to average: the largest wins and says so, since upsampling the smaller view is recoverable
-    while a crash is not.
+    the same size as its neighbours. Disagreeing mappings are a configuration error; the largest
+    wins and says so, since upsampling the smaller view is recoverable while a crash is not.
     """
     sizes = {int(m["out_size"]) for m in mappings.values() if m and "out_size" in m}
     if len(sizes) > 1:

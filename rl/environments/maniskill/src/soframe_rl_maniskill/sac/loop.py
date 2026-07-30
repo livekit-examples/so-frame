@@ -68,7 +68,6 @@ def train(args):
     if not args.evaluate:
         print("Running training")
         if args.track:
-            # NOT named `config`: that would shadow the config module imported above.
             wandb_config = vars(args)
             wandb_config["env_cfg"] = dict(**bundle.env_kwargs, num_envs=args.num_envs,
                                            env_id=args.env_id, reward_mode="normalized_dense",
@@ -283,8 +282,6 @@ def train(args):
 
             pi, log_pi, _ = actor.get_action(obs, state)
             q_values = critic.get_q_values(obs, state, pi, detach_critic=True)
-
-            # Mean (No CDQ)
             critic_value = q_values.mean(dim=0)
 
             actor_loss = (alpha * log_pi - critic_value).mean()
@@ -314,7 +311,6 @@ def train(args):
     eval_envs.reset(seed=args.seed)
 
     global_step = 0
-    # cpu backend under raytraced training
     sim_device = torch.device("cpu") if args.visual_fidelity == "raytraced" else device
     pbar = tqdm.tqdm(total=args.total_timesteps, desc="steps")
     max_ep_ret = -float("inf")
@@ -340,7 +336,6 @@ def train(args):
                     print(f"Step {global_step}: new best (success_at_end={score[0]:.2f}, "
                           f"return={score[1]:.2f}) saved to {best_model_path}")
 
-        # fresh run explores randomly before learning_starts; a warm-started run collects with the loaded policy
         if global_step < args.learning_starts and args.checkpoint is None:
             actions = envs.action_space.sample()
             # At num_envs=1 the sampled action comes back unbatched, (n_act,) rather than

@@ -33,8 +33,7 @@ class RandomizationConfig:
     apply_overlay: bool = False
     """Composite `rgb_overlay_path` in behind the robot and the task objects, per pixel, using a
     segmentation render. OFF: it costs an extra render target and readback per camera per step, and
-    config.SENSOR_FAR already culls the only background geometry (the ground plane), leaving the
-    black clear colour the default overlay image painted anyway.
+    config.SENSOR_FAR already culls the only background geometry (the ground plane).
 
     Turn on only to composite a REAL background photo, and then also pass an obs_mode including
     segmentation (`--obs_mode rgb+segmentation`), which is what feeds the mask."""
@@ -155,7 +154,7 @@ class BaseRandomEnv(BaseEnv):
     @property
     def _default_human_render_camera_configs(self):
         # Videos only; the policy never sees it. Sized from config because its render target is
-        # allocated per sub-scene (~1 GB of VRAM at 512x512 and 1024 envs).
+        # allocated per sub-scene.
         pose = sapien_utils.look_at([0.5, 0.3, 0.35], [0.3, 0.0, 0.1])
         size = config.HUMAN_RENDER_RESOLUTION
         return CameraConfig("render_camera", pose, size, size, 52 * np.pi / 180, 0.01, 100)
@@ -372,7 +371,13 @@ class BaseRandomEnv(BaseEnv):
         return obs
 
     def render_all(self):
-        """Renders all human render cameras and sensors together, excluding segmentation."""
+        """Human render cameras plus sensors, tiled, EXCLUDING segmentation.
+
+        Overrides BaseEnv.render_all, which BaseEnv.render() dispatches to under
+        render_mode="all" (the training default). No caller in this repo names it. Dropping the
+        override tiles the segmentation buffers into the video under an obs_mode that includes
+        them.
+        """
         images = []
         for obj in self._hidden_objects:
             obj.show_visual()

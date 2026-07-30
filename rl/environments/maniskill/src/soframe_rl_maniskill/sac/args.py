@@ -21,9 +21,8 @@ from soframe_policy.encoders import ENCODERS
 ENCODER_DEFAULTS = {
     "squint":      dict(res=32,  render_size=128, num_updates=64),
     "dino_patch":  dict(res=168, render_size=168, num_updates=32),
-    # The dense-vs-collapsed control for dino_patch: same backbone, resolution and num_updates, so
-    # the only difference is whether the patch grid survives. num_updates MUST match dino_patch's
-    # or an update-ratio difference confounds what the run measures.
+    # dino_global is the dense-vs-collapsed control for dino_patch, so its num_updates MUST match
+    # dino_patch's or an update-ratio difference confounds the comparison.
     "dino_global": dict(res=168, render_size=168, num_updates=32),
 }
 
@@ -71,11 +70,9 @@ class Args:
     randomize_colors: bool = False
     """also randomize bar/bin colors per scene build (on top of --object_colors); pair with --reconfiguration_freq"""
     object_colors: str = "black"
-    """cube/bin colour scheme. "black" matches the real rig (both config.BLACK, ~4-5% reflectance
-    matte plastic). "distinct" paints the cube blue and the bin yellow, which the squint CNN needs:
-    at res 32 the cube is one pixel, so hue is the only cue it has. Costs sim2real fidelity, so it
-    is not the default; dino_patch resolves the cube as a shape at res 112/168 and stays on
-    "black"."""
+    """cube/bin colour scheme. "black" matches the real rig (both config.BLACK). "distinct" paints
+    the cube blue and the bin yellow, which the squint CNN needs: at res 32 the cube is one pixel,
+    so hue is the only cue it has. Costs sim2real fidelity, so it is not the default."""
     overhead_camera_fov: Optional[float] = None
     """override the overhead camera's base FOV, in DEGREES (measured via rl/calibrate)"""
     wrist_camera_fov: Optional[float] = None
@@ -104,15 +101,15 @@ class Args:
     """evaluation frequency in terms of global steps"""
     log_freq: int = 10
     """how often, in iterations, to push the SAC losses to wandb. Separate from episode metrics,
-    which only exist at a truncation boundary (every env_horizon iterations, since partial_reset is
-    off): tying losses to that boundary logs one point per env_horizon iterations."""
+    which only exist at a truncation boundary, every env_horizon iterations with partial_reset
+    off."""
     save_train_video_freq: Optional[int] = None
     """frequency to save training videos in terms of iterations"""
     control_mode: Optional[str] = None
     """the control mode to use for the environment"""
     obs_mode: Optional[str] = "rgb"
-    """the observation output mode of the environment. Plain "rgb": the segmentation buffer only
-    feeds the greenscreen overlay, which is off (see RandomizationConfig.apply_overlay). Pass
+    """the observation output mode of the environment. Plain "rgb" because the segmentation buffer
+    only feeds the greenscreen overlay, which is off (see RandomizationConfig.apply_overlay). Pass
     --obs_mode rgb+segmentation if you turn the overlay back on."""
     sim_backend: str = "gpu"
     """physics/render backend. 'gpu' for real training (needs CUDA); 'cpu' supports a single
@@ -150,14 +147,8 @@ class Args:
     override that derivation."""
     replay_storage: str = "gpu"
     """where the replay lives: "gpu" (VRAM) or "cpu" (pinned host RAM, with a prefetch thread
-    overlapping the gather and the PCIe copy with training).
-
-    gpu by default: at dino_patch res 168, 512 envs, 2 episodes of a 200-step horizon, the
-    single-copy buffer is 42 GiB and the run peaks at 59.5 GiB of a 97.9 GiB card, while host
-    storage costs 24% throughput (267 vs 333 sps).
-
-    Use cpu when the buffer will not fit: dino_patch at 1024 envs (84 GiB buffer, ~101 GiB total) or
-    more than 2 episodes of retention. The prefetch holds the penalty near 24%."""
+    overlapping the gather and the PCIe copy with training). gpu by default. Use cpu when the buffer
+    will not fit in VRAM; the prefetch holds the throughput penalty near 24%."""
     replay_prefetch: int = 2
     """batches the replay keeps in flight when --replay_storage cpu. 0 makes sampling synchronous,
     the fallback if the prefetch thread is suspected of masking a bug."""

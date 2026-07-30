@@ -34,8 +34,7 @@ the gather, stages into pinned buffers, issues the host-to-device copy on a side
 the consumer a CUDA event to wait on.
 
 Prefetch engages only for the pinned-host-to-CUDA case. With storage and compute on the same device
-there is nothing to overlap, so ``sample`` takes the direct, synchronous path, which also keeps the
-unit tests deterministic.
+there is nothing to overlap, so ``sample`` takes the direct, synchronous path.
 """
 
 from __future__ import annotations
@@ -139,9 +138,9 @@ class ObsOnlyReplay:
         start = self._cursor
         idx = torch.arange(start, start + n, device=self.storage_device) % self.capacity
 
-        # Blocking device-to-host copies. One iteration is num_envs rows (110 MB for dino at 512
-        # envs, ~6 ms), small enough that overlapping the write is not worth the lifetime rules it
-        # would put on the caller's tensors.
+        # Blocking device-to-host copies: one iteration is only num_envs rows (~6 ms at dino, 512
+        # envs), too small to be worth the tensor-lifetime rules an async write would impose on the
+        # caller.
         with self._lock:
             self._rgb[idx] = obs_rgb.to(device=self.storage_device, dtype=self._rgb.dtype)
             self._state[idx] = obs_state.to(device=self.storage_device, dtype=self._state.dtype)
@@ -292,7 +291,7 @@ class ObsOnlyReplay:
             self._thread = None
 
     def bytes_per_transition(self) -> int:
-        """Allocated bytes per slot, for the sizing arithmetic in the README/args docs."""
+        """Allocated bytes per slot, for buffer sizing arithmetic."""
         if self._rgb is None:
             return 0
         per = self._rgb[0].numel() * self._rgb.element_size()

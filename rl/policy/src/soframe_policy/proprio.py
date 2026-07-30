@@ -47,12 +47,6 @@ class ProprioSpec:
     def names(self) -> tuple[str, ...]:
         return tuple(n for n, _ in self.fields)
 
-    def width_of(self, name: str) -> int:
-        for n, w in self.fields:
-            if n == name:
-                return w
-        raise KeyError(f"{name!r} not in proprio layout {self.names}")
-
     def slice_of(self, name: str) -> slice:
         off = 0
         for n, w in self.fields:

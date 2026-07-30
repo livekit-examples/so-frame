@@ -102,8 +102,6 @@ def load(path, device=None, *, kind=None, res=None, num_cams=2, n_act=7, proprio
                 "action_high": torch.full((n_act,), 1.0)}
 
     spec = ProprioSpec.from_meta(meta["proprio"])
-    # Metadata wins, as for kind/res; the caller's value is a fallback for checkpoints written
-    # before the field existed.
     encoder_kwargs = meta.get("encoder_kwargs") or (encoder_kwargs or {})
     # Build on CPU, then move: the constructors' nn.init.orthogonal_ calls torch.linalg.qr, which
     # has no MPS kernel before torch 2.13, and load_state_dict overwrites the init anyway.

@@ -43,8 +43,8 @@ class Projection(nn.Module):
 class Actor(nn.Module):
     """Squashed-Gaussian SAC actor over (encoder features, proprio).
 
-    Action bounds are plain arrays, not a gym env, so deploy needs no env object; use
-    ``from_env`` on the training side. ``action_scale``/``action_bias`` are registered buffers.
+    Action bounds are plain arrays, not a gym env, so deploy needs no env object.
+    ``action_scale``/``action_bias`` are registered buffers.
     """
 
     def __init__(self, n_obs, n_state, n_act, action_low, action_high,
@@ -69,11 +69,6 @@ class Actor(nn.Module):
         self.LOG_STD_MAX = 2
         self.LOG_STD_MIN = -5
         self.apply(weight_init)
-
-    @classmethod
-    def from_env(cls, env, n_obs, n_state, n_act, device=None, **kwargs):
-        space = env.unwrapped.single_action_space
-        return cls(n_obs, n_state, n_act, space.low, space.high, device=device, **kwargs)
 
     def forward(self, rgb, state, get_log_std=False):
         x = self.proj(rgb, state)

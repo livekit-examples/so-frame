@@ -5,8 +5,8 @@ import os
 import pathlib
 import platform
 
-# Real camera track -> the sim camera it is calibrated against. The arm camera is on the wrist and
-# the two names differ, which is a standing source of confusion when fitting.
+# Real camera track -> the sim camera it is calibrated against. The arm camera is the wrist camera
+# under another name.
 REAL_TO_SIM_CAM = {
     "arm_camera": "wrist_camera",
     "overhead_camera": "overhead_camera",
@@ -56,8 +56,8 @@ class SimMirror:
                 qpos[0, self._idx[name]] = float(v)
         self.u.agent.robot.set_qpos(qpos)
         # A SAPIEN-mounted camera renders from the transforms cached at the PREVIOUS capture, so
-        # the first get_obs() after a set_qpos returns the pre-set pose. The discarded capture is
-        # what flushes the mount; update_render() twice does not.
+        # the first get_obs() after a set_qpos returns the pre-set pose. The discarded capture
+        # flushes the mount; update_render() twice does not.
         self.u.scene.update_render()
         self.u.get_obs()
         self.u.scene.update_render()

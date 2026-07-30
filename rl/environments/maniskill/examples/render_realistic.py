@@ -47,7 +47,6 @@ env = gym.make(
 )
 
 obs, info = env.reset(seed=0)
-unwrapped = env.unwrapped
 
 action_shape = env.action_space.shape
 for step in range(args.steps):

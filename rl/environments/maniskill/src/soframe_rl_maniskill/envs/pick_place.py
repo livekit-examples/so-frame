@@ -148,7 +148,6 @@ class PickPlaceBin(DualCameraEnv):
         frictions = sample_range(cfg.item_friction_range)
         densities = sample_range(cfg.item_density_range)
 
-        # Cube colour from config.COLOR_CUBE (linear base colour).
         colors = np.tile(config.COLOR_CUBE, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_item_color:
             colors = sample_visible_colors()
@@ -194,13 +193,11 @@ class PickPlaceBin(DualCameraEnv):
         self.item = Actor.merge(items, name="item")
         self.add_to_state_dict_registry(self.item)
 
-        # Bin colour from config.COLOR_BIN.
         bin_colors = np.tile(config.COLOR_BIN, (self.num_envs, 1))
         if self.domain_randomization and cfg.randomize_bin_color:
             bin_colors = sample_visible_colors()
         bin_colors = np.concatenate([bin_colors, np.ones((self.num_envs, 1))], axis=-1)
 
-        self.bin_thickness = config.BIN_FLOOR_THICKNESS
         # [interior_half_x, interior_half_y, rim_height]. The z entry is the FULL rim height
         # above the work surface (the mesh base sits on it), not a half-extent.
         self.bin_dimensions = torch.stack([
@@ -252,7 +249,6 @@ class PickPlaceBin(DualCameraEnv):
 
         self.bin = Actor.merge(bins, name="bin")
         self.add_to_state_dict_registry(self.bin)
-        self.bin_radius = ones * config.BIN_FOOTPRINT_HALF * math.sqrt(2)
 
         if self.apply_greenscreen:
             self.remove_object_from_greenscreen(self.agent.robot)
@@ -263,7 +259,6 @@ class PickPlaceBin(DualCameraEnv):
             SO101OnFrame.keyframes["rest"].qpos.tolist(), device=self.device
         )
 
-        # One pass: colour scheme always, PBR relief maps only when realistic.
         self.agent.apply_materials(realistic=realistic)
 
         goal_builder = self.scene.create_actor_builder()

@@ -17,9 +17,6 @@ from soframe_rl.mdp.observations import (
 from soframe_rl.mdp.curriculums import (
   command_spread_curriculum as command_spread_curriculum,
 )
-from soframe_rl.mdp.curriculums import (
-  reward_weight_ramp_curriculum as reward_weight_ramp_curriculum,
-)
 from soframe_rl.mdp.rewards import (
   grasp_lift_reward as grasp_lift_reward,
 )
