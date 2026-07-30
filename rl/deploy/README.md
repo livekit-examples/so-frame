@@ -30,7 +30,8 @@ claims it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0`
 alone to wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` opens a window
 (`uv sync --group viz`) with the two rectified views the encoder is fed, a bar per joint for the
 last action and how far the arm still lags its target, the same keys as buttons, and a live
-**max lag** slider. It appears even with no frames arriving, so you can tell connected from stalled.
+**arm lag** / **rail lag** slider pair. It appears even with no frames arriving, so you can tell
+connected from stalled.
 
 `--arch` picks a checkpoint from `checkpoints/` by name:
 
@@ -47,15 +48,16 @@ contents disagree with the name it was loaded under is an error. That check earn
 two `dino_global` entries, whose pooling modes produce identical tensor shapes and so cannot be
 told apart by loading alone. `--checkpoint <path>` still takes anything outside `checkpoints/`.
 
-`--max-lag DELTAS` (default 1.0) decides how long the target is held after each action: until every
-joint is within that many action steps of where it was put. The task is quasi-static, so waiting is
-free, and it means every inference runs on an observation the arm has actually reached rather than
-one from two steps ago, which is the situation training had.
+`--max-lag-arm DELTAS` and `--max-lag-rail DELTAS` (both default 1.0) decide how long the target is
+held after each action: until every joint in each group is within that many action steps of where it
+was put. The task is quasi-static, so waiting is free, and it means every inference runs on an
+observation the arm has actually reached rather than one from two steps ago, which is the situation
+training had.
 
 The gate is the arm's measured lag, not a stopwatch, because a fixed wait is wrong in both
 directions. Measured against a simulated arm at 10 Hz:
 
-| case | fixed 0.3 s | `--max-lag 0.5` |
+| case | fixed 0.3 s | lag gate 0.5 |
 |---|---|---|
 | arm closes 80% of the gap per tick, full-step actions | 3.3 dec/s | 10.0 dec/s |
 | arm closes 20% per tick, full-step actions | 3.3 dec/s | 2.1 dec/s |
@@ -64,16 +66,43 @@ directions. Measured against a simulated arm at 10 Hz:
 The last row is the case the stopwatch cannot express: the action is already finished, and waiting
 is pure dead time. The middle row is the opposite, a move that needs longer than 0.3 s.
 
-A joint that physically cannot arrive (jaw closed on the object, a mechanical stop, a dead servo)
-would wedge the loop, so the gate gives up after 1 s and decides anyway. The per-second line reports
-`lag L/MAX (joint), N gate timeouts`; steady timeouts on one joint mean the gate is stricter than
+A joint that physically cannot arrive (a mechanical stop, a dead servo) would wedge the loop, so the
+gate gives up after 1 s and decides anyway. The per-second line reports `<group> lag L/MAX (joint)`
+for each group plus `N gate timeouts`; steady timeouts on one joint mean the gate is stricter than
 the hardware, not that the policy is stuck.
 
 Sensible values are roughly 0.1 to 2.0: one action moves a joint at most one step, so above ~2
-nothing is ever gated, and below ~0.1 the arm may never get there and every decision waits out the
-timeout. With `--viz` open the window's slider takes over the value and the per-joint ticks turn red
-above it, so the bars show which joint the next decision is waiting on. Tune it while the arm moves
-rather than restarting the run per guess.
+nothing is ever gated, and below ~0.1 the joint may never get there and every decision waits out the
+timeout. With `--viz` open the window's sliders take over the values and each joint's tick turns red
+above its own gate, so the bars show which joint the next decision is waiting on. Tune them while
+the arm moves rather than restarting the run per guess.
+
+### Why the rail and the arm are gated separately
+
+They are different mechanisms and one action step means a different physical thing on each: 0.85% of
+travel for the belt-driven carriage, 2.86° for a direct position servo. The carriage crosses 117
+steps end to end, so its last fraction of a step is a millimetre nobody's policy cares about, while
+the wrist's is the difference between the jaw being where the frame says it is or not.
+
+With one shared tolerance the two are coupled and the slower one sets the pace. Simulated at 10 Hz
+with a rail that closes 15% of its gap per tick and arm joints that close 80%:
+
+| gates | decisions/s | worst arm lag at decision |
+|---|---|---|
+| 0.5 both | 1.5 | 0.00 |
+| 2.5 both | 4.6 | 0.25 |
+| arm 0.5, rail 2.5 | 4.6 | 0.25 |
+
+Splitting buys the rail's throughput without giving up the arm's guarantee, and the guarantee is the
+point: with `2.5 both` on a loaded arm that closes only 10% per tick, decisions fire while the arm
+is up to **2.47 steps** behind, which is the stale-frame problem the gate exists to prevent. `arm 0.5,
+rail 2.5` holds it to 0.54 there, at the cost of a lower rate and 17 counted timeouts, because a 0.5
+arm gate is stricter than that hardware.
+
+**The gripper is not gated at all.** Its whole range is 9.6 action steps, so a jaw closed on the
+object sits several steps short of its commanded position for as long as it holds, and no useful
+tolerance would ever clear. Gating on it would drop every grasp to the timeout rate, during the part
+of the task that matters most. Its lag still shows in the viz, just never in red.
 
 On a Mac set `POLICY_DEVICE=mps`: the default device pick is cuda-or-cpu, so a DINOv2 checkpoint
 would otherwise run on the CPU.

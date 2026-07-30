@@ -130,14 +130,14 @@ class _Actions(QtWidgets.QWidget):
         super().__init__()
         self.names = list(names)
         self.rows: list = []
-        self.threshold = 1.0
+        self.thresholds: dict = {}
         self.setMinimumWidth(260)
         self.setMinimumHeight(self.ROW * len(self.names) + 2 * self.PAD)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-    def set_rows(self, rows, threshold=1.0) -> None:
+    def set_rows(self, rows, thresholds=None) -> None:
         self.rows = list(rows or [])
-        self.threshold = max(float(threshold), 1e-3)
+        self.thresholds = thresholds or {}
         self.update()
 
     def paintEvent(self, _ev):          # noqa: N802 - Qt naming
@@ -162,16 +162,18 @@ class _Actions(QtWidgets.QWidget):
                            QtGui.QColor(POS if a >= 0 else NEG))
                 p.setPen(QtGui.QColor(FG))
                 p.drawText(int(x0 + span + 6), int(y + 15), f"{a:+.2f}")
-            # Tracking error in action steps, scaled so the gate sits at half a bar. Red means
-            # this joint is over the gate: it is the one the next decision is waiting on.
-            r = max(-1.0, min(1.0, float(resid) / (2 * self.threshold)))
+            # Tracking error in action steps, scaled so this joint's gate sits at half a bar. Red
+            # means it is over the gate: it is what the next decision is waiting on. A joint with no
+            # gate (the gripper) still shows its lag, just never in red.
+            gate = self.thresholds.get(name)
+            r = max(-1.0, min(1.0, float(resid) / (2 * max(gate or 1.0, 1e-3))))
             p.fillRect(QtCore.QRectF(mid + r * span / 2 - 1, y + 2, 2, 15),
-                       QtGui.QColor(ALARM if abs(resid) > self.threshold else "#5b6472"))
+                       QtGui.QColor(ALARM if gate and abs(resid) > gate else "#5b6472"))
         p.end()
 
 
 class Window(QtWidgets.QWidget):
-    def __init__(self, cameras, joint_names, max_lag=1.0):
+    def __init__(self, cameras, joint_names, max_lag=None, groups=None):
         super().__init__()
         self.setWindowTitle("so-frame policy")
         self.setStyleSheet(STYLE)
@@ -196,8 +198,8 @@ class Window(QtWidgets.QWidget):
         views.setRowStretch(1, 1)
 
         self.actions = _Actions(joint_names)
-        hint = QtWidgets.QLabel("action out of centre; the tick is the arm's lag,\n"
-                                "red once it is over the gate below")
+        hint = QtWidgets.QLabel("action out of centre; the tick is the joint's lag,\n"
+                                "red once it is over its own gate below")
         hint.setObjectName("hint")
         acts = QtWidgets.QVBoxLayout()
         acts.addWidget(hint)
@@ -213,13 +215,18 @@ class Window(QtWidgets.QWidget):
             b.clicked.connect(lambda _=False, c=ch: self.requests.append(c))
             buttons.addWidget(b)
         buttons.addStretch()
-        # Live, because the value that works depends on what the arm is doing, and the bars right
-        # here are the readout for it: dial it to just above where the ticks stop going red.
-        self._max_lag = _Value(LAG_MIN, LAG_MAX, 0.05, 2, max_lag)
-        lab = QtWidgets.QLabel("max lag (steps)")
-        lab.setStyleSheet(f"color:{MUTED};")
-        buttons.addWidget(lab)
-        buttons.addWidget(self._max_lag)
+        # One gate per group, live: the value that works depends on the mechanism, and the bars
+        # right here are the readout. Dial each to just above where its ticks stop going red.
+        max_lag = dict(max_lag or {"arm": 1.0, "rail": 1.0})
+        # joint name -> the group whose gate it answers to; anything unlisted is never gated.
+        self._group_of = {n.split(".")[0]: g for g, keys in (groups or {}).items() for n in keys}
+        self._gates: dict[str, _Value] = {}
+        for group, value in max_lag.items():
+            self._gates[group] = _Value(LAG_MIN, LAG_MAX, 0.05, 2, value)
+            lab = QtWidgets.QLabel(f"{group} lag")
+            lab.setStyleSheet(f"color:{MUTED};")
+            buttons.addWidget(lab)
+            buttons.addWidget(self._gates[group])
 
         inner = QtWidgets.QWidget()
         box = QtWidgets.QVBoxLayout(inner)
@@ -250,9 +257,9 @@ class Window(QtWidgets.QWidget):
         """Service Qt from the caller's loop. Nothing else drives this window."""
         QtWidgets.QApplication.instance().processEvents()
 
-    def max_lag(self) -> float:
-        """Action steps of lag the gate tolerates before deciding again, as currently dialled in."""
-        return self._max_lag.value()
+    def max_lag(self) -> dict:
+        """Per-group action steps of lag the gates tolerate, as currently dialled in."""
+        return {g: v.value() for g, v in self._gates.items()}
 
     def take_keys(self) -> list[str]:
         keys, self.requests = list(self.requests), []
@@ -263,8 +270,9 @@ class Window(QtWidgets.QWidget):
         for i, panel in enumerate(self.panels.values()):
             panel.show_rgb(None if rgb is None else rgb[:, :, 3 * i:3 * i + 3])
 
-    def set_state(self, status: str, alarm: bool, info: str, act_rows, threshold=1.0) -> None:
+    def set_state(self, status: str, alarm: bool, info: str, act_rows, thresholds=None) -> None:
         self.status.setText(status)
         self.status.setStyleSheet(f"color:{ALARM if alarm else FG};")
         self.info.setText(info)
-        self.actions.set_rows(act_rows, threshold)
+        by_joint = {n: (thresholds or {}).get(g) for n, g in self._group_of.items()}
+        self.actions.set_rows(act_rows, by_joint)

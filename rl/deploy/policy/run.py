@@ -61,6 +61,35 @@ CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
     "dino_cls":         ("dino_cls_ckpt.pt",          "dino_global", "cls"),
 }
 
+# Which joints each lag gate watches. The rail and the arm get their own tolerance because they
+# are different mechanisms: a belt-driven carriage crossing 117 steps of travel does not converge
+# like a direct position servo moving one of 2.86 deg.
+#
+# The gripper is in NEITHER group, deliberately. Its whole range is 9.6 steps, so a jaw closed on
+# the object sits several steps short of its commanded position for as long as it holds, and no
+# tolerance small enough to be useful would ever clear. Gating on it would drop every grasp to the
+# timeout rate, during the part of the task that matters most.
+LAG_GROUPS: dict[str, tuple[str, ...]] = {
+    "rail": (bridge.RAIL,),
+    "arm": tuple(k for k in bridge.JOINT_KEYS if k not in (bridge.RAIL, "gripper.pos")),
+}
+
+
+def joint_lag(sim_target: dict, sim_qpos: dict) -> dict[str, tuple[float, str]]:
+    """Worst lag per group, in action steps, with the joint responsible."""
+    out = {}
+    for group, keys in LAG_GROUPS.items():
+        worst, who = 0.0, "-"
+        for k in keys:
+            if k not in sim_qpos:
+                continue
+            d = abs(sim_target[k] - sim_qpos[k]) / bridge.DELTA_LIMIT[k]
+            if d > worst:
+                worst, who = d, k.split(".")[0]
+        out[group] = (worst, who)
+    return out
+
+
 def build_rgb(obs: Observation, mappings: dict[str, dict | None],
               out_size: int) -> np.ndarray | None:
     """Rectify both cameras and stack them channel-wise as the sim did; None if a frame is missing.
@@ -87,9 +116,11 @@ def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> d
     }
 
 
-async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1.0,
+async def main(claim: bool = True, start_paused: bool = True,
+               max_lag_arm: float = 1.0, max_lag_rail: float = 1.0,
                binary_gripper: bool = False, viz: bool = False, arch: str | None = None) -> None:
     load_env(_HERE)
+    max_lag = {"arm": max_lag_arm, "rail": max_lag_rail}
     gripper_idx = bridge.JOINT_KEYS.index("gripper.pos")
     url = env("LIVEKIT_URL", required=True)
     room = env("LIVEKIT_ROOM", "so-frame")
@@ -161,7 +192,8 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
     # once the arm has caught up with the target it was last given. `lag` is the worst joint's
     # shortfall in action-step units, `held` counts ticks spent waiting, `timeouts` counts the
     # times a joint never got there.
-    decide = {"last": 0.0, "n": 0, "t0": 0.0, "lag": 0.0, "worst": "-", "held": 0, "timeouts": 0}
+    decide = {"last": 0.0, "n": 0, "t0": 0.0, "held": 0, "timeouts": 0,
+              "lag": {g: (0.0, "-") for g in LAG_GROUPS}}
     last_action = None      # shown in --viz between decisions, when no new one was computed
 
     def on_observation(obs: Observation) -> None:
@@ -297,7 +329,8 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
             raise SystemExit(f"--viz needs the ui toolkit: uv sync --group viz  ({exc})")
         QtWidgets.QApplication([])
         win = vizmod.Window([t for t, _ in CAMERA_STACK],
-                            [k.split(".")[0] for k in bridge.JOINT_KEYS], max_lag=max_lag)
+                            [k.split(".")[0] for k in bridge.JOINT_KEYS],
+                            max_lag=max_lag, groups=LAG_GROUPS)
         win.show()
         print(f"[policy-{NAME}] --viz open")
 
@@ -339,10 +372,11 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
                     status, alarm,
                     f"decide {decide['n']} @ "
                     f"{decide['n']/elapsed if elapsed > 0.5 else 0:.1f}/s    "
-                    f"lag {decide['lag']:.2f} ({decide['worst']})    "
-                    f"waits {decide['held']}  timeouts {decide['timeouts']}    "
-                    f"stack {stack_res} -> {net_res} px    obs #{obs_stats['n']}",
-                    rows, threshold=max_lag)
+                    "  ".join(f"{g} {v:.2f}/{max_lag[g]:.2f} ({who})"
+                              for g, (v, who) in decide["lag"].items())
+                    + f"    waits {decide['held']}  timeouts {decide['timeouts']}"
+                    + f"    stack {stack_res} -> {net_res} px    obs #{obs_stats['n']}",
+                    rows, thresholds=max_lag)
                 win.step()
                 if win.closed:
                     break
@@ -377,8 +411,9 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
                       f"({obs_stats['with_frames']} with both frames) last {age:.0f}ms ago; "
                       f"frames now: {have or 'NONE'}; rgb={'yes' if rgb is not None else 'None'}; "
                       f"decisions {decide['n']} @ {rate:.1f}/s; "
-                      f"lag {decide['lag']:.2f}/{max_lag:.2f} ({decide['worst']}), "
-                      f"{decide['timeouts']} gate timeouts")
+                      + ", ".join(f"{g} lag {v:.2f}/{max_lag[g]:.2f} ({who})"
+                                  for g, (v, who) in decide["lag"].items())
+                      + f", {decide['timeouts']} gate timeouts")
 
             if mode["state"] == "paused":
                 # Hold by COMMANDING the current target every tick, not by falling silent.
@@ -442,19 +477,14 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
             # units the policy emits, so `max_lag` reads as "decide once every joint is within this
             # fraction of a step of where I put it", which is the condition training actually had
             # (sim tracks its target within one step).
-            lag, worst = 0.0, "-"
-            for k in bridge.JOINT_KEYS:
-                if k not in sim_qpos:
-                    continue
-                d = abs(sim_target[k] - sim_qpos[k]) / bridge.DELTA_LIMIT[k]
-                if d > lag:
-                    lag, worst = d, k.split(".")[0]
-            decide["lag"], decide["worst"] = lag, worst
+            lag = joint_lag(sim_target, sim_qpos)
+            decide["lag"] = lag
+            behind = any(v > max_lag[g] for g, (v, _) in lag.items())
             now = time.perf_counter()
-            # A joint that physically cannot arrive (jaw on the object, a stop, a dead servo) must
-            # not wedge the loop, so the gate degrades to a plain timeout rather than hanging.
+            # A joint that physically cannot arrive (a stop, a dead servo) must not wedge the loop,
+            # so the gate degrades to a plain timeout rather than hanging.
             timed_out = now - decide["last"] > LAG_TIMEOUT
-            if lag > max_lag and not timed_out:
+            if behind and not timed_out:
                 decide["held"] += 1
                 op.send_action(
                     bridge.sim_to_real(sim_target),
@@ -462,7 +492,7 @@ async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1
                     in_reply_to_ts_us=obs.timestamp_us,
                 )
                 continue
-            if lag > max_lag:
+            if behind:
                 decide["timeouts"] += 1
 
             # Only inference needs pixels. r/k/0 are joint-only ramps and must not be blocked on
@@ -535,20 +565,27 @@ def cli() -> None:
     parser.add_argument("--start-paused", action=argparse.BooleanOptionalAction, default=True,
                         help="claim but hold the pose until you press p (default). "
                              "--no-start-paused MOVES THE ROBOT as soon as frames arrive.")
-    parser.add_argument("--max-lag", type=float, default=1.0, metavar="DELTAS",
-                        help="decide again once every joint is within this many action steps of "
-                             "the target it was last given (default 1.0). The task is quasi-static "
-                             "so waiting is free, and gating on the arm's actual lag rather than a "
-                             "stopwatch means a long move waits and a tiny one does not. Large "
-                             "values approach deciding every tick. With --viz this is only the "
-                             "starting value; the window changes it live.")
+    parser.add_argument("--max-lag-arm", type=float, default=1.0, metavar="DELTAS",
+                        help="decide again once every ARM joint is within this many action steps "
+                             "of the target it was last given (default 1.0). The task is "
+                             "quasi-static so waiting is free, and gating on measured lag rather "
+                             "than a stopwatch means a long move waits and a tiny one does not. "
+                             "Large values approach deciding every tick. With --viz this is only "
+                             "the starting value; the window changes it live.")
+    parser.add_argument("--max-lag-rail", type=float, default=1.0, metavar="DELTAS",
+                        help="the same gate for the rail, separately (default 1.0). The carriage "
+                             "crosses 117 action steps of travel and does not converge like a "
+                             "2.86 deg servo move, so one tolerance for both means either the arm "
+                             "waits on the rail or the rail is never waited for. The gripper is "
+                             "not gated at all: a jaw closed on the object never arrives.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
                              "matching the continuous-gripper training default; must match how "
                              "the checkpoint was trained.")
     parser.add_argument("--viz", action="store_true",
-                        help="show the two rectified camera views (what the policy sees) in an "
-                             "OpenCV window while driving; press q to close")
+                        help="open a window (needs `uv sync --group viz`) with the rectified views "
+                             "the encoder is fed, a bar per joint for the last action and its lag, "
+                             "the debug keys as buttons, and live sliders for the lag gates")
     args = parser.parse_args()
     # An explicit path wins over the shorthand, which wins over the env var.
     if args.checkpoint:
@@ -563,7 +600,8 @@ def cli() -> None:
     elif not os.environ.get("POLICY_CHECKPOINT"):
         raise SystemExit("pass --arch {" + ",".join(sorted(CHECKPOINTS))
                          + "}, or --checkpoint <path>, or set POLICY_CHECKPOINT.")
-    asyncio.run(main(claim=args.claim, start_paused=args.start_paused, max_lag=args.max_lag,
+    asyncio.run(main(claim=args.claim, start_paused=args.start_paused,
+                     max_lag_arm=args.max_lag_arm, max_lag_rail=args.max_lag_rail,
                      binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 
