@@ -6,10 +6,10 @@ inference, integrate the normalized delta into a running sim target, and send jo
 Claims control on startup and starts PAUSED, holding the pose. --no-start-paused drives on
 launch; --no-claim stays idle until the web UI claims it.
 
-One decision per --settle seconds, not per tick: the task is quasi-static, so after each action
-the target is held until the arm has arrived and only then is a new observation used. Deciding
-every tick committed several actions from one stale frame, which showed up as the jaw closing after
-it had already passed the cube. --viz can change it live, so --settle is only the starting value.
+One decision per catch-up, not per tick: the task is quasi-static, so after each action the target
+is held until the arm is within --max-lag action steps of it, and only then is a new observation
+used. Deciding every tick committed several actions from one stale frame, which showed up as the jaw
+closing after it had already passed the cube. --viz changes the gate live while the arm moves.
 
 Debug keys (terminal or --viz window): p = pause/resume, r = reset to rest then hold paused,
 0 = ramp the rail alone to wire 0 (end of travel) for re-zeroing, q = quit.
@@ -87,7 +87,7 @@ def build_proprio(sim_qpos: dict[str, float], sim_target: dict[str, float]) -> d
     }
 
 
-async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.3,
+async def main(claim: bool = True, start_paused: bool = True, max_lag: float = 1.0,
                binary_gripper: bool = False, viz: bool = False, arch: str | None = None) -> None:
     load_env(_HERE)
     gripper_idx = bridge.JOINT_KEYS.index("gripper.pos")
@@ -146,17 +146,22 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
     # Joints the current ramp is driving, and where to; anything absent holds its target.
     goal: dict[str, float] = {}
     reset_wait = {"ticks": 0, "deadline": 0.0}
-    # Settle tolerance in DELTA_LIMIT units, close to training's initial qpos noise.
-    SETTLE_TOL = 1.5
-    SETTLE_SECS = 1.0   # measured pose must hold within tolerance this long
-    SETTLE_TIMEOUT = 5.0  # give up waiting and pause anyway (e.g. gripper blocked)
+    # When an r/k/0 ramp counts as arrived. Tolerance in DELTA_LIMIT units, close to training's
+    # initial qpos noise. Unrelated to the decision gate below.
+    RESET_TOL = 1.5
+    RESET_HOLD = 1.0     # measured pose must hold within tolerance this long
+    RESET_TIMEOUT = 5.0  # give up waiting and pause anyway (e.g. gripper blocked)
+    # Ceiling on how long the lag gate may hold before it gives up and decides anyway.
+    LAG_TIMEOUT = 1.0
     # Running integrated target (sim units), seeded from the first measured qpos on claim.
     sim_target: dict[str, float] | None = None
 
     obs_stats = {"n": 0, "t": 0.0, "with_frames": 0}
-    # Decision clock. The loop keeps ticking at fps (stream, keys, viz); inference happens only
-    # once `settle` has elapsed since the last action landed.
-    decide = {"last": 0.0, "n": 0, "t0": 0.0}
+    # Decision gate. The loop keeps ticking at fps (stream, keys, viz); inference happens only
+    # once the arm has caught up with the target it was last given. `lag` is the worst joint's
+    # shortfall in action-step units, `held` counts ticks spent waiting, `timeouts` counts the
+    # times a joint never got there.
+    decide = {"last": 0.0, "n": 0, "t0": 0.0, "lag": 0.0, "worst": "-", "held": 0, "timeouts": 0}
     last_action = None      # shown in --viz between decisions, when no new one was computed
 
     def on_observation(obs: Observation) -> None:
@@ -292,7 +297,7 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
             raise SystemExit(f"--viz needs the ui toolkit: uv sync --group viz  ({exc})")
         QtWidgets.QApplication([])
         win = vizmod.Window([t for t, _ in CAMERA_STACK],
-                            [k.split(".")[0] for k in bridge.JOINT_KEYS], settle=settle)
+                            [k.split(".")[0] for k in bridge.JOINT_KEYS], max_lag=max_lag)
         win.show()
         print(f"[policy-{NAME}] --viz open")
 
@@ -309,8 +314,8 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
             rgb = build_rgb(obs, mappings, stack_res) if obs is not None else None
 
             if win is not None:
-                # The window owns settle once it is open, so --settle is only the starting value.
-                settle = win.settle()
+                # The window owns the gate once it is open, so --max-lag is the starting value.
+                max_lag = win.max_lag()
                 if not control["enabled"]:
                     status, alarm = "Unclaimed", True
                 elif obs is None:
@@ -334,9 +339,10 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
                     status, alarm,
                     f"decide {decide['n']} @ "
                     f"{decide['n']/elapsed if elapsed > 0.5 else 0:.1f}/s    "
-                    f"settle {settle:.2f}s    stack {stack_res} -> {net_res} px    "
-                    f"obs #{obs_stats['n']}",
-                    rows)
+                    f"lag {decide['lag']:.2f} ({decide['worst']})    "
+                    f"waits {decide['held']}  timeouts {decide['timeouts']}    "
+                    f"stack {stack_res} -> {net_res} px    obs #{obs_stats['n']}",
+                    rows, threshold=max_lag)
                 win.step()
                 if win.closed:
                     break
@@ -370,7 +376,9 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
                 print(f"[policy-{NAME}] {mode['state']:<10} obs#{obs_stats['n']} "
                       f"({obs_stats['with_frames']} with both frames) last {age:.0f}ms ago; "
                       f"frames now: {have or 'NONE'}; rgb={'yes' if rgb is not None else 'None'}; "
-                      f"decisions {decide['n']} @ {rate:.1f}/s")
+                      f"decisions {decide['n']} @ {rate:.1f}/s; "
+                      f"lag {decide['lag']:.2f}/{max_lag:.2f} ({decide['worst']}), "
+                      f"{decide['timeouts']} gate timeouts")
 
             if mode["state"] == "paused":
                 # Hold by COMMANDING the current target every tick, not by falling silent.
@@ -403,12 +411,12 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
                 ramped = all(abs(goal[k] - sim_target[k]) < 1e-9 for k in goal)
                 if ramped:
                     if reset_wait["deadline"] == 0.0:
-                        reset_wait["deadline"] = time.perf_counter() + SETTLE_TIMEOUT
+                        reset_wait["deadline"] = time.perf_counter() + RESET_TIMEOUT
                     settled = all(
-                        abs(sim_qpos[k] - goal[k]) < SETTLE_TOL * bridge.DELTA_LIMIT[k]
+                        abs(sim_qpos[k] - goal[k]) < RESET_TOL * bridge.DELTA_LIMIT[k]
                         for k in goal if k in sim_qpos)
                     reset_wait["ticks"] = reset_wait["ticks"] + 1 if settled else 0
-                    if reset_wait["ticks"] >= int(SETTLE_SECS * fps):
+                    if reset_wait["ticks"] >= int(RESET_HOLD * fps):
                         why = "settled"
                     elif time.perf_counter() > reset_wait["deadline"]:
                         why = "settle timeout (a joint never reached its goal)"
@@ -426,19 +434,36 @@ async def main(claim: bool = True, start_paused: bool = True, settle: float = 0.
 
             # Quasi-static task: after each action, hold the target and let the arm arrive before
             # looking again. Deciding every tick meant several actions were committed from the same
-            # stale frame, so the jaw closed after it had already passed the cube. Waiting costs
-            # nothing here and it puts each decision on a pose the arm has actually reached, which
-            # is the situation training had (sim tracks its target within one step).
-            # Measured from the last decision rather than as a precomputed deadline, so dragging
-            # the viz slider takes effect on this tick instead of after the wait already in flight.
+            # stale frame, so the jaw closed after it had already passed the cube.
+            #
+            # The gate is the ARM'S LAG, not a stopwatch. A fixed wait is wrong in both directions:
+            # too short for a long rail traverse, and pure dead time for an action of 0.05 deltas
+            # that the arm has already finished. Lag is measured per joint in the same action-step
+            # units the policy emits, so `max_lag` reads as "decide once every joint is within this
+            # fraction of a step of where I put it", which is the condition training actually had
+            # (sim tracks its target within one step).
+            lag, worst = 0.0, "-"
+            for k in bridge.JOINT_KEYS:
+                if k not in sim_qpos:
+                    continue
+                d = abs(sim_target[k] - sim_qpos[k]) / bridge.DELTA_LIMIT[k]
+                if d > lag:
+                    lag, worst = d, k.split(".")[0]
+            decide["lag"], decide["worst"] = lag, worst
             now = time.perf_counter()
-            if now - decide["last"] < settle:
+            # A joint that physically cannot arrive (jaw on the object, a stop, a dead servo) must
+            # not wedge the loop, so the gate degrades to a plain timeout rather than hanging.
+            timed_out = now - decide["last"] > LAG_TIMEOUT
+            if lag > max_lag and not timed_out:
+                decide["held"] += 1
                 op.send_action(
                     bridge.sim_to_real(sim_target),
                     timestamp_us=int(time.time() * 1_000_000),
                     in_reply_to_ts_us=obs.timestamp_us,
                 )
                 continue
+            if lag > max_lag:
+                decide["timeouts"] += 1
 
             # Only inference needs pixels. r/k/0 are joint-only ramps and must not be blocked on
             # a camera, or a dropped frame silently turns them into no-ops.
@@ -510,12 +535,13 @@ def cli() -> None:
     parser.add_argument("--start-paused", action=argparse.BooleanOptionalAction, default=True,
                         help="claim but hold the pose until you press p (default). "
                              "--no-start-paused MOVES THE ROBOT as soon as frames arrive.")
-    parser.add_argument("--settle", type=float, default=0.3, metavar="SECONDS",
-                        help="wait this long after each action before deciding again, holding the "
-                             "target meanwhile (default 0.3). The task is quasi-static, so waiting "
-                             "costs nothing and it makes every decision use an observation the arm "
-                             "has actually reached, as in sim. 0 decides every tick. With --viz "
-                             "this is only the starting value; the window changes it live.")
+    parser.add_argument("--max-lag", type=float, default=1.0, metavar="DELTAS",
+                        help="decide again once every joint is within this many action steps of "
+                             "the target it was last given (default 1.0). The task is quasi-static "
+                             "so waiting is free, and gating on the arm's actual lag rather than a "
+                             "stopwatch means a long move waits and a tiny one does not. Large "
+                             "values approach deciding every tick. With --viz this is only the "
+                             "starting value; the window changes it live.")
     parser.add_argument("--binary-gripper", action=argparse.BooleanOptionalAction, default=False,
                         help="threshold the gripper action to fully open/closed. Off by default, "
                              "matching the continuous-gripper training default; must match how "
@@ -537,7 +563,7 @@ def cli() -> None:
     elif not os.environ.get("POLICY_CHECKPOINT"):
         raise SystemExit("pass --arch {" + ",".join(sorted(CHECKPOINTS))
                          + "}, or --checkpoint <path>, or set POLICY_CHECKPOINT.")
-    asyncio.run(main(claim=args.claim, start_paused=args.start_paused, settle=args.settle,
+    asyncio.run(main(claim=args.claim, start_paused=args.start_paused, max_lag=args.max_lag,
                      binary_gripper=args.binary_gripper, viz=args.viz, arch=args.arch))
 
 

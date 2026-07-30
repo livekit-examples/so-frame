@@ -30,7 +30,7 @@ claims it. Keys while running: `p` pause/resume, `r` reset to rest and hold, `0`
 alone to wire 0 (end of travel, for re-zeroing the carriage), `q` quit. `--viz` opens a window
 (`uv sync --group viz`) with the two rectified views the encoder is fed, a bar per joint for the
 last action and how far the arm still lags its target, the same keys as buttons, and a live
-**settle** slider. It appears even with no frames arriving, so you can tell connected from stalled.
+**max lag** slider. It appears even with no frames arriving, so you can tell connected from stalled.
 
 `--arch` picks a checkpoint from `checkpoints/` by name:
 
@@ -47,13 +47,33 @@ contents disagree with the name it was loaded under is an error. That check earn
 two `dino_global` entries, whose pooling modes produce identical tensor shapes and so cannot be
 told apart by loading alone. `--checkpoint <path>` still takes anything outside `checkpoints/`.
 
-`--settle SECONDS` (default 0.3) is how long the target is held after each action before the next
-decision. The task is quasi-static, so waiting is free, and it means every inference runs on an
-observation the arm has actually reached rather than one from two steps ago. `--settle 0` decides
-every tick, which is what training did, but training also had the arm tracking its target within a
-single step. Watch the `decisions N @ R/s` line to see the rate you are actually getting. With
-`--viz` open the window's slider takes over this value, so you can find it while the arm moves
-instead of restarting the run per guess.
+`--max-lag DELTAS` (default 1.0) decides how long the target is held after each action: until every
+joint is within that many action steps of where it was put. The task is quasi-static, so waiting is
+free, and it means every inference runs on an observation the arm has actually reached rather than
+one from two steps ago, which is the situation training had.
+
+The gate is the arm's measured lag, not a stopwatch, because a fixed wait is wrong in both
+directions. Measured against a simulated arm at 10 Hz:
+
+| case | fixed 0.3 s | `--max-lag 0.5` |
+|---|---|---|
+| arm closes 80% of the gap per tick, full-step actions | 3.3 dec/s | 10.0 dec/s |
+| arm closes 20% per tick, full-step actions | 3.3 dec/s | 2.1 dec/s |
+| arm closes 20% per tick, 0.05-step actions | 3.3 dec/s | 10.0 dec/s |
+
+The last row is the case the stopwatch cannot express: the action is already finished, and waiting
+is pure dead time. The middle row is the opposite, a move that needs longer than 0.3 s.
+
+A joint that physically cannot arrive (jaw closed on the object, a mechanical stop, a dead servo)
+would wedge the loop, so the gate gives up after 1 s and decides anyway. The per-second line reports
+`lag L/MAX (joint), N gate timeouts`; steady timeouts on one joint mean the gate is stricter than
+the hardware, not that the policy is stuck.
+
+Sensible values are roughly 0.1 to 2.0: one action moves a joint at most one step, so above ~2
+nothing is ever gated, and below ~0.1 the arm may never get there and every decision waits out the
+timeout. With `--viz` open the window's slider takes over the value and the per-joint ticks turn red
+above it, so the bars show which joint the next decision is waiting on. Tune it while the arm moves
+rather than restarting the run per guess.
 
 On a Mac set `POLICY_DEVICE=mps`: the default device pick is cuda-or-cpu, so a DINOv2 checkpoint
 would otherwise run on the CPU.
