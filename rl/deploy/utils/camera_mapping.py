@@ -60,13 +60,16 @@ def build_mapping(camera, raw_shape, rot90, angle, k1, k2, focal, *,
         # Angular span of the kept square, recorded for reference. This is the REAL camera's span
         # and may differ from the sim FOV; the fit is what reconciles the two.
         fov_deg=round(float(np.rad2deg(2 * np.arctan(size / (2 * focal * zoom)))), 2),
-        rot90=int(rot90), angle_deg=float(angle), k1=float(k1), k2=float(k2),
-        focal_px=int(focal), zoom=round(float(zoom), 3),
-        offset_x=round(float(offset_x), 1), offset_y=round(float(offset_y), 1),
+        # Rounded only to keep the JSON readable, and never below what the UI lets you dial in:
+        # a fit that snaps back a decimal place when reloaded is worse than a long number.
+        rot90=int(rot90), angle_deg=round(float(angle), 2),
+        k1=round(float(k1), 4), k2=round(float(k2), 4),
+        focal_px=round(float(focal), 2), zoom=round(float(zoom), 4),
+        offset_x=round(float(offset_x), 2), offset_y=round(float(offset_y), 2),
         out_size=int(out_size),
         # Colour, in the array's channel order (RGB on the deploy path).
-        gain_r=round(float(gain_r), 3), gain_g=round(float(gain_g), 3),
-        gain_b=round(float(gain_b), 3), gamma=round(float(gamma), 3),
+        gain_r=round(float(gain_r), 4), gain_g=round(float(gain_g), 4),
+        gain_b=round(float(gain_b), 4), gamma=round(float(gamma), 4),
     )
 
 

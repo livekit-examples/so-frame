@@ -249,7 +249,7 @@ async def run_calibrate(sim_size: int = 168) -> int:
                         track.replace("_camera", ""), rgb.shape,
                         rot90=int(field["rot90"]), angle=field["angle_deg"],
                         k1=field["k1"], k2=field["k2"],
-                        focal=max(int(field["focal_px"]), 100),
+                        focal=max(field["focal_px"], 1.0),
                         zoom=max(field["zoom"], 0.2),
                         offset_x=field["offset_x"], offset_y=field["offset_y"],
                         out_size=sim_size,
