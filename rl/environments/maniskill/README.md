@@ -10,9 +10,10 @@ distributional C51 critic, massively parallel envs, and low-resolution "squinted
 
 ## Requirements
 
-Python `>=3.10,<3.13`, and **a Linux box with an NVIDIA GPU** for training. macOS can run the CPU
-backend for editing and smoke tests (`--sim_backend cpu --num_envs 1 --num_eval_envs 1`, the only
-count that backend supports) but not real training.
+Python `>=3.10,<3.13` (pinned to 3.10 via `.python-version`), and **a Linux box with an NVIDIA
+GPU** for training. macOS can run the CPU backend for editing and smoke tests
+(`--sim_backend cpu --num_envs 1 --num_eval_envs 1`, the only count that backend supports) but not
+real training.
 
 ## Run
 
@@ -29,12 +30,16 @@ record their own architecture, so deploying needs no flags.
 
 Useful flags: `--num_envs` (1024), `--total_timesteps` (12M), `--exp_name`, `--track` (wandb).
 `--checkpoint <path>` warm-starts, resetting the entropy temperature so fine-tuning keeps
-exploring; `--no-reset_alpha` inherits the checkpoint's instead. `--visual_fidelity flat` is a
-faster shadowless render, and `raytraced` forces the cpu backend, so it is eval-only.
+exploring; `--no-reset_alpha` inherits the checkpoint's instead. `--visual_fidelity flat` is the
+shadowless render kept for cheap ablations (see Cost knobs: with shadows off it no longer buys
+much), and `raytraced` forces the cpu backend, so it is eval-only.
 `--object_colors distinct` paints the cube blue and the bin yellow, which the res-32 CNN needs and
 sim2real fidelity pays for. `--encoder_lr` defaults to `--q_lr` and is worth lowering for the
-transformer head; `--grad_clip` is off by default. `--arm_speed_scale` is for arm-speed ablations
-only.
+transformer head; `--grad_clip` is off by default.
+
+Sim2real knobs: `--overhead_camera_fov` / `--wrist_camera_fov` and
+`--overhead_camera_pos_offset` / `--overhead_camera_rot_offset` re-calibrate a camera without
+editing `config.py`, and `--arm_speed_scale` is for arm-speed ablations only.
 
 ## Commands
 
@@ -64,11 +69,11 @@ train.py                      entry point
 examples/                     scene check, one-off pretty render, rollout videos
 tests/                        replay index arithmetic, and its CUDA-only host-RAM path
 src/soframe_rl_maniskill/
-  config.py                   task, robot, reward and colour constants  <- edit here
+  config.py                   task, robot, reward, cost and colour constants  <- edit here
   wrappers.py                 observation pipeline (downsample, jitter, sensor aug, DINOv2 features)
-  envs/base_random_env.py     domain randomization, greenscreen, camera mounts
+  envs/base_random_env.py     domain randomization, lighting, URDF-mounted cameras, greenscreen
   envs/pick_place.py          the task: scene, spawn, success, reward
-  robot/so101_on_frame.py     the agent (arm + rail as one 7-DOF robot)
+  robot/so101_on_frame.py     the agent (arm + rail as one 7-DOF robot), materials/colour pass
   sac/                        Args, env construction, replay, critic, logging, training loop
 ```
 
@@ -85,9 +90,11 @@ reach [0,1.5] < grasped [2,3] < holding [4,5] < released 6 < success 10
 ```
 
 Both jaw motions are shaped, so neither is a blind jump off a plateau: closing pays while the tool
-is on the cube (top of the reach stage), opening pays while holding over the bin (top of the
-holding stage). Each stays below the next rung, so a jaw that shuts without catching the cube is
-worth less than a grasp, and the most-open still-holding pose is worth less than a real release.
+is on the cube (`SHAPE_REACH_CLOSE`, top of the reach stage), opening pays while holding over the
+bin (`SHAPE_HOLD_OPEN`, top of the holding stage). Each stays below the next rung, so a jaw that
+shuts without catching the cube is worth less than a grasp, and the most-open still-holding pose is
+worth less than a real release. The gripper action is continuous throughout; those ramps are what
+it climbs.
 
 No penalty terms. Motion limits are structural instead: the delta action space caps per-step speed
 at the measured real servo rate (0.05 rad/step arm, 0.007 m/step rail at 10 Hz) and the force
@@ -149,8 +156,29 @@ rounds down to a whole number of iterations, and `--buffer_size` overrides the d
 - **10 Hz control**, matching the deploy loop. A policy trained at one rate and driven at another
   sees a different amount of world motion per decision.
 - **The overhead camera's FOV is calibrated** against the real rig, at 38°. The wrist's 58° comes
-  from the MJCF twin's `fovy` rather than a fit against the real camera. Deploy rectifies the real
-  cameras to match; fit the mapping in [rl/calibrate](../../calibrate/README.md), which renders
-  these cameras live beside the real ones.
-- **Domain randomization** covers camera pose/FOV jitter, arm and gripper PD gains, lighting,
-  qpos noise, colour jitter and sensor-realism augmentation. On by default.
+  from the MJCF twin's `fovy` rather than a fit against the real camera. Both cameras are
+  SAPIEN-mounted on the URDF's own camera links, so their poses follow the model rather than being
+  rewritten per step. Deploy rectifies the real cameras to match; fit the mapping in
+  [rl/calibrate](../../calibrate/README.md), which renders these cameras live beside the real ones.
+- **Domain randomization** covers arm and gripper PD gains, lighting, qpos noise, colour jitter and
+  sensor-realism augmentation per episode, plus camera pose/FOV jitter drawn once per scene build
+  (pass `--reconfiguration_freq` to resample it during a run). On by default.
+
+## Cost knobs
+
+The per-step cost lives in three places, all documented with their measurements in `config.py`:
+
+- **Physics**: `SOLVER_POSITION_ITERATIONS` (8) / `SOLVER_VELOCITY_ITERATIONS` (0) /
+  `FRICTION_EVERY_ITERATION` (off). 8 is the floor, bounded by the residual speed of a cube that
+  should be sitting still: 1.33 mm/s at 8 iterations against 5.29 mm/s at 4, where it starts to
+  buzz.
+- **Render**: `RASTER_SHADOWS` is **off**: the sim's key light cast a large directional shadow the
+  real lightbox does not produce, so dropping it both narrows the sim2real gap and saves a geometry
+  pass per camera per step. With it off, `--visual_fidelity flat` is no longer a meaningful speed
+  option, the two timing within a few tenths of a millisecond per step when this was last measured,
+  so prefer `raster` and keep the PBR materials. `--visual_fidelity raytraced` is for one-off
+  renders only and forces the CPU backend.
+- **Observations**: the default `--obs_mode rgb` runs no segmentation pass. `SENSOR_FAR` (3 m)
+  culls the ground plane outright, leaving the renderer's black clear colour, which is what the
+  greenscreen overlay used to paint. Turn `apply_overlay` back on only to composite a real
+  background photo, and then also pass `--obs_mode rgb+segmentation` to feed its mask.

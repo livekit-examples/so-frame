@@ -62,6 +62,14 @@ this file instead, so every consumer of this model (mjlab, the Isaac Sim MJCF im
 The arm keeps its own mesh collisions. The frame is static (welded to the world); only the
 slider and the arm move.
 
+## Visual geometry
+
+This model keeps the **full** visual geometry: handles, M5 screws and the rail drive internals
+(`GE_27`, `MOTOR_1723_3`, `PCB_CHAZUO_92`, `Pinion`, the metal servo horns) all still render
+here. The URDF has had those trimmed for render speed, so the two models now differ in visual
+geometry, see [the URDF README](../urdf/README.md#visual-geometry). Kinematics, collision and
+the two camera frames are unaffected and still match.
+
 ## Regenerating
 
 Converted from `../urdf/so101_on_frame.urdf` with MuJoCo's URDF importer, then augmented with

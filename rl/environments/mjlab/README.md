@@ -43,7 +43,15 @@ Training parameters (parallel envs, iterations, PPO hyperparameters, network siz
 be overridden per run on the CLI (e.g. `--env.scene.num-envs 2048`).
 
 No pretrained checkpoint ships with this task: training starts from scratch. `soframe-play`
-and `soframe-render` both need a `--checkpoint-file` from a run of your own.
+and `soframe-render` both need a `--checkpoint-file` from a run of your own. `soframe-train`
+writes to `logs/rsl_rl/<experiment_name>/<timestamp>/` (`experiment_name` comes from
+`train.toml`).
+
+If you are holding a checkpoint from before the action-space and control-rate rework, retrain
+rather than trusting it: the rate is now 10 Hz instead of 50, and the action is a
+delta-from-target with a real-speed per-step cap instead of an absolute target from the home
+pose. Observation and action *dimensions* are unchanged, so such a checkpoint still loads. It
+just means something different by every action it emits.
 
 ### Fleet render
 
@@ -72,8 +80,8 @@ rl/environments/mjlab/
     ├── assets.py             get_cube_spec (free box) + get_bin_spec (fixed tray)
     ├── pick_place_env_cfg.py robot-agnostic manager wiring (obs/act/reward/etc.)
     ├── mdp/
-    │   ├── actions.py        TargetRelativeJointPositionAction: delta from the
-    │   │                     previous target, clamped to the soft joint limits
+    │   ├── actions.py        TargetRelativeJointPositionAction: delta from the running
+    │   │                     target, clamped to the soft joint limits
     │   ├── commands.py       PlaceInBinCommand: spread-scaled cube+bin placement,
     │   │                     goal inside the bin, carry-progress tracking
     │   ├── rewards.py        grasp_lift, potential-based transport, in_bin_bonus
@@ -98,18 +106,21 @@ The scene has three entities:
   re-declared in Python as `BuiltinPositionActuatorCfg`s, so stiffness/damping/effort/
   armature are first-class, tunable, sim-to-real knobs rather than buried in XML. It's a
   fixed-base entity, so mjlab wraps it in a mocap body that also carries the frame's
-  loose geoms, keeping the whole rig positioned correctly in every parallel env.
+  loose geoms, keeping the whole rig positioned correctly in every parallel env. The arm
+  and gripper are capped at the STS3215's ~3 N·m stall torque, matching the XML's
+  `actuatorfrcrange` and the maniskill twin.
 - **`cube`**: a free (`freejoint`) 2.5 cm, 30 g box with high tangential friction so the
-  gripper can hold it.
-- **`bin`**: a base plate plus four walls. No freejoint, so it's teleported to a new spot
-  each episode rather than physically knocked around.
+  gripper can hold it. (The maniskill twin uses a 20 mm CAD cube instead; the two task
+  objects are not identical.)
+- **`bin`**: a base plate plus four walls, 10 cm interior. No freejoint, so it's teleported
+  to a new spot each episode rather than physically knocked around.
 
 The rig sits at a height where the frame's legs rest on the ground plane and the lightbox's
 bottom panel sits at the workspace surface height, with the cube and bin placed on that
 panel in the arm's reach. Physics runs at `timestep=0.005` with `decimation=20`, so the
-policy acts at 10 Hz, matching `so101_constants.CONTROL_HZ`, the maniskill twin, and the
-deploy loop's 10 Hz tick. The action cadence is part of the sim-to-real contract, so it is
-not a free knob. Episodes are `episode_length_s=30.0`, i.e. 300 decisions, which is the
+policy acts at **10 Hz**, matching `so101_constants.CONTROL_HZ`, the maniskill twin, and the
+deploy loop's 10 Hz portal tick. The action cadence is part of the sim-to-real contract, so it
+is not a free knob. Episodes are `episode_length_s=30.0`, i.e. 300 decisions, which is the
 runway the real-servo speeds need to reach, carry and place.
 
 ### Managers
@@ -117,7 +128,7 @@ runway the real-servo speeds need to reach, carry and place.
 | Manager | What ours does |
 |---|---|
 | **Observation** | Two groups: `actor` (27-dim, with input noise) and `critic` (same, no noise). Joint pos (7) + joint vel (7) + `ee_to_cube` (3) + `cube_to_goal` (3) + last action (7). |
-| **Action** | One `TargetRelativeJointPositionActionCfg` (ours, `mdp/actions.py`) over all 7 actuators (slider + 5 arm + gripper): `target = previous_target + action * scale`, clamped to the soft joint limits. Integrating from the previous target rather than the measured pose is what the maniskill twin and the deploy loop do; delta-from-current stalls under load. |
+| **Action** | One `TargetRelativeJointPositionActionCfg` (ours, `mdp/actions.py`) over all 7 actuators (slider + 5 arm + gripper): `target = clamp(previous_target + action * scale)` against the soft joint limits. Integrating from the previous *target* rather than the measured pose is what the maniskill twin and the deploy loop both do: delta-from-current cannot get ahead of a lagging joint, so the target collapses onto the measured pose and the arm stalls under load. On reset the running target is reseeded from the measured pose, so the first action of an episode is a no-jump delta. |
 | **Command** | `PlaceInBinCommand`. On each episode reset it samples a bin and cube position (keeping them apart), teleports both, and publishes a target at the cube's resting place on the bin floor, so putting the cube in *increases* the place reward. |
 | **Event** | Resets the robot to its home pose plus a small joint jitter (+/- 0.05). Domain-randomization events are a TODO. |
 | **Reward** | The staged terms below. |
@@ -144,10 +155,12 @@ dense term plus a milestone bonus:
 | `in_bin_bonus` | 10.0 | Milestone bonus for landing the cube in the bin. |
 | `joint_pos_limits` | -10.0 | Keeps the arm off its joint end-stops. |
 
-`joint_pos_limits` is the only penalty. There is no action-rate or joint-velocity term: the
-action space's per-step cap already limits speed and jerk structurally, so there is no
-penalty weight to tune against the task rewards. The weights above have not been swept, they
-are the values the current wiring uses.
+`joint_pos_limits` is the only penalty. **No speed or smoothness penalties**: there is no
+action-rate or joint-velocity term, because the action space's per-step cap already limits
+speed and jerk structurally, so there is no penalty weight to tune against the task rewards.
+The ones that used to sit here were standing in for a rate limit the action space did not
+have, down to `joint_vel_hinge`'s `max_vel` of 0.5, literally the real arm's 0.5 rad/s. The
+weights above have not been swept, they are the values the current wiring uses.
 
 **Success** (a metric, not a reward) means the cube's center is inside the bin footprint,
 below the rim.
@@ -161,6 +174,11 @@ above 0.4 success and lowering it below 0.2, by `1e-4` per env step. So it holds
 layout until the policy can place, then widens randomization as fast as the policy keeps up,
 and backs off if it starts failing. `soframe-play` disables the curriculum and pins
 `initial_spread = 1.0`, i.e. it always shows the hard, fully randomized case.
+
+There is no second term ramping a smoothness penalty. That ramp's own rationale was the
+argument against it: the weight had to be ramped linearly because a step change could collapse
+a trained policy, and had to stay under a threshold or the penalty outbid the task rewards. A
+per-step cap in the action space has no weight and no window to fall out of.
 
 ### Configs
 
