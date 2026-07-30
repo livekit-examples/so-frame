@@ -14,6 +14,10 @@ from dotenv import load_dotenv
 from livekit import api
 from livekit.protocol.room import RoomConfiguration
 
+# rl/deploy itself. Tools that live outside this project (rl/calibrate) still need its `.env` and
+# `portal.yaml`, and cannot find them relative to their own __file__.
+DEPLOY_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 
 def load_env(start: Optional[pathlib.Path] = None) -> None:
     """Load `.env` walking up from `start` to root (plus cwd). Nearest `.env` wins;
@@ -73,4 +77,9 @@ async def pace(fps: int) -> AsyncIterator[int]:
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
         else:
+            # Behind schedule. Still yield: without this the loop never awaits, so the event loop
+            # never gets to run its callbacks, and on a portal Operator that means observations
+            # stop being delivered entirely. It presents as the video freezing only while the
+            # policy is inferring, since that is the tick that overruns 1/fps.
             next_tick = time.perf_counter()
+            await asyncio.sleep(0)
