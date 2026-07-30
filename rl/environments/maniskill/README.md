@@ -11,7 +11,8 @@ distributional C51 critic, massively parallel envs, and low-resolution "squinted
 ## Requirements
 
 Python `>=3.10,<3.13`, and **a Linux box with an NVIDIA GPU** for training. macOS can run the CPU
-backend for editing and smoke tests (`--sim_backend cpu --num_envs 1`) but not real training.
+backend for editing and smoke tests (`--sim_backend cpu --num_envs 1 --num_eval_envs 1`, the only
+count that backend supports) but not real training.
 
 ## Run
 
@@ -26,8 +27,14 @@ uv run python train.py --help                  # every flag, documented
 Checkpoints land in `runs/<exp_name>/`: `ckpt.pt` (latest) and `ckpt_best.pt` (best eval). Both
 record their own architecture, so deploying needs no flags.
 
-Useful flags: `--num_envs`, `--total_timesteps`, `--exp_name`, `--track` (wandb),
-`--checkpoint <path>` to warm-start, `--visual_fidelity flat` for a faster shadowless render.
+Useful flags: `--num_envs` (1024), `--total_timesteps` (12M), `--exp_name`, `--track` (wandb).
+`--checkpoint <path>` warm-starts, resetting the entropy temperature so fine-tuning keeps
+exploring; `--no-reset_alpha` inherits the checkpoint's instead. `--visual_fidelity flat` is a
+faster shadowless render, and `raytraced` forces the cpu backend, so it is eval-only.
+`--object_colors distinct` paints the cube blue and the bin yellow, which the res-32 CNN needs and
+sim2real fidelity pays for. `--encoder_lr` defaults to `--q_lr` and is worth lowering for the
+transformer head; `--grad_clip` is off by default. `--arm_speed_scale` is for arm-speed ablations
+only.
 
 ## Commands
 
@@ -53,17 +60,19 @@ uv run --with pytest pytest tests/test_replay_cuda.py -q
 ## Where things are
 
 ```
-train.py                     entry point
-config.py                    task, robot, reward and colour constants  <- edit here
-wrappers.py                  observation pipeline (downsample, jitter, sensor aug, DINOv2 tokens)
-envs/base_random_env.py       domain randomization, greenscreen, camera mounts
-envs/pick_place.py            the task: scene, spawn, success, reward
-robot/so101_on_frame.py       the agent (arm + rail as one 7-DOF robot)
-sac/                          Args, env construction, critic, logging, training loop
-examples/                     scene check, reference renders for calibration, rollout videos
+train.py                      entry point
+examples/                     scene check, one-off pretty render, rollout videos
+tests/                        replay index arithmetic, and its CUDA-only host-RAM path
+src/soframe_rl_maniskill/
+  config.py                   task, robot, reward and colour constants  <- edit here
+  wrappers.py                 observation pipeline (downsample, jitter, sensor aug, DINOv2 features)
+  envs/base_random_env.py     domain randomization, greenscreen, camera mounts
+  envs/pick_place.py          the task: scene, spawn, success, reward
+  robot/so101_on_frame.py     the agent (arm + rail as one 7-DOF robot)
+  sac/                        Args, env construction, replay, critic, logging, training loop
 ```
 
-The encoder, actor and checkpoint format live in [`policy/`](../../policy/README.md), shared with
+The encoders, actor and checkpoint format live in [`policy/`](../../policy/README.md), shared with
 deploy so the network that runs on the robot is the one that trained.
 
 ## Task
@@ -91,25 +100,57 @@ camera's footprint, and where objects physically fit.
 
 ## Encoders
 
-| `--encoder` | vision | default res |
-|---|---|---|
-| `squint` | CNN over a squinted image stack | 32 px |
-| `dino_patch` | self-attention over frozen DINOv2 patch tokens | 168 px |
-| `dino_global` | MLP over one frozen DINOv2 vector per camera (`--dino_pool cls\|mean\|cls_mean`) | 168 px |
+| `--encoder` | vision | default res | renders at | updates/step |
+|---|---|---|---|---|
+| `squint` | CNN over a squinted image stack | 32 px | 128 px | 64 |
+| `dino_patch` | self-attention over frozen DINOv2 patch tokens | 168 px | 168 px | 32 |
+| `dino_global` | MLP over one frozen DINOv2 vector per camera (`--dino_pool cls\|mean\|cls_mean`) | 168 px | 168 px | 32 |
 
-`dino_global` is the collapsed-pooling control for `dino_patch`: same backbone, resolution and
-update ratio, so the only difference is whether the patch grid survives.
+`dino_global` is the collapsed-pooling control for `dino_patch`: same frozen ViT-S/14, same
+resolution and the same update ratio, so the only difference is whether the patch grid survives.
+At two cameras and 168 px that is 288 tokens against 2 vectors, or 4 under `cls_mean`.
 
-Resolution and update ratio default per encoder; see `sac/args.py`. Replay size does NOT: it is
-`--replay_episodes * config.EPISODE_HORIZON * --num_envs` for every encoder, so a comparison
-between encoders is not confounded by how much history each one keeps.
+The observation pipeline follows from the encoder (`sac/build.py`):
+
+```
+squint       render at render_size -> downsample to res -> jitter -> sensor aug
+dino_patch   render at render_size -> jitter -> sensor aug -> tokenize at res
+dino_global  render at render_size -> jitter -> sensor aug -> pool at res
+```
+
+The frozen ViT runs in that last wrapper, once per env step rather than once per minibatch, so
+what lands in the replay buffer is already encoder-ready. It has to be last: everything above it
+needs pixels, and it emits features.
+
+Resolution and update ratio default per encoder; see `sac/args.py`. The updates/step defaults are
+tuned against `--batch_size 512` and 1024 envs, so scaling `--num_envs` without scaling them
+changes the update-to-data ratio. Replay retention does NOT vary by encoder: it is
+`--replay_episodes * config.EPISODE_HORIZON * --num_envs` for all three, so a comparison between
+them is not confounded by how much history each one keeps.
+
+## Replay
+
+`sac/replay.py` stores each observation once and recovers `next_obs` by an index offset: the
+successor of a slot is the same env one iteration later, so nothing is kept twice. That matters
+most for the patch head, whose 2-camera 168 px token grid is 216 KB per observation. Slots whose
+successor crosses a reset are dropped rather than bootstrapped across the seam, as is the newest
+iteration, which has no successor yet.
+
+`--replay_episodes 2` on the default 1024 envs is 2 * 200 * 1024 = 409,600 transitions. Capacity
+rounds down to a whole number of iterations, and `--buffer_size` overrides the derivation.
+
+`--replay_storage cpu` keeps the buffer in pinned host RAM, for when it will not fit in VRAM, with
+`--replay_prefetch` batches in flight so the gather and the PCIe copy overlap training. It needs
+`--obs_only_replay` (the default): host storage exists only in this buffer, and
+`--no-obs_only_replay` falls back to the torchrl two-copy buffer, which stays in VRAM.
 
 ## Sim2real notes
 
 - **10 Hz control**, matching the deploy loop. A policy trained at one rate and driven at another
   sees a different amount of world motion per decision.
-- **Camera FOVs are calibrated** against the real rig (overhead 38°, wrist 58°). Deploy rectifies
-  the real cameras to match; fit the mapping in [rl/calibrate](../../calibrate/README.md), which
-  renders these cameras live beside the real ones.
+- **The overhead camera's FOV is calibrated** against the real rig, at 38°. The wrist's 58° comes
+  from the MJCF twin's `fovy` rather than a fit against the real camera. Deploy rectifies the real
+  cameras to match; fit the mapping in [rl/calibrate](../../calibrate/README.md), which renders
+  these cameras live beside the real ones.
 - **Domain randomization** covers camera pose/FOV jitter, arm and gripper PD gains, lighting,
   qpos noise, colour jitter and sensor-realism augmentation. On by default.

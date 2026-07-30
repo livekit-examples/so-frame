@@ -5,7 +5,7 @@ sim-vs-real comparison. Nothing here runs on the robot host.
 
 ```
 debug_policy.py  the tool: drives the arm and fits the mappings
-window.py        the window (PySide6, plain widgets)
+window.py        the window (PySide6, on the plain widgets in deploy's utils/qt.py)
 sim_mirror.py    renders the sim cameras at a given qpos
 ```
 
@@ -18,9 +18,10 @@ the robot host to resolve `sapien` for linux aarch64 on every `uv sync`, for a d
 installs.
 
 It path-depends on `rl/deploy` rather than copying from it. `utils.bridge` (sim to wire units),
-`utils.camera_mapping` (the mapping format, its replay and its constructor) and `utils.common` are
-imported, so a mapping fitted here is replayed byte-for-byte by the deploy loop, and `.env` /
-`portal.yaml` / `camera_mappings/` are read and written in the deploy tree.
+`utils.camera_mapping` (the mapping format, its replay and its constructor), `utils.common` (env
+loading, tokens, the pacer) and `utils.qt` (the widgets both operator windows share) are imported,
+so a mapping fitted here is replayed byte-for-byte by the deploy loop, and `.env` / `portal.yaml` /
+`camera_mappings/` are read and written in the deploy tree.
 
 ## Calibrating the cameras
 
@@ -52,7 +53,8 @@ Colour is the same rail and the same file: `gain R` / `gain G` / `gain B` and `g
 applied after the resize. **match colour to sim** sets the three gains so the real channel
 means land on the sim render's, which is the right target: neutralising to grey would only make the
 camera self-consistent, while the policy needs it to look like what it trained on. Hold the arm
-still when you press it, since it measures the frame in front of you.
+still when you press it, since it measures the frame in front of you. It measures with the current
+gains taken back out and resets `gamma` to 1, so pressing it twice does not compound.
 
 Rectification is geometry and never touches pixel values, so a colour cast reaches the encoder
 untouched unless corrected here. The policy trained under +-10% per-channel gain and 0.7-1.4 gamma
@@ -62,7 +64,8 @@ augmentation, so the goal is landing inside that envelope rather than perfect ne
 both applied to the undistort output matrix. The kept square is always the centred largest one.
 An earlier version exposed a movable crop window instead, which could not work: the crop was the
 largest square that fits, so its centre was pinned in the narrow axis, and its size fought `zoom`
-for the same job.
+for the same job. A mapping still carrying those `crop_size`/`crop_cx` fields is refused on load,
+here and in the deploy loop, and has to be refit.
 
 The slider between the two image rows sets the overlay mix, real at one end and sim at the other.
 Buttons:
@@ -84,14 +87,15 @@ resolution your checkpoint trained at: 128 for squint, 168 for `dino_patch` and 
 
 ```bash
 uv run calibrate                 # the tool. MOVES THE ROBOT.
-uv run calibrate --bridge        # joint round-trip and the applied offsets, then exit. No robot.
+uv run calibrate --bridge        # joint round-trip and the applied offsets, then exit. No robot, no sim.
 uv run calibrate --ui-smoke 5    # the window alone on synthetic frames. No robot, no simulator.
 uv run calibrate --sim-size 128  # match a squint checkpoint instead of dino's 168
 ```
 
-There is no read-only mode and no way to run without the simulator: driving the arm and comparing
-against sim are the same activity, and separating them is what made the old two-step flow able to
-validate a single arm pose only. The self-test prints on every start, before anything moves.
+There is no read-only mode and no way to fit a mapping without the simulator: driving the arm and
+comparing against sim are the same activity, and separating them is what made the old two-step flow
+able to validate a single arm pose only. The joint self-test prints on every start, before anything
+moves, and the simulator loads before control is claimed so nothing is held while SAPIEN starts.
 
 ## Checking the joint mapping
 

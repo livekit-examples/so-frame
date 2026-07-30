@@ -15,7 +15,8 @@ simulation/mjcf/
 ```
 
 Meshes are shared with the URDF via `meshdir="../urdf"`, so this reuses
-`../urdf/components/**/*.stl` (no duplicated files).
+`../urdf/components/**/*.stl` plus the two fixed-jaw `*.obj` collision hulls
+(no duplicated files).
 
 ## Actuators
 
@@ -40,9 +41,10 @@ Two cameras, named to match the URDF camera frames:
 | `frame_overhead_camera` | on the frame's camera-holder, looks down at the workspace |
 
 Render from one with `renderer.update_scene(data, camera="frame_wrist_camera")` (or
-`"frame_overhead_camera"`). Note: MuJoCo cameras look down their local **−Z**, so the poses
-here are the optical frames rotated 180° about X from the REP-103 (+Z view) convention used
-in the URDF.
+`"frame_overhead_camera"`). Note: MuJoCo cameras look down their local **−Z**, while the URDF's
+camera links look down their **+X** (the SAPIEN convention), so the two files carry the same
+poses under different axis conventions. The remap is spelled out in the comments on those joints
+in `../urdf/so101_on_frame.urdf`.
 
 ## Collision
 
@@ -63,5 +65,6 @@ slider and the arm move.
 ## Regenerating
 
 Converted from `../urdf/so101_on_frame.urdf` with MuJoCo's URDF importer, then augmented with
-the `<option>`/`<default>`, actuators, the two cameras, the extrusion collision boxes, and the
-lightbox panel collision pads.
+the `<option>`/`<default>`, actuators, the two cameras, the extrusion collision boxes, the
+lightbox panel collision pads, and the `grasp_site` on `gripper_link` that
+`rl/environments/mjlab` uses as the end-effector site.

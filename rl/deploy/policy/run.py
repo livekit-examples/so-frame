@@ -194,9 +194,16 @@ async def main(claim: bool = True, start_paused: bool = True,
     # One resolution for every camera: what the mappings were fitted at, or the checkpoint's own
     # input size when none are fitted, so an uncalibrated run is at least not upsampling too.
     stack_res = stack_out_size(mappings, default=net_res)
-    if stack_res != net_res:
-        print(f"[policy-{NAME}] camera views are {stack_res}px but the encoder wants {net_res}px; "
-              f"it will resample. Refit the mappings with --sim-size {net_res} to feed it natively.")
+    if stack_res < net_res:
+        # Upsampling IS out of distribution: the encoder never saw a view with less detail than
+        # its input size. Refitting at net_res is the fix.
+        print(f"[policy-{NAME}] camera views are {stack_res}px but the encoder wants {net_res}px, "
+              f"so it will UPSAMPLE. Refit the mappings with --sim-size {net_res}.")
+    elif stack_res > net_res:
+        # Downsampling is the trained path for squint: it rendered at 128 and area-resized to
+        # res, which is exactly what SquintEncoder.preprocess does here. Not a fault.
+        print(f"[policy-{NAME}] camera views are {stack_res}px and the encoder squints to "
+              f"{net_res}px, as it did in training.")
     frames = FrameCache(mappings, stack_res)
 
     # Warm the encoder BEFORE connecting. dino_patch fetches its frozen backbone from torch.hub on

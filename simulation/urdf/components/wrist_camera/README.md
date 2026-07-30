@@ -6,7 +6,7 @@
 ## Overview
 This guide provides step-by-step instructions for installing a **Wrist Camera** (alternate "McGartoll-Fung" design) on the SO-101 robot using a **Camera Module** and a 3D-printed **Hex-Nut Recess Camera Adapter**.
 
-This adapts the [Wrist Camera (MF) UVC Module](../Wrist_Cam_Mount_32x32_UVC_Module/) and [Wrist Camera (MF) UVC Plug‑on Module](../Wrist_Cam_Mount_32x32_UVC_Module/).
+This adapts the [Wrist Camera (MF) UVC Module](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/Wrist_Cam_Mount_32x32_UVC_Module) and [Wrist Camera (MF) UVC Plug‑on Module](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Optional/Wrist_Cam_Plug_Mount_32x32_UVC_Module), which live upstream in SO-ARM100 and are not vendored here.
 
 ## Comparison to Main Design
 #### Advantages:
@@ -20,7 +20,7 @@ This adapts the [Wrist Camera (MF) UVC Module](../Wrist_Cam_Mount_32x32_UVC_Modu
 ## Required Components
 ### Hardware:
 - **USB Camera Module** (1) - this is the [recommended model](https://www.amazon.com/innomaker-Computer-Raspberry-Support-Windows/dp/B0CNCSFQC1/ref=pd_lpo_d_sccl_3/132-7372155-9780230?pd_rd_w=eYz4L&content-id=amzn1.sym.4c8c52db-06f8-4e42-8e56-912796f2ea6c&pf_rd_p=4c8c52db-06f8-4e42-8e56-912796f2ea6c&pf_rd_r=XC3EXZRSSXKDB1G0Z5D7&pd_rd_wg=1wTpn&pd_rd_r=932b1976-9ac7-4cef-9774-f0f9c3acb804&pd_rd_i=B0CNCSFQC1&psc=1), but any 32mm x 32mm USB camera module with min 720p / 30 fps spec will likely work
-- [3D-printed Hex-Nut Recess Camera Adapter](stl/SO-ARM101_camera_wrist_mount.stl) (1)
+- [3D-printed Hex-Nut Recess Camera Adapter](SO-ARM101_camera_wrist_mount.stl) (1)
    - I recommend printing it as oriented in the STL using tree supports. 40% infill is recommended to increase sturdiness and avoid wobbling
 - **M2 Screws** (4) - these are the smaller screws that came with your Feetech servos.
 - **M3 x 8mm Screws** (2)
@@ -34,9 +34,9 @@ This adapts the [Wrist Camera (MF) UVC Module](../Wrist_Cam_Mount_32x32_UVC_Modu
    
 1. 3D print the **Hex-Nut Recess Camera Adapter**.
 
-2. Remove Motor 6, you can leave the [Moving Jaw](../../STL/SO101/Individual/Moving_Jaw_SO101.stl) attached.
+2. Remove Motor 6, you can leave the [Moving Jaw](../so101_arm/assets/moving_jaw_so101_v1.stl) attached.
 
-3. Insert the hex nuts into the recesses in the [Wrist Roll Element](../../STL/SO101/Individual/Wrist_Roll_Follower_SO101.stl).
+3. Insert the hex nuts into the recesses in the [Wrist Roll Element](../so101_arm/assets/wrist_roll_follower_so101_v1.stl).
 
 <img width="300" src="https://github.com/user-attachments/assets/68f34831-eeb1-4e90-83a2-4e204a94ac51" />
 
