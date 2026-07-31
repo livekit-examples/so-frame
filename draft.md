@@ -31,7 +31,7 @@ the arm and rail are bolted to a frame with a diffuse lightbox work surface (nea
 
 both are cheap camera modules, the specifications of which are not important to reproduction, as we built a tool that helps us align simulation cameras with real cameras, which will be mentioned later. the entire frame, arm, rail, cameras, and lightbox panels are one URDF, so the simulated twin and the real rig share the same kinematics and the same calibrated camera mounts (camera poses come from forward kinematics of the URDF links, not hand-measured offsets).
 
-we call this rig the so-frame and its full description can be found [here](#).
+we call this rig the so-frame and its full description can be found [here](https://github.com/livekit-examples/so-frame).
 
 # what is the task?
 
