@@ -214,6 +214,13 @@ We have four encoders, same task, same reward, same retention, same budget.
 
 The dense grid wins on both axes. It blooms first and holds the highest level once it is there. Collapsing the same features to one vector per camera costs about twenty points of sustained success, and collapsing to the CLS token costs another nine and delays the bloom by five million steps. The only difference between the top row and the middle two is whether the patch grid survives to the head.
 
+Some notes from the run history:
+
+- Before the reward ladder got its jaw-closing ramp and the horizon came down to 200 steps, this same CNN ran five times, three of them separate seeds, 12M steps each, and never placed a single cube. Not rarely, never. Nothing about the encoder changed between those runs and the 0.71 above, so I spent a while suspecting the architecture when the reward was the problem.
+- Take the best checkpoint, not the last one. `dino_patch` hits 1.00 at 4.75M and then wanders between 0.69 and 1.00 for the remaining seven million steps, ending at 0.83. An earlier run of the same head peaked at 0.74 and decayed to flat zero. Critic loss stays stable throughout, so this is not divergence, it is a confidently over-optimistic critic.
+- The entropy temperature ends up in the 1e-4 range in every run, successful or not, so alpha on the floor diagnoses nothing. Printed with three decimals it reads as 0.000, which looks worse than it is.
+- Eval is 35 episodes, so a reading is a multiple of 1/35, and 0/35 is a real policy state rather than sampling noise off something that half works. One run is not an experiment here.
+
 # Deployment
 
 My so-frame is built to be a remote rig and so I always connect to it remotely through [LiveKit Portal](https://github.com/livekit/portal).
