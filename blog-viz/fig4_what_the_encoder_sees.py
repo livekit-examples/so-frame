@@ -61,20 +61,7 @@ def main():
     fig = plt.figure(figsize=(12.4, 5.6))
     left = 0.055
     gs = fig.add_gridspec(1, 4, left=left, right=0.985, bottom=0.03, wspace=0.055,
-                          top=style.content_top(fig, headings=True, groups=True))
-
-    style.title_block(fig, "Overhead camera view at each encoder's input resolution", left=left)
-
-    # Name the encoder over the panels it consumes, so a panel is never just a resolution.
-    for label, (a, b) in (("squint CNN", (0, 1)), ("DINOv2 heads", (2, 3))):
-        x0 = gs[0, a].get_position(fig).x0
-        x1 = gs[0, b].get_position(fig).x1
-        text_y, rule_y = style.group_label_y(fig)
-        fig.text((x0 + x1) / 2, text_y, label, ha="center", va="bottom",
-                 fontsize=style.T_LABEL, color=style.INK, fontweight="bold")
-        fig.add_artist(plt.Line2D([x0, x1], [rule_y, rule_y], transform=fig.transFigure,
-                                  color=style.AXIS, lw=1.0))
-
+                          top=0.97)
 
     panels = [
         (sc.blow_up(v128, DISPLAY), "128 px render", None),
@@ -83,6 +70,7 @@ def main():
         (sc.blow_up(v168, DISPLAY), "168 px, 12 × 12 patches", 12),
     ]
 
+    axes = []
     for i, (img, heading, grid) in enumerate(panels):
         ax = fig.add_subplot(gs[i])
         ax.imshow(img, interpolation="nearest")
@@ -94,7 +82,13 @@ def main():
         # Ring the cube in every panel, so the eye can follow the one object that disappears.
         ax.add_patch(Circle((cube_frac[0] * DISPLAY, cube_frac[1] * DISPLAY),
                             DISPLAY * 0.055, fill=False, ec=style.ORANGE, lw=1.6))
+        axes.append(ax)
 
+    # Name the encoder over the panels it consumes, so a panel is never just a resolution.
+    style.span_label(fig, axes[0:2], "squint CNN")
+    style.span_label(fig, axes[2:4], "DINOv2 heads")
+
+    style.place_title(fig, "Overhead camera view at each encoder's input resolution")
     return fig
 
 

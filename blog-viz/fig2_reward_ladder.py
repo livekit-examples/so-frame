@@ -36,8 +36,6 @@ def main():
     left = 0.075
     ax = fig.add_axes([left, 0.10, 0.965 - left, 0.76])
 
-    style.title_block(fig, "Reward value by task stage, with each stage's shaping range", left=left)
-
 
     for i, (label, floor, head, note) in enumerate(STAGES):
         top = floor + head
@@ -56,7 +54,7 @@ def main():
             ax.plot([i - BAR_W / 2, i + BAR_W / 2], [floor, floor],
                     color=style.ORANGE, lw=5.0, solid_capstyle="round", zorder=3)
         ax.text(i, floor - 0.30, f"{floor:g}", ha="center", va="top",
-                fontsize=style.T_TICK, color=style.INK, fontweight="bold")
+                fontsize=style.T_TICK, color=style.INK)
         ax.text(i, -1.15, label, ha="center", va="top", linespacing=1.45,
                 fontsize=style.T_LABEL, color=style.INK)
 
@@ -87,6 +85,7 @@ def main():
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.005, 0.90), frameon=False, fontsize=style.T_TICK,
               labelcolor=style.MUTED, handletextpad=0.5, borderaxespad=0.2)
 
+    style.place_title(fig, "Reward value by task stage, with each stage's shaping range")
     return fig
 
 

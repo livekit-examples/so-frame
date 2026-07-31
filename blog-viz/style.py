@@ -125,49 +125,55 @@ def apply():
     })
 
 
-# Vertical space above the plotting area, in INCHES rather than figure fractions, so a short
-# figure and a tall one get the same gap instead of the same proportion. Hand-tuning `top=` per
-# figure is what produced titles sitting on top of panels.
-_TITLE_INSET_IN = 0.30    # top of the page to the title's baseline area
-_TITLE_BAND_IN = 0.62     # total reserved for the title alone
-_HEADING_BAND_IN = 0.30   # extra, when panels carry their own headings
-_GROUP_BAND_IN = 0.42     # extra, when panels are grouped under a spanning label
+def _ink_bounds(fig, artists=None):
+    """(x0, x1, y1) in figure fractions of everything currently drawn.
 
-
-def title_block(fig, title, subtitle=None, *, left):
-    """Left-align a title (and optional subtitle) to the `left` rail.
-
-    Pass the same `left` the plotting area uses, so text and plot share one vertical guide.
-    Position is measured down from the top of the figure in inches, so it does not drift with
-    figure height.
+    Measured after a real draw rather than guessed from the gridspec, because what sticks out on
+    the left is the y-axis label and the tick labels, and what sticks out on top is a panel
+    heading. Guessing those margins is what kept titles landing on top of panels and sitting
+    indented from the content they belong to.
     """
-    h = fig.get_figheight()
-    top = 1.0 - _TITLE_INSET_IN / h
-    fig.text(left, top, title, ha="left", va="top", fontsize=T_TITLE, fontweight="bold", color=INK)
-    if subtitle:
-        gap = 0.26 / h
-        fig.text(left, top - gap, subtitle, ha="left", va="top", fontsize=T_SUB, color=MUTED)
-        return top - gap
-    return top
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    boxes = []
+    for a in (artists if artists is not None else fig.axes):
+        b = a.get_tightbbox(r)
+        if b is not None and b.width > 0:
+            boxes.append(b)
+    if artists is None:
+        for t in fig.texts:
+            b = t.get_window_extent(r)
+            if b.width > 0:
+                boxes.append(b)
+    inv = fig.transFigure.inverted()
+    x0 = min(inv.transform((b.x0, 0))[0] for b in boxes)
+    x1 = max(inv.transform((b.x1, 0))[0] for b in boxes)
+    y1 = max(inv.transform((0, b.y1))[1] for b in boxes)
+    return x0, x1, y1
 
 
-def content_top(fig, *, headings=False, groups=False):
-    """The `top` a gridspec should use to clear the title, and whatever sits under it.
+def place_title(fig, text, *, gap_in=0.30):
+    """Put the title above everything, flush with the leftmost ink on the page.
 
-    `headings` if the panels carry their own titles, `groups` if a spanning label sits above those.
+    Call it LAST, once every axes and label exists. Regular weight: at this size on a cream page
+    the title already reads as the title, and bold makes it shout over the figure it introduces.
     """
-    band = _TITLE_BAND_IN
-    band += _HEADING_BAND_IN if headings else 0.0
-    band += _GROUP_BAND_IN if groups else 0.0
-    return 1.0 - band / fig.get_figheight()
+    x0, _, y1 = _ink_bounds(fig)
+    fig.text(x0, y1 + gap_in / fig.get_figheight(), text,
+             ha="left", va="bottom", fontsize=T_TITLE, color=INK)
 
 
-def group_label_y(fig):
-    """Figure fraction for a label spanning a group of panels, and for its underline."""
+def span_label(fig, axes, text, *, gap_in=0.13):
+    """A label over a group of panels, with a rule under it spanning exactly those panels."""
+    from matplotlib.lines import Line2D
+
+    x0, x1, y1 = _ink_bounds(fig, artists=axes)
     h = fig.get_figheight()
-    band = _TITLE_BAND_IN + _HEADING_BAND_IN + _GROUP_BAND_IN
-    text_y = 1.0 - (band - 0.30) / h
-    return text_y, text_y - 0.055 / h
+    rule_y = y1 + gap_in / h
+    fig.add_artist(Line2D([x0, x1], [rule_y, rule_y], transform=fig.transFigure,
+                          color=AXIS, lw=1.0))
+    fig.text((x0 + x1) / 2, rule_y + 0.05 / h, text, ha="center", va="bottom",
+             fontsize=T_LABEL, color=INK)
 
 
 def footnote(fig, text, *, left, y=0.02):

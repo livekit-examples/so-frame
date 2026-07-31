@@ -82,9 +82,7 @@ def main():
     left = 0.065
     gs = fig.add_gridspec(2, 3, left=left, right=0.90, bottom=0.03,
                           wspace=0.07, hspace=0.16, width_ratios=[1, 1, 1.15],
-                          top=style.content_top(fig, headings=True))
-
-    style.title_block(fig, "DINOv2 patch tokens for sim and real frames, shared PCA projection", left=left)
+                          top=0.97)
 
 
     rows = [("simulation", over_sim, pca_sim), ("real, rectified", over_real, pca_real)]
@@ -114,6 +112,7 @@ def main():
         if r == 0:
             style.panel_title(ax, "mean-pooled to one vector", color=style.INK)
 
+    style.place_title(fig, "DINOv2 patch tokens for sim and real frames, shared PCA projection")
     return fig
 
 

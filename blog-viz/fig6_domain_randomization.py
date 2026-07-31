@@ -58,9 +58,7 @@ def main():
     left = 0.045
     gs = fig.add_gridspec(2, DRAWS + 1, left=left, right=0.99, bottom=0.03,
                           wspace=0.035, hspace=0.06,
-                          top=style.content_top(fig, headings=True))
-
-    style.title_block(fig, "Wrist and overhead views across domain-randomization draws", left=left)
+                          top=0.97)
 
 
     for col, (wrist, overhead) in enumerate(cols):
@@ -76,6 +74,7 @@ def main():
                 style.panel_title(ax, "off" if col == 0 else f"draw {col}",
                                   color=style.INK if col == 0 else style.FAINT)
 
+    style.place_title(fig, "Wrist and overhead views across domain-randomization draws")
     return fig
 
 

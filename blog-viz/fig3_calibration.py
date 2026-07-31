@@ -58,9 +58,7 @@ def main():
     left = 0.055
     gs = fig.add_gridspec(2, 4, left=left, right=0.985, bottom=0.03,
                           wspace=0.06, hspace=0.30,
-                          top=style.content_top(fig, headings=True))
-
-    style.title_block(fig, "Sim render, raw capture, rectified capture and blend, per camera", left=left)
+                          top=0.97)
 
 
     for row, cam in enumerate(sc.CAMERA_ORDER):
@@ -82,6 +80,7 @@ def main():
 
 
     env.close()
+    style.place_title(fig, "Sim render, raw capture, rectified capture and blend, per camera")
     return fig
 
 

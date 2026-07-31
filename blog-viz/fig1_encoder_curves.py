@@ -53,10 +53,8 @@ def main():
     left, right = 0.075, 0.985
     gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1.0], wspace=0.16,
                           left=left, right=right, bottom=0.15,
-                          top=style.content_top(fig))
+                          top=0.97)
     ax_a, ax_b = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
-
-    style.title_block(fig, "Evaluation success rate vs environment steps, by vision encoder", left=left)
 
     # ---- Panel A: the four encoders, current recipe --------------------------------------
     ends = []
@@ -88,7 +86,7 @@ def main():
         if abs(y - value) > 1e-3:
             ax_a.plot([xe, xe + 0.18], [value, y], color=color, lw=0.9, alpha=0.7, zorder=3)
         ax_a.text(xe + 0.28, y, label, color=color, fontsize=style.T_TICK,
-                  va="center", ha="left", fontweight="bold")
+                  va="center", ha="left")
 
     # ---- Panel B: the CNN either side of the recipe change --------------------------------
     for run in PREVIOUS:
@@ -98,7 +96,7 @@ def main():
     ax_b.plot(x, rolling(y), color=style.ENCODER_COLOR["squint"], lw=2.0, zorder=3,
               path_effects=style.RELIEF[style.GOLD])
     ax_b.text(12.2, rolling(y)[-1], "after", color=style.GOLD, fontsize=style.T_TICK,
-              va="center", ha="left", fontweight="bold")
+              va="center", ha="left")
     ax_b.text(9.2, 0.045, "5 runs, previous recipe", color=style.MUTED,
               fontsize=style.T_TICK, ha="center", va="bottom")
 
@@ -114,6 +112,7 @@ def main():
     ax_b.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax_b.set_yticklabels([])
 
+    style.place_title(fig, "Evaluation success rate vs environment steps, by vision encoder")
     return fig
 
 

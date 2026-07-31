@@ -51,9 +51,7 @@ def main():
     left = 0.06
     gs = fig.add_gridspec(1, 2, left=left, right=0.975, bottom=0.16,
                           width_ratios=[1.0, 1.30], wspace=0.14,
-                          top=style.content_top(fig, headings=True))
-
-    style.title_block(fig, "Spawn zone in the overhead view, and sampled object positions", left=left)
+                          top=0.97)
 
 
     # ---- The zone, seen by the camera that constrains it ---------------------------------
@@ -81,10 +79,13 @@ def main():
     # Equal aspect, but with the limits pinned to the zone plus a small margin: left to itself it
     # pads whichever axis the panel shape leaves slack in, which reads as zone that isn't there.
     ax2.set_aspect("equal", adjustable="box")
+    # Equal aspect shrinks the axes and centres it in its cell, which would drop this panel's
+    # heading below the image panel's. Anchor north so both headings sit on one line.
+    ax2.set_anchor("N")
     ax2.set_xlabel("along the rail (m)")
     ax2.set_ylabel("across it (m)")
     style.clean_axes(ax2, grid_axis=None)
-    ax2.legend(loc="lower left", bbox_to_anchor=(0.0, -0.34), ncol=2, frameon=False,
+    ax2.legend(loc="upper left", bbox_to_anchor=(0.0, -0.12), ncol=2, frameon=False,
                fontsize=style.T_TICK, labelcolor=style.MUTED, handletextpad=0.4, borderaxespad=0.0)
     style.panel_title(ax2, f"{EPISODES} episodes", color=style.INK)
     # Limits last: equal aspect will otherwise pad whichever axis the panel shape leaves slack in,
@@ -92,6 +93,7 @@ def main():
     ax2.set_xlim(cy - hy - 0.02, cy + hy + 0.02)
     ax2.set_ylim(cx - hx - 0.02, cx + hx + 0.02)
 
+    style.place_title(fig, "Spawn zone in the overhead view, and sampled object positions")
     return fig
 
 
