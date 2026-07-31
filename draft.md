@@ -42,7 +42,7 @@ the task for the robot is to pick up a cube on the work surface and place it in 
 
 in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 358 × 728 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
 
-three edges of that zone are the overhead camera's footprint, measured at both the cube's height and the taller bin's rim, since the policy is vision only and a spawn out of frame is unobservable rather than merely hard. the far edge is pulled 100 mm inside that, because top-down reach cannot cross it at all. reach still stops 104 mm short of where the camera stops, so 69% of the zone is completable and success caps near there rather than at 1.0.
+that zone is the overhead camera's footprint, measured at both the cube's height and the taller bin's rim, and inset on the far edge to keep it inside the arm's top-down reach. the policy is vision only, so a spawn out of frame would be unobservable rather than merely hard.
 
 ![the spawn zone, and episodes drawn from it](blog-viz/out/fig5_spawn_zone.png)
 
