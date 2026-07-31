@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-07-30T20:06:33-0700",
+  "room": "so-frame",
+  "cameras": [
+    "arm_camera",
+    "overhead_camera"
+  ],
+  "sim_qpos": {
+    "dof_slider": -0.03586,
+    "shoulder_pan": 0.009206,
+    "shoulder_lift": -1.746864,
+    "elbow_flex": 1.664776,
+    "wrist_flex": 0.613742,
+    "wrist_roll": 0.022632,
+    "gripper": 1.209324
+  },
+  "wire_state": {
+    "dof_slider.pos": 44.7561,
+    "shoulder_pan.pos": 0.5275,
+    "shoulder_lift.pos": -100.0879,
+    "elbow_flex.pos": 95.3846,
+    "wrist_flex.pos": 35.1648,
+    "wrist_roll.pos": 91.2967,
+    "gripper.pos": 69.2892
+  }
+}
