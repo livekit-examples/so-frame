@@ -35,6 +35,8 @@ We call this rig the so-frame and its full description can be found [here](https
 
 # What is the task?
 
+<video src="blog-viz/assets/sim.mp4" controls muted loop playsinline width="100%"></video>
+
 The task for the robot is to pick up a cube on the work surface and place it in a bin.
 
 - Cube: 20 mm, ~3.2 g, blue.
@@ -200,10 +202,6 @@ In simulation, `dino_patch_policy` yield the highest performance. In real life, 
 Training is 12M environment steps on a single RTX PRO 6000, replay retention of 2 episodes per env, batch 512, and Squint's hyperparameters mostly untouched. The Squint CNN runs 1024 parallel envs at 2833 environment steps per second and finishes in about ninety minutes. The DINO heads run 512 envs, and the patch head is the expensive one at 341 steps per second and ten hours.
 
 We have four encoders, same task, same reward, same retention, same budget.
-
-<video src="blog-viz/assets/sim.mp4" controls muted loop playsinline width="100%"></video>
-
-An evaluation looks like this: 35 held-out episodes at once, each tile a wrist and overhead pair, every one on its own draw of the randomization.
 
 ![evaluation success by encoder](blog-viz/out/fig1_encoder_curves.png)
 
