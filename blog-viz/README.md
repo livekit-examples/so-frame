@@ -67,7 +67,7 @@ jaw-closing ramp and the horizon came down to 200 steps.
 
 | # | figure | script | needs |
 |---|---|---|---|
-| 1 | four encoders, and the recipe change | `fig1_encoder_curves.py` | the wandb cache |
+| 1 | four encoders, success vs steps | `fig1_encoder_curves.py` | the wandb cache |
 | 2 | the reward ladder | `fig2_reward_ladder.py` | training constants only |
 | 3 | sim / raw / rectified / blended, both cameras | `fig3_calibration.py` | sim + a reference capture |
 | 4 | what each encoder is handed | `fig4_what_the_encoder_sees.py` | sim |
@@ -90,8 +90,9 @@ and coloured jenga blocks, on the previous task.
 
 ## Design system
 
-`style.py` holds it: a warm cream page, one type scale, and a structural left rail that the title,
-subtitle, footnote and plotting area all hang from. Edit it to restyle every figure at once.
+`style.py` holds it: a warm cream page, one type scale, and a left rail the title and the plotting
+area share. Edit it to restyle every figure at once. Figures carry a title, panel headings and the
+labels needed to read the marks, and nothing else: the prose lives in the post.
 
 Titles are placed by `place_title()`, which draws the figure, measures it, and hangs the title off
 the left edge of the leftmost panel at a fixed gap above the tallest thing on the page. Nothing
