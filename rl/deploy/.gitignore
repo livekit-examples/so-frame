@@ -8,7 +8,8 @@
 __pycache__/
 *.pyc
 
-# Deploy checkpoints: copied off a training run, never committed
+# Deploy checkpoints: the four the write-up refers to are committed on purpose, everything
+# else copied off a training run stays local.
 checkpoints/
 *.pt
 
