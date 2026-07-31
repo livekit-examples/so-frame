@@ -11,6 +11,7 @@ robot.
 
     uv run --project ../rl/calibrate python fig7_dino_features.py
 
+`main` takes the real camera track, so fig8 renders the wrist view through this same code.
 Pulls the backbone from torch.hub on first use, so the first run needs network.
 """
 from __future__ import annotations
@@ -36,7 +37,7 @@ def tokens(rgb, torch):
     return tok[0, : GRID * GRID].float().numpy()
 
 
-def main():
+def main(real_cam="overhead_camera", title=None):
     import torch
 
     ref = sc.reference()
@@ -56,10 +57,12 @@ def main():
     if len(found) == 2:
         sc.place_objects(u, found["blue"], found["yellow"])
         sc.set_qpos(u, ref["sim_qpos"])
-    over_sim = sc.sim_views(u)["overhead_camera"]
+    views = sc.sim_views(u)
+    sim = views[sc.REAL_TO_SIM_CAM[real_cam]]
+    real = sc.rectify_real(real_cam, RES, maps=maps)
     env.close()
 
-    t_sim, t_real = tokens(over_sim, torch), tokens(over_real, torch)
+    t_sim, t_real = tokens(sim, torch), tokens(real, torch)
 
     # One PCA over both, each frame mean-centred first so the constant sim-vs-real offset does not
     # eat the leading component. What is left is structure the two share, or do not.
@@ -85,7 +88,7 @@ def main():
                           top=0.97)
 
 
-    rows = [("simulation", over_sim, pca_sim), ("real, rectified", over_real, pca_real)]
+    rows = [("simulation", sim, pca_sim), ("real, rectified", real, pca_real)]
     for r, (label, img, pca) in enumerate(rows):
         ax = fig.add_subplot(gs[r, 0])
         ax.imshow(img)
@@ -112,7 +115,8 @@ def main():
         if r == 0:
             style.panel_title(ax, "mean-pooled to one vector", color=style.INK)
 
-    style.place_title(fig, "DINOv2 patch tokens for sim and real frames, shared PCA projection")
+    style.place_title(fig, title or
+                      f"DINOv2 patch tokens, {sc.CAMERA_TITLE[real_cam]}, shared PCA projection")
     return fig
 
 

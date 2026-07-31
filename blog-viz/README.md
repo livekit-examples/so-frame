@@ -73,7 +73,8 @@ jaw-closing ramp and the horizon came down to 200 steps.
 | 4 | what each encoder is handed | `fig4_what_the_encoder_sees.py` | sim |
 | 5 | the spawn zone, and episodes drawn from it | `fig5_spawn_zone.py` | sim |
 | 6 | domain-randomization draws | `fig6_domain_randomization.py` | sim |
-| 7 | DINOv2 features, sim vs real | `fig7_dino_features.py` | sim + reference + torch.hub |
+| 7 | DINOv2 features, overhead camera | `fig7_dino_features.py` | sim + reference + torch.hub |
+| 8 | DINOv2 features, wrist camera | `fig8_dino_features_wrist.py` | same, via `fig7.main("arm_camera")` |
 
 Still missing, because they need capture the repo cannot synthesize:
 
@@ -91,6 +92,11 @@ and coloured jenga blocks, on the previous task.
 
 `style.py` holds it: a warm cream page, one type scale, and a structural left rail that the title,
 subtitle, footnote and plotting area all hang from. Edit it to restyle every figure at once.
+
+Titles are placed by `place_title()`, which draws the figure, measures it, and hangs the title off
+the left edge of the leftmost panel at a fixed gap above the tallest thing on the page. Nothing
+about the title band is hand-tuned per figure, which is what used to put titles on top of panels.
+Regular weight throughout, no bold.
 
 Series colours are the validated four-slot categorical order (blue, orange, aqua, yellow), checked
 against this page colour rather than a generic white one: worst adjacent CVD ΔE 9.1, worst adjacent

@@ -1,9 +1,11 @@
-"""The headline result: what the vision encoder is worth, and what the recipe was worth.
+"""What the vision encoder is worth: four of them under one recipe, 12M steps each.
 
-Left panel, the four encoders under the current recipe, all 12M steps, same task, same reward,
-same replay retention. Right panel, the same squint CNN before the reward ladder gained its
-jaw-closing ramp and the horizon came down to 200 steps: four runs, three of them separate seeds,
-none of which ever placed the cube.
+Same task, same reward, same replay retention, same step budget, so the only thing varying is
+what the policy is handed instead of pixels.
+
+The squint CNN's five zero-success runs under the previous recipe used to be a second panel here.
+Dropped: that is a different claim, and five flat lines at zero is weaker evidence than the one
+sentence of prose that states it.
 
 Reads raw/wandb_runs.json (see fetch_runs.py). Needs no simulator.
 """
@@ -31,7 +33,6 @@ CURRENT = (
     ("v5-dino-global-cls", "dino_global_cls", "dino_global (cls)"),
     ("v4-squint", "squint", "squint CNN"),
 )
-PREVIOUS = ("v1-squint", "v2-squint-s1", "v2-squint-s2", "v2-squint-s3", "v3-squint")
 
 
 def series(name):
@@ -49,12 +50,10 @@ def rolling(y, n=SMOOTH):
 
 def main():
     style.apply()
-    fig = plt.figure(figsize=(12.6, 4.8))
-    left, right = 0.075, 0.985
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1.0], wspace=0.16,
-                          left=left, right=right, bottom=0.15,
-                          top=0.97)
-    ax_a, ax_b = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
+    fig = plt.figure(figsize=(9.6, 5.0))
+    left, right = 0.085, 0.985
+    gs = fig.add_gridspec(1, 1, left=left, right=right, bottom=0.14, top=0.97)
+    ax_a = fig.add_subplot(gs[0])
 
     # ---- Panel A: the four encoders, current recipe --------------------------------------
     ends = []
@@ -88,29 +87,14 @@ def main():
         ax_a.text(xe + 0.28, y, label, color=color, fontsize=style.T_TICK,
                   va="center", ha="left")
 
-    # ---- Panel B: the CNN either side of the recipe change --------------------------------
-    for run in PREVIOUS:
-        x, y = series(run)
-        ax_b.plot(x, y, color=style.MUTED, lw=1.8, alpha=0.6, zorder=2)
-    x, y = series("v4-squint")
-    ax_b.plot(x, rolling(y), color=style.ENCODER_COLOR["squint"], lw=2.0, zorder=3,
-              path_effects=style.RELIEF[style.GOLD])
-    ax_b.text(12.2, rolling(y)[-1], "after", color=style.GOLD, fontsize=style.T_TICK,
-              va="center", ha="left")
-    ax_b.text(9.2, 0.045, "5 runs, previous recipe", color=style.MUTED,
-              fontsize=style.T_TICK, ha="center", va="bottom")
-
-    for ax, xmax in ((ax_a, 15.0), (ax_b, 14.2)):
-        style.clean_axes(ax)
-        ax.set_xlim(-0.3, xmax)
-        ax.set_ylim(-0.03, 1.06)
-        ax.set_xticks([0, 3, 6, 9, 12])
-        ax.set_xlabel("environment steps (millions)")
+    style.clean_axes(ax_a)
+    ax_a.set_xlim(-0.3, 15.6)
+    ax_a.set_ylim(-0.03, 1.06)
+    ax_a.set_xticks([0, 3, 6, 9, 12])
+    ax_a.set_xlabel("environment steps (millions)")
     ax_a.set_ylabel("success rate")
     ax_a.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax_a.set_yticklabels(["0", "0.25", "0.50", "0.75", "1.00"])
-    ax_b.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax_b.set_yticklabels([])
 
     style.place_title(fig, "Evaluation success rate vs environment steps, by vision encoder")
     return fig

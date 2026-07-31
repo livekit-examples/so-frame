@@ -153,12 +153,17 @@ def _ink_bounds(fig, artists=None):
 
 
 def place_title(fig, text, *, gap_in=0.30):
-    """Put the title above everything, flush with the leftmost ink on the page.
+    """Put the title above everything, flush with the left edge of the leftmost panel.
+
+    Aligned to the panel BOX, not to the leftmost ink: the y-axis label and tick labels stick out
+    further left, and hanging the title off those leaves it floating clear of the picture it
+    belongs to. The panel edge is the line the eye actually reads as the figure's left edge.
 
     Call it LAST, once every axes and label exists. Regular weight: at this size on a cream page
     the title already reads as the title, and bold makes it shout over the figure it introduces.
     """
-    x0, _, y1 = _ink_bounds(fig)
+    _, _, y1 = _ink_bounds(fig)
+    x0 = min(ax.get_position().x0 for ax in fig.axes)
     fig.text(x0, y1 + gap_in / fig.get_figheight(), text,
              ha="left", va="bottom", fontsize=T_TITLE, color=INK)
 

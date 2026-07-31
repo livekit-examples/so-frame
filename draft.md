@@ -62,7 +62,7 @@ $\phi$ is the encoder's preprocessing, and the choice of it is most of this arti
 
 $\tilde{\mathbf{q}}_t$ is the 7 measured joint positions, $\mathcal{N}(0, \sigma_q^2)$ with $\sigma_q = 5°$ per joint to model real encoders.
 
-$\mathbf{q}^{\text{tgt}}_t$ is the running controller target, and it is why proprio is 14 and not 7. the controller is positional and the arm lags it, so $\tilde{\mathbf{q}}_t$ alone is ambiguous: identical poses under different targets evolve differently, and the process is not Markov in the measurement. deploy integrates the same target, so the semantics transfer exactly.
+$\mathbf{q}^{\text{tgt}}_t$ is the running controller target. the controller is positional, but command actions are not instantaneous, so $\tilde{\mathbf{q}}_t$ alone is ambiguous, so we need to model control delay as well, especially since our action space is delta.
 
 that layout is a contract, not a convention. the 14 fields and their order are measured off the live training env and written into the checkpoint, so deploy assembles its vector from that record instead of assuming a width.
 
@@ -76,61 +76,73 @@ note that a delta per control period is a velocity. that matters later.
 
 ### the reward
 
-the reward is a monotonic staircase. each stage is a fixed rung plus a bounded amount of shaping, and every stage's maximum sits below the next stage's floor, so a higher stage overrides the lower one instead of adding to it.
+the reward is a staircase over five mutually exclusive stages. each stage has a fixed rung, plus at most a bounded amount of shaping on top, and the rungs are spaced so that a stage's maximum still sits below the next stage's rung, which means a higher stage always overrides the one below it instead of adding to it.
 
-$$\text{reach } [0, 1.5] \;<\; \text{grasped } [2, 3] \;<\; \text{holding } [4, 5] \;<\; \text{released } 6 \;<\; \text{success } 10$$
+first the predicates, all read off the sim state:
+
+- $\mathrm{G}$: the cube is grasped, both jaws in contact and closing on it
+- $\mathrm{B}$: the cube is horizontally inside the bin's 96 mm opening, $|p^{x}_{\text{item}} - p^{x}_{\text{bin}}| < 0.048$ and likewise in $y$
+- $\mathrm{T}$: the robot is touching the cube
+- $\mathrm{I}$: the cube is *in* the bin, $\mathrm{B}$ and its lowest corner within 5 mm of the bin floor
+- $\Sigma = \mathrm{I} \wedge \|\dot p_{\text{item}}\| \le 0.02 \wedge \neg\mathrm{T} \wedge \text{robot static} \wedge \neg\text{touching the bin}$
+
+and the distances: $d_{xy}$ and $d_z$ from the tool centre to the cube, $d_g = \|g - p_{\text{item}}\|$ from the cube to the drop point $g$, and $o \in [0,1]$ for how far the jaw is open.
+
+| stage | condition | reward |
+| --- | --- | --- |
+| a. reach | otherwise | $r_{\text{reach}} \in [0, 1.5]$ |
+| b. grasped | $\mathrm{G} \wedge \neg\mathrm{B}$ | $2 + \big(1 - \tanh(5 d_g)\big) \in [2, 3]$ |
+| c. holding over the bin | $\mathrm{B} \wedge \mathrm{T}$ | $4 + o \in [4, 5]$ |
+| d. released over the bin | $\mathrm{B} \wedge \neg\mathrm{T}$ | $6$ |
+| e. success | $\Sigma$ | $10$ |
+
+$$r_{\text{reach}} = \underbrace{0.5\big(1 - \tanh(5\,d_{xy})\big)}_{\text{align over the cube}} \;+\; \mathbb{1}[\,d_{xy} < 0.03\,]\underbrace{0.5\big(1 - \tanh(5\,d_z)\big)}_{\text{then descend}} \;+\; \mathbb{1}[\,d_{xy} < 0.03 \,\wedge\, d_z < 0.02\,]\underbrace{0.5\,(1 - o)}_{\text{then close}}$$
+
+the per-step reward is normalized by the maximum, $\hat r_t = r_t / 10$, and what the policy maximizes is the discounted sum over the episode, $\sum_t \gamma^t \hat r_t$ at $\gamma = 0.9$. so the ladder is a rate, not a score for finishing: more steps spent on a higher rung is worth more.
 
 ![the reward ladder](blog-viz/out/fig2_reward_ladder.png)
 
-the ordering does the work that a pile of bonuses and hover taxes used to do badly. "let go of the cube, don't just hold it over the bin" is encoded once, by $5 < 6$: holding is a plateau you can only beat by releasing. and because the ladder is monotonic, regression handles itself, since dropping the cube falls to a lower rung on its own.
+d and e are easy to conflate. d fires the instant the jaw stops touching a cube that is over the opening, and says nothing about where that cube ends up: it can still be in the air, it can catch the rim and bounce out, and the arm can be leaning on the bin throughout. e needs the outcome, cube down on the floor and slow, arm stopped, robot touching neither. d is the decision to let go, e is that decision having worked, which is why d is flat: nothing left to shape, the only way up is for the throw to land.
 
-the shaping inside the stages:
+the ordering replaces a pile of bonuses and hover taxes. "let go, don't hover" is $5 < 6$, and regression handles itself, since dropping the cube falls to a lower rung with no penalty needed.
 
-$$r_{\text{reach}} = \underbrace{0.5\big(1 - \tanh(5\,d_{xy})\big)}_{\text{align over the cube}} + \mathbb{1}[\,d_{xy} < 0.03\,]\underbrace{0.5\big(1 - \tanh(5\,d_z)\big)}_{\text{then descend}} + \mathbb{1}[\text{on it}]\underbrace{0.5\,(1 - o_{\text{grip}})}_{\text{then close}}$$
+the two jaw terms are mirror images and took longest to get right. opening pays in c, so a jaw opening over the bin climbs toward d instead of leaping a plateau; closing pays at the top of a, but only with the tool on the cube in both axes. both are capped below the next rung, so a jaw shutting on nothing loses to a grasp, and the most open still-holding pose loses to a release. an earlier version made the gripper binary to force a clean release, which was treating a reward problem as an action-space problem.
 
-$$r_{\text{carry}} = 1 - \tanh(5\,\|g - p_{\text{item}}\|), \qquad r_{\text{hold}} = o_{\text{grip}}$$
+no penalty terms anywhere: speed is capped by the action space and torque by the servos' stall.
 
-reaching is deliberately top-down. it always pays for closing the horizontal gap, but the vertical term only switches on once the tool is within 3 cm horizontally, so the policy learns to get over the cube and drop onto it. scooping in from the side wrecked the grasp on the real rig.
-
-the two jaw terms are mirror images and they took the longest to get right. opening pays inside the holding stage, so a jaw opening over the bin climbs continuously toward the released rung instead of leaping off a plateau. closing pays at the top of reaching, but only while the tool is genuinely on the cube. each is capped below the next rung, so a jaw shutting on nothing is still worth less than a real grasp. an earlier version of this made the gripper binary to force a clean release, which was treating a reward problem as an action-space problem. with both ramps in place the policy commits on its own and the hack came out.
-
-there are no penalty terms. every limit that used to be one is structural now: speed is capped by the action space and torque by the servos' stall value.
-
-one last piece. carrying aims 5 cm above the bin rim, not at the floor. the opening is 96 mm and the jaw cannot swing open at depth inside it, so a policy shaped to insert deep becomes physically unable to let go. aiming high lets the jaw open, gives the arm margin to clear the wall, and lets gravity finish.
+the drop point $g$ sits 5 cm above the rim rather than on the floor. the opening is 96 mm and the jaw cannot swing open at depth inside it, so shaping toward a deep insert teaches the policy into being unable to let go. aiming high leaves the last few centimetres to gravity.
 
 # matching sim2real
 
-a policy trained in one simulator learns that simulator: its lighting, its frictions, its camera pose. reality is then a distribution shift and the policy shatters.
+a policy trained inside one simulator ends up learning that simulator, its exact lighting and its exact frictions and its exact camera pose, so the moment i drop it onto the real rig all of those are slightly wrong at once and it falls apart.
 
-two things close it. align the real rig to sim, so the training distribution is centred where the robot actually is. randomize what varies between runs, so the policy never leans on any single draw.
+there are two halves to closing that gap and i find it worth keeping them apart in my head. the first is alignment, where i make the simulator agree with the one real rig i actually own, so that the distribution the policy trains in is centred on the robot it will end up driving. the second is randomization, where i vary everything that changes from one run of that rig to the next, so the policy never comes to depend on any single draw of it.
 
 ## real alignment to sim
 
-camera calibration is easy on so-frame. the camera poses are in the URDF and the rig is standardized, so sim already renders from where the real camera is bolted. what is left is the lens.
+calibrating the cameras turned out to be the easy half, which honestly surprised me. because the camera holders are part of the so-frame URDF, the simulated camera already sits exactly where the real one is bolted and its pose falls out of forward kinematics, so i never had to measure an offset or fit a pose by hand. the only thing left standing between the two views is the lens.
 
-the real modules are 120° wide-angle with barrel distortion; sim renders a pinhole. rather than teach the renderer to fake a cheap lens, we rectify reality into sim's geometry: undistort with a $k_1/k_2$ plus focal model, rotate (the overhead camera is mounted sideways), zoom and crop to sim's field of view, then correct colour with a per-channel gain and a gamma.
+that lens is a cheap 120° wide-angle module with real barrel distortion, while the simulator renders a clean pinhole, and the two end up seeing quite different fractions of the same scene. rather than teach the renderer to imitate a cheap lens i went the other way and rectified reality into the simulator's geometry, which is really just undistorting with a $k_1/k_2$ plus focal model, rotating (the overhead camera is mounted sideways), zooming and cropping down to the field of view sim renders, and then correcting the colour with a per-channel gain and a gamma.
 
 <!-- IMG: screenshot of the calibration tool mid-fit. -->
 
 > _tool screenshot pending._
 
-the parameters come from a tool that drives the arm and renders the sim cameras live next to the rectified real feed, with a blend slider between them. it writes the same mapping file the deploy loop replays, so the frame the policy trained on and the frame it sees on the robot are formed by an identical transform. driving the arm while fitting is required rather than convenient: the wrist camera sees almost nothing but jaws, so a fit checked at one pose says nothing about the rest.
+i fit those parameters in a tool that drives the arm while rendering the sim cameras live beside the rectified real feed, with a blend slider between them so i can watch the two converge as i turn each knob, and it writes out the same mapping file the deploy loop later replays, which means the frame the policy trains on and the frame it sees on the robot are formed by an identical transform. driving the arm while fitting is the part i would not skip, because the wrist camera sees almost nothing except its own jaws, and a fit that looks perfect at one pose can be badly wrong at the next.
 
 ![rectifying reality into the simulator](blog-viz/out/fig3_calibration.png)
 
-the figure is a check, not a claim. sim is rendered at the joint pose the real frames were captured at, and the cube and bin are stood where the rectified real frame says they are, un-projected onto the work surface. everything landing on top of everything is what says the mapping holds. it also shows the loose end: the overhead FOV was fitted against the rig, the wrist's is inherited from the MJCF twin, so its objects sit a little large.
+i treat that figure as a check rather than a claim, so sim is rendered at the exact joint pose the real frames were captured at, and the cube and bin are stood wherever the rectified real frame says they are, recovered by un-projecting them back onto the work surface. the arm and the objects and the frame extrusions all landing on top of each other is what tells me the mapping holds, and it also shows me the one loose end i have left: the overhead camera's field of view was fitted against the rig while the wrist's is still inherited from the MJCF twin, which is why its objects sit slightly too large.
 
-**colours and lighting.** sim's linear base colours are picked to land on the real ones under sim's own lighting. nothing is pure black or pure white: a pure black object returns no light and renders as a flat silhouette, a pure white one clips under the softbox. the shadow-casting key light is off, since the real lightbox produces no directional shadow at all, only contact darkening at an object's base. a cast shadow in sim was an artifact for the policy to key on.
+**colours and lighting.** the linear base colours in sim are picked so they land on the real ones under sim's own lighting, and nothing in the scene is ever pure black or pure white, since a pure black object returns no light and renders as a flat silhouette with no shape left in it while a pure white one clips under the softbox and loses its edges the same way. the shadow-casting key light is switched off entirely, because the real lightbox throws no directional shadow at all, only a little contact darkening at the base of an object, and a cast shadow in sim is just one more artifact for the policy to key on.
 
-**speed.** the STS3215 servos are slow, especially on the rail. a policy trained to command motion the hardware cannot track winds its target ahead of the arm, which overshoots and oscillates. so we measured: drive each joint to its limit and read the achieved speed off the observation stream. the arm manages 29 to 34 deg/s, the rail about 7 cm/s. sim's per-step deltas come straight from those, 0.05 rad and 7 mm at 10 hz.
+**speed.** the STS3215 servos are slow, the rail especially, and a policy trained to command motion the hardware cannot actually track will wind its target up ahead of the arm until the arm overshoots and starts oscillating. so i measured what the real thing does, driving each joint to its limit and reading the achieved speed straight off the observation stream, which came out at 29 to 34 deg/s on the arm and about 7 cm/s on the rail, and sim's per-step deltas come from exactly those numbers, 0.05 rad and 7 mm per step at 10 hz. worth saying that speed is enforced by the action space rather than by torque, since 3 N·m against the servo's damping would reach something like 280 deg/s, an order of magnitude past anything the real arm does.
 
-speed is enforced by the action space, not by torque. 3 N·m against the servo's damping reaches around 280 deg/s, an order of magnitude past the real arm.
-
-**torque.** 3 N·m is where the servos stall, so that is the force limit in sim. an over-powered sim arm muscles through imprecise grasps and leans on the work surface, neither of which transfers. at the real stall torque the top-down grasp gets easier: a weak arm settles onto the cube instead of slamming into it.
+**torque.** 3 N·m is where those servos stall, so that is what each joint's force limit is set to in sim. an over-powered sim arm learns to muscle its way through an imprecise grasp and to lean on the work surface, and neither of those transfers, because the real servo simply stalls instead. at the real stall torque the low top-down grasp actually gets easier, since a weak arm settles onto the cube rather than slamming into it and bouncing off.
 
 ## domain randomize
 
-everything above centres the distribution. randomization gives it width, so that reality is one more sample from it rather than a point outside it.
+alignment centres the distribution and randomization is what gives it width, so that reality reads as one more sample out of it rather than a point sitting outside it.
 
 ![domain randomization draws](blog-viz/out/fig6_domain_randomization.png)
 
@@ -145,9 +157,9 @@ everything above centres the distribution. randomization gives it width, so that
 | colour jitter       | brightness/contrast/saturation 0.3, hue 0.05, per camera               |
 | sensor realism      | gamma 0.7 to 1.4, ±10% white balance, noise, blur, a compression proxy |
 
-camera pose and FOV are drawn when the scene is built rather than every episode, since they are properties of a rig and not of a moment.
+camera pose and FOV are drawn once when the scene is built rather than every episode, since those are properties of a rig and not of a moment.
 
-object colour is deliberately not randomized. it costs sample efficiency, and there is exactly one real rig whose cube and bin are a known blue and yellow. so we match instead, and the policy gets colour as a reliable cue. how heavily an encoder leans on that cue turns out to matter enormously.
+the one thing i deliberately leave alone is the colour of the task objects. randomizing it costs real sample efficiency, and there is exactly one physical rig whose cube and bin are a known blue and a known yellow, so i match them instead and let the policy treat colour as a cue it can rely on. how heavily a given encoder ends up leaning on that cue turns out to matter enormously, which is where the rest of this article goes.
 
 # improving upon prior work
 
@@ -188,6 +200,10 @@ it stays frozen on purpose. fine-tuning it on sim renders would just re-teach it
 the middle column is the reason to bother. the same frozen backbone on a sim render and on a rectified real frame, both painted by a single shared PCA so the colours are comparable rather than each image being flattered by its own projection. the surface, the arm and the frame edges take the same colours in both worlds, and we did not have to train for it.
 
 the mistake to avoid is treating DINOv2 like a CNN, flattening its output into one vector and moving on. it does not hand you a feature image, it hands you tokens. at 168 px, twelve of its 14-pixel patches a side, each camera is a 12×12 grid of 384-dim patch tokens, 288 for the pair. so the head consumes tokens: both grids go in jointly with a learned per-camera embedding, self-attention runs over the sequence, and a learned readout token collects the answer. this follows the [Patch Policy](#) recipe, whose claim is exactly that dense representations are what embodied control needs.
+
+![dinov2 features, wrist camera](blog-viz/out/fig8_dino_features_wrist.png)
+
+the wrist view is worth its own figure because it is a different kind of evidence. the overhead camera shows the backbone agreeing about a scene, while the wrist camera sees almost nothing except its own gripper, so it shows the backbone agreeing about the tool, which is what the grasp actually depends on.
 
 that is testable rather than believable, so i built the control. `dino_global` is the same frozen backbone at the same resolution with the same head width and update ratio, differing in one thing: the patch grid is collapsed to one vector per camera before the head sees it, either the CLS token or the mean over patches. 288 tokens against 2.
 
@@ -252,9 +268,9 @@ flowchart TD
 
 the bridge itself is thin, so the network's tensors never leave sim space: radians to degrees for the arm, metres to a normalized 0-to-100 position for the rail. one joint, `wrist_roll`, carries a measured 90° offset because its calibrated zero is not the URDF zero. everything else is identity, checked against a live arm rather than assumed.
 
-now, back to that sentence about actions being velocities. sim integrates one every step, so deploy has to keep applying an action every tick until a new one replaces it. the first version applied each action once and froze the target, and the arm stalled between decisions.
+back to actions being velocities. sim integrates one every step, so deploy keeps applying an action every tick until a new one replaces it.
 
-the mirror problem is that the sim arm reaches its target within a step and the real arm lags. if the target keeps advancing while the arm is behind, it winds up, and by the time the jaw closes the arm has sailed past the cube. the fix is a lag budget: the target only advances while every gated joint is within a few action steps of its measured pose, and the same threshold gates the next decision. it is a velocity-clamped ramp rather than a stopwatch, and it trades directly against speed.
+the real arm lags its target where the sim arm does not, so a target left to advance freely winds up, and the jaw closes after the arm has already gone past the cube. the fix is a lag budget: the target only advances while every gated joint is within a few action steps of its measured pose, and the same threshold gates the next decision. it trades directly against speed.
 
 | budget | decisions/s | rail speed | 0.49 m traverse |
 | ------ | ----------- | ---------- | --------------- |
@@ -275,17 +291,19 @@ with hindsight the explanation is in the squint figure. at 32 px the real cube i
 
 the dense grid keeps both, and it is the only one of the four with enough left over to absorb the difference between a render and a rectified photograph of a room.
 
-so the simulation number was not the thing to optimize. an encoder that reaches 0.71 in sim and zero on the robot is not eighty percent as good as one that reaches 0.88 and works.
-
 > _closer clip pending: a continuous real rollout, no human in the loop._
 
 # takeaway
 
 this is just a simple proof of concept (which is reliable and reproducible), it took me 1 week for the rl env and another to successfully adapt squint and more to the rl environment and to real life.
 
-the encoder turned out to be a sim2real decision rather than an accuracy decision. four learned the task, one transferred, and the sim success rate barely hinted at which. what mattered was whether the representation keeps _where things are_ or only _what is present_.
+some learnings as of now:
 
-and suspect the reward before the architecture. five runs and three seeds at exactly zero were not an encoder problem.
+- there is nothing i can do in sim to reliably compensate for how crap the sts3215 response is. it just sucks. i can throw a bunch of domain randomization at it, but for the love of god, i don't want to do it like that.
+- patch policy greatly improves policy performance. global mean and cls token cannot compare, in sim or in real. i spent a good amount of time trying to figure out a way there and then the paper dropped and i was like this is it.
+- visual is one thing, matching control behaviors and system delay is a whole other problem set, which i have not solved.
+
+so the simulation number was never the thing to optimize. an encoder that reaches 0.71 in sim and zero on the robot is not eighty percent as good as one that reaches 0.88 and works.
 
 rl is more than just picking and placing stuff. since this is visual and proprio only, the hardest problem is now engineering the reward function.
 
