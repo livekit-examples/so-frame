@@ -54,18 +54,14 @@ def main():
         env.close()
 
     style.apply()
-    fig = plt.figure(figsize=(13.0, 4.6))
+    fig = plt.figure(figsize=(13.0, 3.9))
     left = 0.045
-    gs = fig.add_gridspec(2, DRAWS + 1, left=left, right=0.99, top=0.70, bottom=0.10,
-                          wspace=0.035, hspace=0.06)
+    gs = fig.add_gridspec(2, DRAWS + 1, left=left, right=0.99, bottom=0.03,
+                          wspace=0.035, hspace=0.06,
+                          top=style.content_top(fig, headings=True))
 
-    style.title_block(
-        fig,
-        "Reality should be one more draw from the training distribution",
-        "Lighting, PD gains, joint-read noise, camera pose and FOV, colour, gamma, white balance, "
-        "sensor noise and a compression proxy, all resampled.",
-        left=left,
-    )
+    style.title_block(fig, "Wrist and overhead views across domain-randomization draws", left=left)
+
 
     for col, (wrist, overhead) in enumerate(cols):
         for row, img in enumerate((wrist, overhead)):
@@ -80,14 +76,6 @@ def main():
                 style.panel_title(ax, "off" if col == 0 else f"draw {col}",
                                   color=style.INK if col == 0 else style.FAINT)
 
-    style.footnote(
-        fig,
-        "Colour randomization of the objects themselves is deliberately off: there is one real rig "
-        "and its cube and bin are a known blue and yellow, so those are matched rather than "
-        "randomized,\nand the policy gets to spend its capacity elsewhere. Ranges live in "
-        "envs/base_random_env.py and envs/pick_place.py.",
-        left=left,
-    )
     return fig
 
 

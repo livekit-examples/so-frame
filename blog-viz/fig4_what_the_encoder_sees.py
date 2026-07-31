@@ -56,47 +56,45 @@ def main():
     v32 = sc.squint(v128, k=4)
 
     style.apply()
+    # Three stacked bands of text above the panels: the title, then the encoder each pair of
+    # panels belongs to, then each panel's own resolution. They need room, hence the low `top`.
     fig = plt.figure(figsize=(12.4, 5.6))
     left = 0.055
-    gs = fig.add_gridspec(1, 4, left=left, right=0.985, top=0.79, bottom=0.13, wspace=0.055)
+    gs = fig.add_gridspec(1, 4, left=left, right=0.985, bottom=0.03, wspace=0.055,
+                          top=style.content_top(fig, headings=True, groups=True))
 
-    style.title_block(
-        fig,
-        "The same scene, as each encoder receives it",
-        "A 20 mm cube on a 710 mm workspace. What survives the downsample decides what the policy "
-        "can possibly learn to aim at.",
-        left=left,
-    )
+    style.title_block(fig, "Overhead camera view at each encoder's input resolution", left=left)
+
+    # Name the encoder over the panels it consumes, so a panel is never just a resolution.
+    for label, (a, b) in (("squint CNN", (0, 1)), ("DINOv2 heads", (2, 3))):
+        x0 = gs[0, a].get_position(fig).x0
+        x1 = gs[0, b].get_position(fig).x1
+        text_y, rule_y = style.group_label_y(fig)
+        fig.text((x0 + x1) / 2, text_y, label, ha="center", va="bottom",
+                 fontsize=style.T_LABEL, color=style.INK, fontweight="bold")
+        fig.add_artist(plt.Line2D([x0, x1], [rule_y, rule_y], transform=fig.transFigure,
+                                  color=style.AXIS, lw=1.0))
+
 
     panels = [
-        (sc.blow_up(v128, DISPLAY), "128 px render", "what the squint CNN renders", None),
-        (sc.blow_up(v32, DISPLAY), "32 px, area-averaged", "what the squint CNN is fed", None),
-        (sc.blow_up(v168, DISPLAY), "168 px render", "what the DINOv2 heads are fed", None),
-        (sc.blow_up(v168, DISPLAY), "168 px, 12 × 12 patches",
-         "144 tokens per camera, 288 for the stack", 12),
+        (sc.blow_up(v128, DISPLAY), "128 px render", None),
+        (sc.blow_up(v32, DISPLAY), "32 px, area-averaged", None),
+        (sc.blow_up(v168, DISPLAY), "168 px render", None),
+        (sc.blow_up(v168, DISPLAY), "168 px, 12 × 12 patches", 12),
     ]
 
-    for i, (img, heading, caption, grid) in enumerate(panels):
+    for i, (img, heading, grid) in enumerate(panels):
         ax = fig.add_subplot(gs[i])
         ax.imshow(img, interpolation="nearest")
         if grid:
             patch_grid(ax, grid, DISPLAY, style.BLUE)
         style.frame_image(ax)
         style.panel_title(ax, heading, color=style.INK)
-        ax.set_xlabel(caption, fontsize=style.T_FOOT, color=style.FAINT, labelpad=7)
 
         # Ring the cube in every panel, so the eye can follow the one object that disappears.
         ax.add_patch(Circle((cube_frac[0] * DISPLAY, cube_frac[1] * DISPLAY),
                             DISPLAY * 0.055, fill=False, ec=style.ORANGE, lw=1.6))
 
-    style.footnote(
-        fig,
-        "Rendered through the training env on the cpu backend, objects at fixed poses for the "
-        "comparison. Cube blue and bin yellow is --object_colors distinct,\nwhich every run in "
-        "this post used. The cube covers a 5 × 5 block at 128 px and two pixels at 32, where hue "
-        "is the only cue the CNN has left.",
-        left=left,
-    )
     return fig
 
 

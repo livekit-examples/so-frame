@@ -49,22 +49,16 @@ def rolling(y, n=SMOOTH):
 
 def main():
     style.apply()
-    fig = plt.figure(figsize=(12.6, 5.5))
+    fig = plt.figure(figsize=(12.6, 4.8))
     left, right = 0.075, 0.985
     gs = fig.add_gridspec(1, 2, width_ratios=[1.55, 1.0], wspace=0.16,
-                          left=left, right=right, top=0.76, bottom=0.13)
+                          left=left, right=right, bottom=0.15,
+                          top=style.content_top(fig))
     ax_a, ax_b = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
 
-    style.title_block(
-        fig,
-        "The dense patch grid is what learns the task",
-        "Evaluation success over training, 35 held-out episodes per point. Same task, reward, "
-        "replay retention and step budget throughout.",
-        left=left,
-    )
+    style.title_block(fig, "Evaluation success rate vs environment steps, by vision encoder", left=left)
 
     # ---- Panel A: the four encoders, current recipe --------------------------------------
-    ax_a.set_title("Four encoders, current recipe", color=style.INK, pad=10)
     ends = []
     for run, key, label in CURRENT:
         x, y = series(run)
@@ -97,7 +91,6 @@ def main():
                   va="center", ha="left", fontweight="bold")
 
     # ---- Panel B: the CNN either side of the recipe change --------------------------------
-    ax_b.set_title("The same CNN, before and after the recipe change", color=style.INK, pad=10)
     for run in PREVIOUS:
         x, y = series(run)
         ax_b.plot(x, y, color=style.MUTED, lw=1.8, alpha=0.6, zorder=2)
@@ -106,13 +99,8 @@ def main():
               path_effects=style.RELIEF[style.GOLD])
     ax_b.text(12.2, rolling(y)[-1], "after", color=style.GOLD, fontsize=style.T_TICK,
               va="center", ha="left", fontweight="bold")
-    ax_b.annotate(
-        "before: five runs, three of them\nseparate seeds, never one placement",
-        xy=(9.4, 0.0), xytext=(9.0, 0.13), color=style.MUTED, fontsize=style.T_TICK,
-        ha="center", va="bottom",
-        arrowprops=dict(arrowstyle="-", color=style.MUTED, lw=0.9, alpha=0.8,
-                        shrinkA=2, shrinkB=3),
-    )
+    ax_b.text(9.2, 0.045, "5 runs, previous recipe", color=style.MUTED,
+              fontsize=style.T_TICK, ha="center", va="bottom")
 
     for ax, xmax in ((ax_a, 15.0), (ax_b, 14.2)):
         style.clean_axes(ax)
@@ -126,14 +114,6 @@ def main():
     ax_b.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax_b.set_yticklabels([])
 
-    style.footnote(
-        fig,
-        "Faint line: raw evaluation, a multiple of 1/35. Bold: 3-point rolling mean. "
-        "Dot: the first evaluation that placed a cube.  "
-        "Left runs: v4-dino, v5-dino-global-mean, v5-dino-global-cls, v4-squint. "
-        "Right: v1-squint, v2-squint seeds 1-3, v3-squint.",
-        left=left,
-    )
     return fig
 
 

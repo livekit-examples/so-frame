@@ -32,18 +32,12 @@ BAR_W = 0.52
 
 def main():
     style.apply()
-    fig = plt.figure(figsize=(9.8, 6.6))
+    fig = plt.figure(figsize=(9.0, 5.4))
     left = 0.075
-    ax = fig.add_axes([left, 0.115, 0.965 - left, 0.63])
+    ax = fig.add_axes([left, 0.10, 0.965 - left, 0.76])
 
-    style.title_block(
-        fig,
-        "A reward you can only climb",
-        "Each stage is a fixed rung plus bounded shaping, and every stage's maximum sits strictly "
-        "below the next stage's rung.\nLetting go of the cube is not a bonus, it is the only way "
-        "to score more than holding it.",
-        left=left, gap=0.048,
-    )
+    style.title_block(fig, "Reward value by task stage, with each stage's shaping range", left=left)
+
 
     for i, (label, floor, head, note) in enumerate(STAGES):
         top = floor + head
@@ -63,10 +57,8 @@ def main():
                     color=style.ORANGE, lw=5.0, solid_capstyle="round", zorder=3)
         ax.text(i, floor - 0.30, f"{floor:g}", ha="center", va="top",
                 fontsize=style.T_TICK, color=style.INK, fontweight="bold")
-        ax.text(i, -1.15, label.replace("\n", " "), ha="center", va="top",
+        ax.text(i, -1.15, label, ha="center", va="top", linespacing=1.45,
                 fontsize=style.T_LABEL, color=style.INK)
-        ax.text(i, -1.95, note, ha="center", va="top", fontsize=style.T_FOOT,
-                color=style.FAINT, linespacing=1.5)
 
     # The invariant, drawn: the gap between one stage's ceiling and the next stage's floor.
     for i in range(len(STAGES) - 1):
@@ -79,7 +71,7 @@ def main():
                 fontsize=style.T_FOOT, color=style.FAINT)
 
     ax.set_xlim(-0.62, len(STAGES) - 0.30)
-    ax.set_ylim(-4.3, 11.2)
+    ax.set_ylim(-2.6, 11.2)
     ax.set_xticks([])
     ax.set_yticks([0, 2, 4, 6, 8, 10])
     ax.set_ylabel("reward")
@@ -89,19 +81,12 @@ def main():
 
     # Legend: two mark meanings, so the colour is never carrying identity on its own.
     handles = [
-        plt.Line2D([], [], marker="s", ls="", ms=9, color=style.BLUE, label="rung + shaping range"),
+        plt.Line2D([], [], marker="s", ls="", ms=9, color=style.BLUE, label="rung + shaping"),
         plt.Line2D([], [], marker="s", ls="", ms=9, color=style.ORANGE, label="flat rung"),
     ]
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.005, 0.90), frameon=False, fontsize=style.T_TICK,
               labelcolor=style.MUTED, handletextpad=0.5, borderaxespad=0.2)
 
-    style.footnote(
-        fig,
-        "Constants read from rl/environments/maniskill/src/soframe_rl_maniskill/config.py.\n"
-        "No penalty terms: speed is capped by the delta action space, torque by the servo's 3 N·m "
-        "stall. Nothing to trade against the task.",
-        left=left,
-    )
     return fig
 
 

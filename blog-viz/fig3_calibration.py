@@ -22,18 +22,8 @@ import numpy as np
 import sim_common as sc
 import style
 
-COLS = ("sim render", "raw frame, as published", "rectified", "blended")
+COLS = ("sim render", "raw frame", "rectified", "blended")
 
-
-def mapping_note(m):
-    """The mapping's fitted values, as one line."""
-    if not m:
-        return "no mapping fitted: plain resize (out of distribution)"
-    bits = [f"rot90 {m['rot90']}", f"angle {m['angle_deg']:g}°",
-            f"k1 {m['k1']:g}", f"k2 {m['k2']:g}", f"focal {m['focal_px']:g}px",
-            f"zoom {m['zoom']:g}", f"offset {m['offset_x']:g}, {m['offset_y']:g}",
-            f"gamma {m['gamma']:g}"]
-    return "   ".join(bits)
 
 
 def main():
@@ -64,19 +54,14 @@ def main():
     sim = sc.sim_views(u)
 
     style.apply()
-    fig = plt.figure(figsize=(12.2, 7.4))
+    fig = plt.figure(figsize=(12.2, 6.2))
     left = 0.055
-    gs = fig.add_gridspec(2, 4, left=left, right=0.985, top=0.775, bottom=0.10,
-                          wspace=0.06, hspace=0.30)
+    gs = fig.add_gridspec(2, 4, left=left, right=0.985, bottom=0.03,
+                          wspace=0.06, hspace=0.30,
+                          top=style.content_top(fig, headings=True))
 
-    style.title_block(
-        fig,
-        "Reality is rectified into the simulator, not the other way round",
-        "The real cameras are 120° wide-angle modules. Rather than teach the renderer to fake a "
-        "cheap lens, every real frame is undistorted,\nrotated and cropped to exactly the view the "
-        "policy trained on. The same mapping file is replayed on every deploy tick.",
-        left=left, gap=0.045,
-    )
+    style.title_block(fig, "Sim render, raw capture, rectified capture and blend, per camera", left=left)
+
 
     for row, cam in enumerate(sc.CAMERA_ORDER):
         raw = sc.real_frame(cam)
@@ -95,22 +80,7 @@ def main():
                         rotation=90, ha="right", va="center", fontsize=style.T_LABEL,
                         color=style.INK)
 
-        # The fit, under the row it produced.
-        ax_note = fig.add_subplot(gs[row, 1:])
-        ax_note.axis("off")
-        ax_note.text(0.0, -0.10, mapping_note(maps.get(cam)), transform=ax_note.transAxes,
-                     ha="left", va="top", fontsize=style.T_FOOT, color=style.FAINT)
 
-    pose = ", ".join(f"{k} {v:+.2f}" for k, v in ref["sim_qpos"].items())
-    style.footnote(
-        fig,
-        f"Captured off the live rig on {ref['captured_at'][:10]}, sim rendered at the same joint "
-        f"pose ({pose}),\nwith the cube and bin stood where the rectified overhead frame says the "
-        "real ones are. The overhead camera's FOV was fitted against the rig; the wrist's is "
-        "inherited from the MJCF twin,\nwhich is why its objects sit a little large and its blend "
-        "is the looser of the two.",
-        left=left,
-    )
     env.close()
     return fig
 

@@ -78,19 +78,14 @@ def main():
     pca_sim, pca_real = proj[: GRID * GRID], proj[GRID * GRID:]
 
     style.apply()
-    fig = plt.figure(figsize=(10.4, 6.2))
+    fig = plt.figure(figsize=(10.4, 5.4))
     left = 0.065
-    gs = fig.add_gridspec(2, 3, left=left, right=0.90, top=0.755, bottom=0.10,
-                          wspace=0.07, hspace=0.16, width_ratios=[1, 1, 1.15])
+    gs = fig.add_gridspec(2, 3, left=left, right=0.90, bottom=0.03,
+                          wspace=0.07, hspace=0.16, width_ratios=[1, 1, 1.15],
+                          top=style.content_top(fig, headings=True))
 
-    style.title_block(
-        fig,
-        "The frozen features land on the same structures in both worlds",
-        "DINOv2 ViT-S/14 patch tokens for a sim render and the matching rectified real frame, "
-        "painted by one shared 3-component PCA.\nColour means the same thing in both columns, "
-        "because the projection is the same.",
-        left=left,
-    )
+    style.title_block(fig, "DINOv2 patch tokens for sim and real frames, shared PCA projection", left=left)
+
 
     rows = [("simulation", over_sim, pca_sim), ("real, rectified", over_real, pca_real)]
     for r, (label, img, pca) in enumerate(rows):
@@ -119,13 +114,6 @@ def main():
         if r == 0:
             style.panel_title(ax, "mean-pooled to one vector", color=style.INK)
 
-    style.footnote(
-        fig,
-        "Left to right is what the two DINOv2 heads are handed. dino_patch attends over the middle "
-        "column, 144 tokens per camera. dino_global gets the right one: 384 numbers,\nsame frozen "
-        "features, no positions left in them. The backbone is the only part of the deployed policy that ever saw a real photograph during its own training.",
-        left=left,
-    )
     return fig
 
 

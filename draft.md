@@ -44,11 +44,15 @@ the task for the robot is to pick up a cube on the work surface and place it in 
 
 both are printed from the same CAD the simulation loads its meshes from, and the exporter asserts the dimensions against the constants the environment uses, so changing the CAD without changing the task fails loudly instead of quietly.
 
-in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 258 × 710 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
+in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 458 × 728 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
 
 ![the spawn zone, and episodes drawn from it](blog-viz/out/fig5_spawn_zone.png)
 
-the zone is not a design choice, it is a measurement: the intersection of where the arm can reach top-down, what the overhead camera can see, and where the bin actually settles on the panels. the policy is vision only, so anything outside the camera's footprint is not hard to learn, it is unlearnable. it is also much longer along the rail than across it, which means most spawns put the two objects too far apart to reach without driving the rail.
+the zone is not a design choice, it is a measurement: it is exactly what the overhead camera sees, the largest rectangle inside its footprint, checked at both the cube's height and the taller bin's rim. the policy is vision only, so a spawn outside that is not a hard episode, it is an unobservable one.
+
+what it is deliberately *not* clipped to is the arm's reach. top-down reach covers only about 55% of the zone's x, all of it lost on the far side where the camera sees panel the arm cannot cross, so roughly half the spawns are unreachable by construction. that caps success below 1.0 on purpose, and it means a number from this environment is not comparable to one from a zone drawn inside the reach envelope. the runs below predate the change and used the older 258 × 710 mm zone, which was clipped to reach.
+
+it is also much longer along the rail than across it, so most spawns put the two objects too far apart to reach without driving the rail.
 
 the task is considered successful if all of the following hold: the cube settles inside the bin, the cube and the robot are both static, and the robot touches neither the cube nor the bin. episodes are capped at 200 steps, each step one action. the robot is controlled at 10 hz, so each episode has 20 seconds. that budget is sized against rail travel, which dominates everything else: park to cube to bin costs about 110 steps at a far spawn.
 

@@ -47,32 +47,29 @@ def main():
     gaps = np.linalg.norm(cubes - bins_, axis=1)
 
     style.apply()
-    fig = plt.figure(figsize=(12.0, 5.8))
+    fig = plt.figure(figsize=(10.6, 4.9))
     left = 0.06
-    gs = fig.add_gridspec(1, 2, left=left, right=0.975, top=0.77, bottom=0.17,
-                          width_ratios=[1.0, 1.30], wspace=0.14)
+    gs = fig.add_gridspec(1, 2, left=left, right=0.975, bottom=0.16,
+                          width_ratios=[1.0, 1.30], wspace=0.14,
+                          top=style.content_top(fig, headings=True))
 
-    style.title_block(
-        fig,
-        "One zone, both objects, every episode",
-        "The cube and the bin are drawn from the same 258 × 710 mm region: the measured "
-        "intersection of top-down graspable reach,\nthe overhead camera's footprint, and where "
-        "the bin physically settles on the panels.",
-        left=left,
-    )
+    style.title_block(fig, "Spawn zone in the overhead view, and sampled object positions", left=left)
+
 
     # ---- The zone, seen by the camera that constrains it ---------------------------------
     ax = fig.add_subplot(gs[0])
     ax.imshow(view)
     ax.add_patch(plt.Polygon(uv, closed=True, fill=False, ec=style.ORANGE, lw=2.0, zorder=3))
     ax.fill(uv[:, 0], uv[:, 1], color=style.ORANGE, alpha=0.10, zorder=2)
+    # The zone runs past the bottom of the frame, and drawing it autoscales the axes to follow.
+    # Clamp back to the image so the panel stays a picture rather than a picture plus empty space.
+    ax.set_xlim(0, view.shape[1])
+    ax.set_ylim(view.shape[0], 0)
     style.frame_image(ax)
-    style.panel_title(ax, "the zone, in the overhead camera's view", color=style.INK)
-    ax.set_xlabel("anything outside this is unlearnable: the policy is vision-only",
-                  fontsize=style.T_FOOT, color=style.FAINT, labelpad=7)
+    style.panel_title(ax, "overhead view", color=style.INK)
 
     # ---- The spawns themselves -----------------------------------------------------------
-    # Plotted with the rail axis horizontal: the zone is 710 mm along the rail against 258 mm
+    # Plotted with the rail axis horizontal: the zone is 728 mm along the rail against 458 mm
     # across it, so laid out this way it fills the panel instead of a tall sliver of it.
     ax2 = fig.add_subplot(gs[1])
     ax2.add_patch(Rectangle((cy - hy, cx - hx), 2 * hy, 2 * hx, fill=True,
@@ -81,24 +78,20 @@ def main():
                 edgecolor=style.MUTED, linewidth=0.4, alpha=0.75, zorder=2, label="bin")
     ax2.scatter(cubes[:, 1], cubes[:, 0], s=11, marker="o", facecolor=style.CUBE,
                 edgecolor="none", alpha=0.85, zorder=3, label="cube")
-    ax2.set_aspect("equal")
+    # Equal aspect, but with the limits pinned to the zone plus a small margin: left to itself it
+    # pads whichever axis the panel shape leaves slack in, which reads as zone that isn't there.
+    ax2.set_aspect("equal", adjustable="box")
     ax2.set_xlabel("along the rail (m)")
     ax2.set_ylabel("across it (m)")
     style.clean_axes(ax2, grid_axis=None)
     ax2.legend(loc="lower left", bbox_to_anchor=(0.0, -0.34), ncol=2, frameon=False,
                fontsize=style.T_TICK, labelcolor=style.MUTED, handletextpad=0.4, borderaxespad=0.0)
-    style.panel_title(ax2, f"{EPISODES} episodes, sampled by the env's own reset", color=style.INK)
+    style.panel_title(ax2, f"{EPISODES} episodes", color=style.INK)
+    # Limits last: equal aspect will otherwise pad whichever axis the panel shape leaves slack in,
+    # which draws zone that is not there. Both axes are metres, so the aspect has to stay honest.
+    ax2.set_xlim(cy - hy - 0.02, cy + hy + 0.02)
+    ax2.set_ylim(cx - hx - 0.02, cx + hx + 0.02)
 
-    style.footnote(
-        fig,
-        f"The bin is placed first and the cube rejection-sampled until its footprint clears the "
-        f"bin's by {cfg.SPAWN_MIN_GAP * 1000:.0f} mm; the closest pair in this sample is "
-        f"{gaps.min() * 1000:.0f} mm centre to centre. Each object is inset from the zone edge by "
-        f"its own rotated footprint,\nwhich is why the bin's cloud stops further in than the "
-        f"cube's. The arm stands in the zone too, so it occludes the cube in a minority of resets "
-        f"until the gantry moves.",
-        left=left,
-    )
     return fig
 
 

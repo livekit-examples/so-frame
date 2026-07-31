@@ -125,16 +125,49 @@ def apply():
     })
 
 
-def title_block(fig, title, subtitle=None, *, left, top=0.955, gap=0.052):
-    """Left-align a title and optional subtitle to the `left` rail (figure fraction).
+# Vertical space above the plotting area, in INCHES rather than figure fractions, so a short
+# figure and a tall one get the same gap instead of the same proportion. Hand-tuning `top=` per
+# figure is what produced titles sitting on top of panels.
+_TITLE_INSET_IN = 0.30    # top of the page to the title's baseline area
+_TITLE_BAND_IN = 0.62     # total reserved for the title alone
+_HEADING_BAND_IN = 0.30   # extra, when panels carry their own headings
+_GROUP_BAND_IN = 0.42     # extra, when panels are grouped under a spanning label
+
+
+def title_block(fig, title, subtitle=None, *, left):
+    """Left-align a title (and optional subtitle) to the `left` rail.
 
     Pass the same `left` the plotting area uses, so text and plot share one vertical guide.
+    Position is measured down from the top of the figure in inches, so it does not drift with
+    figure height.
     """
+    h = fig.get_figheight()
+    top = 1.0 - _TITLE_INSET_IN / h
     fig.text(left, top, title, ha="left", va="top", fontsize=T_TITLE, fontweight="bold", color=INK)
     if subtitle:
+        gap = 0.26 / h
         fig.text(left, top - gap, subtitle, ha="left", va="top", fontsize=T_SUB, color=MUTED)
         return top - gap
     return top
+
+
+def content_top(fig, *, headings=False, groups=False):
+    """The `top` a gridspec should use to clear the title, and whatever sits under it.
+
+    `headings` if the panels carry their own titles, `groups` if a spanning label sits above those.
+    """
+    band = _TITLE_BAND_IN
+    band += _HEADING_BAND_IN if headings else 0.0
+    band += _GROUP_BAND_IN if groups else 0.0
+    return 1.0 - band / fig.get_figheight()
+
+
+def group_label_y(fig):
+    """Figure fraction for a label spanning a group of panels, and for its underline."""
+    h = fig.get_figheight()
+    band = _TITLE_BAND_IN + _HEADING_BAND_IN + _GROUP_BAND_IN
+    text_y = 1.0 - (band - 0.30) / h
+    return text_y, text_y - 0.055 / h
 
 
 def footnote(fig, text, *, left, y=0.02):
@@ -158,6 +191,10 @@ def frame_image(ax, label=None, *, color=None):
     """Style an image panel: no ticks, a thin warm border, an optional caption under it."""
     ax.set_xticks([])
     ax.set_yticks([])
+    # An equal-aspect image shrinks its own axes to fit and centres the result in the cell, so a
+    # 4:3 panel beside square ones drops its heading half an inch lower than theirs. Anchoring
+    # north puts every panel's top edge, and therefore every heading, on one line.
+    ax.set_anchor("N")
     for s in ax.spines.values():
         s.set_visible(True)
         s.set_edgecolor(AXIS)
