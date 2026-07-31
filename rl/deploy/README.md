@@ -43,7 +43,6 @@ never opens a window can skip it.
 | `dino_patch` | `dino_patch_policy_ckpt.pt` | frozen DINOv2 patch tokens, res 168 |
 | `dino_global_mean` | `dino_global_mean_ckpt.pt` | one mean-pooled vector per camera |
 | `dino_cls` | `dino_cls_ckpt.pt` | one CLS vector per camera |
-| `v6_dino` | `v6_dino_ckpt.pt` | as `dino_patch`, trained on the widened spawn zone |
 
 That selects a *file*, not an architecture: the checkpoint still declares its own encoder,
 resolution, camera count and proprio layout (see [policy/](../policy/README.md)), and a file whose

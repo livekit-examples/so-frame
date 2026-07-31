@@ -64,8 +64,6 @@ CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
     "dino_patch":       ("dino_patch_policy_ckpt.pt", "dino_patch",  None),
     "dino_global_mean": ("dino_global_mean_ckpt.pt",  "dino_global", "mean"),
     "dino_cls":         ("dino_cls_ckpt.pt",          "dino_global", "cls"),
-    # v6_dino: same architecture as dino_patch, trained on the widened spawn zone.
-    "v6_dino":          ("v6_dino_ckpt.pt",           "dino_patch",  None),
 }
 
 # Joints the lag budget covers: everything but the gripper. A jaw closed on the object sits several
