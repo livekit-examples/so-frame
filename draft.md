@@ -48,7 +48,7 @@ three edges of that zone are the overhead camera's footprint, measured at both t
 
 the task is considered successful if all of the following hold: the cube settles inside the bin, the cube and the robot are both static, and the robot touches neither the cube nor the bin. episodes are capped at 200 steps, each step one action. the robot is controlled at 10 hz, so each episode has 20 seconds.
 
-the simulator we use is [ManiSkill3](https://github.com/haosulab/ManiSkill) from [Sapien](https://github.com/haosulab/SAPIEN). it is a popular framework with state of the art visual rendering, which is why i picked it, as we want to focus on visual learning instead of the state-based learning mostly used in locomotion. furthermore, ManiSkill's author has an [official implementation for sim2real on the so101](https://github.com/StoneT2000/lerobot-sim2real) which is of great reference.
+the simulator we use is [ManiSkill3](https://arxiv.org/abs/2410.00425) ([repo](https://github.com/haosulab/ManiSkill)) from [Sapien](https://github.com/haosulab/SAPIEN). it is a popular framework with state of the art visual rendering, which is why i picked it, as we want to focus on visual learning instead of the state-based learning mostly used in locomotion. furthermore, ManiSkill's author has an [official implementation for sim2real on the so101](https://github.com/StoneT2000/lerobot-sim2real) which is of great reference.
 
 # formalizing the problem
 
@@ -173,13 +173,13 @@ this leads us to [squint](https://arxiv.org/abs/2602.21203), which is a zero sho
 
 thanks to [pratham](https://x.com/PrathamJainAI/status/2076232338447724623) for introducing me to this method on his twitter thread and sharing his squint notes with me.
 
-the answer to the question above is both. squint is a visual Soft Actor-Critic, off-policy and entropy-regularized, so parallel simulation can fill a replay buffer fast while a learned critic squeezes many gradient updates out of every environment step. instead of the plain discounted return it maximizes return plus an entropy bonus,
+the answer to the question above is both. squint is a visual [Soft Actor-Critic](https://arxiv.org/abs/1801.01290), off-policy and entropy-regularized, so parallel simulation can fill a replay buffer fast while a learned critic squeezes many gradient updates out of every environment step. instead of the plain discounted return it maximizes return plus an entropy bonus,
 
 $$\pi^\star = \arg\max_\pi\ \mathbb{E}_\pi\!\Big[\textstyle\sum_t \gamma^t\big(r_t + \alpha\,\mathcal{H}(\pi(\cdot\mid o_t))\big)\Big], \qquad \gamma = 0.9$$
 
 which pays the policy to stay stochastic rather than collapse onto the first behavior that scores. the temperature $\alpha$ is auto-tuned so exploration fades on its own, and at deploy the actor is deterministic.
 
-there are three networks. a small conv stack over the two cameras stacked to H×W×6. an MLP actor that fuses the visual features with proprio. and a distributional critic: instead of a scalar Q-value each critic predicts a distribution over returns across 101 atoms spanning $[-20, 20]$, evenly spaced candidate returns with a probability on each. the Bellman target shifts every atom by $r + \gamma z_i$, projects it back onto the fixed grid, and the loss is a cross-entropy over a two-network ensemble. for a staged reward like ours this is much more stable than scalar Q-learning.
+there are three networks. a small conv stack over the two cameras stacked to H×W×6. an MLP actor that fuses the visual features with proprio. and a [distributional critic](https://arxiv.org/abs/1707.06887): instead of a scalar Q-value each critic predicts a distribution over returns across 101 atoms spanning $[-20, 20]$, evenly spaced candidate returns with a probability on each. the Bellman target shifts every atom by $r + \gamma z_i$, projects it back onto the fixed grid, and the loss is a cross-entropy over a two-network ensemble. for a staged reward like ours this is much more stable than scalar Q-learning.
 
 then the trick it is named for. the cameras render at 128×128 and are area-downsampled to 32×32 before the network sees them. the policy squints. this beats rendering natively at 32 because a native 32 px render point-samples the scene, so a small object flickers or vanishes between frames, while averaging a 4×4 block leaves a stable soft signal. and it is fast, a full run in well under two hours on one GPU.
 
@@ -193,7 +193,7 @@ hold that thought.
 
 ### 2. dinov2 encoder
 
-squint has a problem when going to higher resolution, which is that it focuses too much on unwanted visual artifacts such as shadows and wires. a CNN trained purely inside a simulator has never seen the real world, so it has no prior for what is signal and what is a rendering artifact. to improve upon this, i then switched the from-scratch CNN encoder for a [DINOv2](https://github.com/facebookresearch/dinov2) pre-trained encoder, ViT-S/14 with registers, trained self-supervised on real images at scale.
+squint has a problem when going to higher resolution, which is that it focuses too much on unwanted visual artifacts such as shadows and wires. a CNN trained purely inside a simulator has never seen the real world, so it has no prior for what is signal and what is a rendering artifact. to improve upon this, i then switched the from-scratch CNN encoder for a [DINOv2](https://arxiv.org/abs/2304.07193) pre-trained encoder, ViT-S/14 [with registers](https://arxiv.org/abs/2309.16588), trained self-supervised on real images at scale.
 
 it stays frozen on purpose. fine-tuning it on sim renders would just re-teach it the simulator's quirks and throw away the prior that motivated the swap.
 
