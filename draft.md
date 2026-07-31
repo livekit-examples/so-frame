@@ -175,7 +175,7 @@ But look at what squinting costs on this task.
 
 The cube is 20 mm on a 710 mm workspace. It covers a 5×5 block of the 128 px render, and **two pixels** of the 32 px squint. No shape, no edges, no orientation. The only property that survives is hue, which is why every run here paints the cube blue and the bin yellow instead of the black they are by default. At 32 px, colour is the only cue the CNN has.
 
-Squint was did not have good performance in sim, as mentioned in training section below, and had no transfer to real.
+Squint did not have good performance in sim, as mentioned in training section below, and had no transfer to real.
 
 ### 2. DINOv2 encoder
 
