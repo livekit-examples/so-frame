@@ -4,7 +4,7 @@ for the past months, we've been designing a cheap robot rig for benchmarking our
 
 while our benchmarking focus so far has been on training behavior cloning models and collecting data for them, it has always been a core question of mine (after hours of collecting data): "can't the robot self-learn these behaviors?"
 
-after all, we are doing very simple tasks such as picking and placing objects in a very controlled environment.
+i'm so tired of collecting data while our focus is on infra, and, after all, we are doing very simple tasks such as picking and placing objects in a very controlled environment.
 
 so as we released so-frame to the world, we also designed and released its digital twin, with the vision that we will train a rl model that reduces our need to collect data for the rig, be it rl from scratch or from prior demonstrations.
 
@@ -12,17 +12,13 @@ our aim is very simple: make sim2real work end to end, the same way our bc polic
 
 today, we got it to work reliably and this is a write-up on how we did it.
 
-i adapted squint, then diverged and swapped out the encoder to improve sim2real performance. that swap turned out to be the thing that decided it. four encoders learned the task in simulation. only one of them survived contact with the real robot.
-
 <!-- IMG 1 (hero): matched sim | real rollout. see blog-viz/README.md -->
 
 > _hero clip pending._
 
 # what is the environment?
 
-the so-frame's full description can be found [here](#).
-
-in short, the robot is an SO-101 5-DOF arm mounted on a linear rail, giving 7 actuated DOF total:
+our robot is an SO-101 5-DOF arm mounted on a linear rail, giving 7 actuated DOF total:
 
 - `dof_slider`, the rail (linear travel along the work surface)
 - `shoulder_pan`, `shoulder_lift`, `elbow_flex`, `wrist_flex`, `wrist_roll`, the arm
@@ -35,6 +31,8 @@ the arm and rail are bolted to a frame with a diffuse lightbox work surface (nea
 
 both are cheap camera modules, the specifications of which are not important to reproduction, as we built a tool that helps us align simulation cameras with real cameras, which will be mentioned later. the entire frame, arm, rail, cameras, and lightbox panels are one URDF, so the simulated twin and the real rig share the same kinematics and the same calibrated camera mounts (camera poses come from forward kinematics of the URDF links, not hand-measured offsets).
 
+we call this rig the so-frame and its full description can be found [here](#).
+
 # what is the task?
 
 the task for the robot is to pick up a cube on the work surface and place it in a bin.
@@ -42,19 +40,11 @@ the task for the robot is to pick up a cube on the work surface and place it in 
 - cube: 20 mm, ~3.2 g, blue.
 - bin: 100 mm square, 30 mm tall, 2 mm walls, so a 96 mm opening 28 mm deep. yellow.
 
-both are printed from the same CAD the simulation loads its meshes from, and the exporter asserts the dimensions against the constants the environment uses, so changing the CAD without changing the task fails loudly instead of quietly.
-
 in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 458 × 728 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
 
 ![the spawn zone, and episodes drawn from it](blog-viz/out/fig5_spawn_zone.png)
 
-the zone is not a design choice, it is a measurement: it is exactly what the overhead camera sees, the largest rectangle inside its footprint, checked at both the cube's height and the taller bin's rim. the policy is vision only, so a spawn outside that is not a hard episode, it is an unobservable one.
-
-what it is deliberately *not* clipped to is the arm's reach. top-down reach covers only about 55% of the zone's x, all of it lost on the far side where the camera sees panel the arm cannot cross, so roughly half the spawns are unreachable by construction. that caps success below 1.0 on purpose, and it means a number from this environment is not comparable to one from a zone drawn inside the reach envelope. the runs below predate the change and used the older 258 × 710 mm zone, which was clipped to reach.
-
-it is also much longer along the rail than across it, so most spawns put the two objects too far apart to reach without driving the rail.
-
-the task is considered successful if all of the following hold: the cube settles inside the bin, the cube and the robot are both static, and the robot touches neither the cube nor the bin. episodes are capped at 200 steps, each step one action. the robot is controlled at 10 hz, so each episode has 20 seconds. that budget is sized against rail travel, which dominates everything else: park to cube to bin costs about 110 steps at a far spawn.
+the task is considered successful if all of the following hold: the cube settles inside the bin, the cube and the robot are both static, and the robot touches neither the cube nor the bin. episodes are capped at 200 steps, each step one action. the robot is controlled at 10 hz, so each episode has 20 seconds.
 
 the simulator we use is ManiSkill3 from Sapien. it is a popular framework with state of the art visual rendering, which is why i picked it, as we want to focus on visual learning instead of the state-based learning mostly used in locomotion. furthermore, ManiSkill's author has an official implementation for sim2real on the so101 which is of great reference.
 
@@ -62,15 +52,17 @@ the simulator we use is ManiSkill3 from Sapien. it is a popular framework with s
 
 this part can be hard for some readers, as i'll formalize the RL environment mathematically as a Markov Decision Process. if you don't know what that is, i recommend watching [this video](#), as well as reading up on [this RL cheat sheet](#) from OpenAI.
 
-ours is really a POMDP, a partially observable one. the agent never sees the true state (object poses, physics parameters), only what the sensors let through. that is the two camera frames stacked on the channel axis, plus 14 numbers of proprioception:
+I like formalizing as it's easier for me to explain, aka it has the highest information density.
+
+If you have learned about MDP, our problem is a POMDP, a partially observable markov decision process. the agent never sees the true state (object poses, physics parameters), only what the sensors let through. This includes the two camera frames, plus 7 proprioceptive joint states and current commanded actions:
 
 $$o_t = \Big(\phi(\mathbf{X}_t),\ \big[\tilde{\mathbf{q}}_t,\ \mathbf{q}^{\text{tgt}}_t\big]\Big)$$
 
-$\phi$ is whatever the encoder does to the pixels before the policy sees them, and the difference between those choices is most of this article.
+$\phi$ is the encoder's preprocessing, and the choice of it is most of this article.
 
-$\tilde{\mathbf{q}}_t$ is the 7 measured joint positions with 5° of gaussian noise on each, to model real encoders.
+$\tilde{\mathbf{q}}_t$ is the 7 measured joint positions, $\mathcal{N}(0, \sigma_q^2)$ with $\sigma_q = 5°$ per joint to model real encoders.
 
-$\mathbf{q}^{\text{tgt}}_t$ is the running target, and it is worth explaining properly because it is the reason proprio is 14 numbers and not 7. the low-level controller is positional: it is always driving toward wherever the target currently sits, and the arm physically lags behind it. so two identical arm poses with different targets evolve completely differently over the next few steps. the measured pose alone is ambiguous and the problem stops being Markov. telling the policy both where the arm is and where it was last told to go fixes that. at deploy the inference loop maintains the same integrated target and sends it to the servos, so the meaning carries over one to one.
+$\mathbf{q}^{\text{tgt}}_t$ is the running controller target, and it is why proprio is 14 and not 7. the controller is positional and the arm lags it, so $\tilde{\mathbf{q}}_t$ alone is ambiguous: identical poses under different targets evolve differently, and the process is not Markov in the measurement. deploy integrates the same target, so the semantics transfer exactly.
 
 that layout is a contract, not a convention. the 14 fields and their order are measured off the live training env and written into the checkpoint, so deploy assembles its vector from that record instead of assuming a width.
 
@@ -106,30 +98,56 @@ there are no penalty terms. every limit that used to be one is structural now: s
 
 one last piece. carrying aims 5 cm above the bin rim, not at the floor. the opening is 96 mm and the jaw cannot swing open at depth inside it, so a policy shaped to insert deep becomes physically unable to let go. aiming high lets the jaw open, gives the arm margin to clear the wall, and lets gravity finish.
 
-# randomizing the environment
+# matching sim2real
 
-before we go on to what kind of rl method we use, i'd like to introduce domain randomization.
+a policy trained in one simulator learns that simulator: its lighting, its frictions, its camera pose. reality is then a distribution shift and the policy shatters.
 
-a policy trained in one simulator learns that simulator's quirks: its exact lighting, its exact friction, its exact camera pose. reality is then a distribution shift and the policy shatters. domain randomization is the standard fix. instead of training in one simulation you train across a distribution of them, and if it is wide enough, reality is just another sample.
+two things close it. align the real rig to sim, so the training distribution is centred where the robot actually is. randomize what varies between runs, so the policy never leans on any single draw.
 
-i think of the gap as two jobs. appearance matching makes sim look like the one real rig, and it gets its own section. robustness makes the policy not care how that rig differs from itself run to run. randomization is the second job.
+## real alignment to sim
+
+camera calibration is easy on so-frame. the camera poses are in the URDF and the rig is standardized, so sim already renders from where the real camera is bolted. what is left is the lens.
+
+the real modules are 120° wide-angle with barrel distortion; sim renders a pinhole. rather than teach the renderer to fake a cheap lens, we rectify reality into sim's geometry: undistort with a $k_1/k_2$ plus focal model, rotate (the overhead camera is mounted sideways), zoom and crop to sim's field of view, then correct colour with a per-channel gain and a gamma.
+
+<!-- IMG: screenshot of the calibration tool mid-fit. -->
+
+> _tool screenshot pending._
+
+the parameters come from a tool that drives the arm and renders the sim cameras live next to the rectified real feed, with a blend slider between them. it writes the same mapping file the deploy loop replays, so the frame the policy trained on and the frame it sees on the robot are formed by an identical transform. driving the arm while fitting is required rather than convenient: the wrist camera sees almost nothing but jaws, so a fit checked at one pose says nothing about the rest.
+
+![rectifying reality into the simulator](blog-viz/out/fig3_calibration.png)
+
+the figure is a check, not a claim. sim is rendered at the joint pose the real frames were captured at, and the cube and bin are stood where the rectified real frame says they are, un-projected onto the work surface. everything landing on top of everything is what says the mapping holds. it also shows the loose end: the overhead FOV was fitted against the rig, the wrist's is inherited from the MJCF twin, so its objects sit a little large.
+
+**colours and lighting.** sim's linear base colours are picked to land on the real ones under sim's own lighting. nothing is pure black or pure white: a pure black object returns no light and renders as a flat silhouette, a pure white one clips under the softbox. the shadow-casting key light is off, since the real lightbox produces no directional shadow at all, only contact darkening at an object's base. a cast shadow in sim was an artifact for the policy to key on.
+
+**speed.** the STS3215 servos are slow, especially on the rail. a policy trained to command motion the hardware cannot track winds its target ahead of the arm, which overshoots and oscillates. so we measured: drive each joint to its limit and read the achieved speed off the observation stream. the arm manages 29 to 34 deg/s, the rail about 7 cm/s. sim's per-step deltas come straight from those, 0.05 rad and 7 mm at 10 hz.
+
+speed is enforced by the action space, not by torque. 3 N·m against the servo's damping reaches around 280 deg/s, an order of magnitude past the real arm.
+
+**torque.** 3 N·m is where the servos stall, so that is the force limit in sim. an over-powered sim arm muscles through imprecise grasps and leans on the work surface, neither of which transfers. at the real stall torque the top-down grasp gets easier: a weak arm settles onto the cube instead of slamming into it.
+
+## domain randomize
+
+everything above centres the distribution. randomization gives it width, so that reality is one more sample from it rather than a point outside it.
 
 ![domain randomization draws](blog-viz/out/fig6_domain_randomization.png)
 
-| randomization | range |
-| --- | --- |
-| ambient lighting | 0.2 to 0.5 per channel |
-| camera pose and FOV | ±2 mm, ±1°, ±1° |
-| gripper gains | stiffness 500 to 2000, damping 50 to 200 |
-| arm and rail gains | stiffness 600 to 1400, damping 60 to 140 |
-| proprio noise | 5° std on joint reads |
-| cube friction | 0.5 to 1.0 |
-| colour jitter | brightness/contrast/saturation 0.3, hue 0.05, per camera |
-| sensor realism | gamma 0.7 to 1.4, ±10% white balance, noise, blur, a compression proxy |
+| randomization       | range                                                                  |
+| ------------------- | ---------------------------------------------------------------------- |
+| ambient lighting    | 0.2 to 0.5 per channel                                                 |
+| camera pose and FOV | ±2 mm, ±1°, ±1°                                                        |
+| gripper gains       | stiffness 500 to 2000, damping 50 to 200                               |
+| arm and rail gains  | stiffness 600 to 1400, damping 60 to 140                               |
+| proprio noise       | 5° std on joint reads                                                  |
+| cube friction       | 0.5 to 1.0                                                             |
+| colour jitter       | brightness/contrast/saturation 0.3, hue 0.05, per camera               |
+| sensor realism      | gamma 0.7 to 1.4, ±10% white balance, noise, blur, a compression proxy |
 
 camera pose and FOV are drawn when the scene is built rather than every episode, since they are properties of a rig and not of a moment.
 
-object colour is deliberately not randomized. it costs a lot of sample efficiency and there is exactly one real rig, whose cube and bin are a known blue and yellow. so we match instead, and the policy gets to use colour as a reliable cue. how heavily an encoder leans on that cue turns out to matter enormously.
+object colour is deliberately not randomized. it costs sample efficiency, and there is exactly one real rig whose cube and bin are a known blue and yellow. so we match instead, and the policy gets colour as a reliable cue. how heavily an encoder leans on that cue turns out to matter enormously.
 
 # improving upon prior work
 
@@ -175,28 +193,6 @@ that is testable rather than believable, so i built the control. `dino_global` i
 
 one practical note. since the backbone is frozen its tokens never change for a given frame, so they are computed once per environment step in an observation wrapper and cached in the replay buffer instead of recomputed on every gradient batch.
 
-# matching simulation to real
-
-domain randomization widens the distribution. this section centers it on the real rig.
-
-**colours and lighting.** sim's linear base colours are picked to land on the real ones under sim's own lighting. nothing in the scene is pure black or pure white, since a pure black object returns no light and renders as a flat silhouette with no shape cues, and a pure white one clips under the softbox the same way. the shadow-casting key light is off. it used to be on, faintly, but the real lightbox produces no directional shadow at all, only soft contact darkening at an object's base, so a cast shadow in sim was an artifact for the policy to key on. turning it off narrowed the gap and saved a geometry pass per camera per step.
-
-**cameras.** the real modules are 120° wide-angle with real barrel distortion. you cannot just set the sim camera's FOV to the lens spec, because a pinhole render and a fisheye see different fractions of the scene. so instead of making sim render like a cheap lens, we do the opposite and rectify reality into sim's geometry: undistort with a $k_1/k_2$ plus focal model, rotate (the overhead camera is mounted sideways), zoom and crop to the sim's field of view, then correct colour with a per-channel gain and a gamma.
-
-![rectifying reality into the simulator](blog-viz/out/fig3_calibration.png)
-
-those parameters come from a tool that drives the real arm while rendering the sim cameras live beside the rectified real feed, with a blend slider between them. the mapping it writes is the same file the deploy loop replays, so the frame the policy trained on and the frame it sees on the robot are formed by an identical transform.
-
-driving the arm while fitting is the requirement, not a convenience. the wrist camera's view is almost entirely jaws, so a fit checked at one pose tells you nothing about whether it holds as the arm moves. an earlier two-step flow, capture a frame then align offline, could only ever validate one pose.
-
-the figure is a check rather than a claim. sim is rendered at the exact joint pose the real frames were captured at, and the cube and bin are stood at positions read back out of the rectified real frame by un-projecting them onto the work surface. that the arm, the objects and the frame extrusions land on top of each other is what says the mapping is right. it also shows where it is loosest: the overhead camera's FOV was fitted against the rig, the wrist's is inherited from the MJCF twin, so the wrist's objects sit a little large.
-
-**speed.** the real STS3215 servos are slow, especially driving the rail, and a policy trained to command motion the hardware cannot track winds its target up ahead of the arm, which then overshoots and oscillates. so we measured it: drive each joint to its limit in a manual control UI and read the achieved speed off the observation stream. the arm manages 29 to 34 deg/s and the rail about 7 cm/s. sim's per-step deltas come straight from those numbers, 0.05 rad and 7 mm per step at 10 hz.
-
-it is worth saying which limit does the work here, because it is tempting to assume torque. it does not. 3 N·m against the servo's damping would reach around 280 deg/s, an order of magnitude past the real arm. speed is enforced by the action space.
-
-**torque.** 3 N·m is where the servos stall, so that is each joint's force limit in sim. an over-powered sim arm learns to muscle through imprecise grasps and lean on the work surface, which does not transfer because the real servo simply stalls. at the real stall torque the low top-down grasp actually gets easier, since a weak arm settles onto the cube instead of slamming into it.
-
 # training notes
 
 training is 12M environment steps on a single RTX PRO 6000, replay retention of 2 episodes per env, batch 512, and squint's hyperparameters mostly untouched. the squint CNN runs 1024 parallel envs at 2833 environment steps per second and finishes in about ninety minutes. the dino heads run 512 envs, and the patch head is the expensive one at 341 steps per second and ten hours.
@@ -205,12 +201,12 @@ four encoders, same task, same reward, same retention, same budget.
 
 ![the four encoders, and the recipe change](blog-viz/out/fig1_encoder_curves.png)
 
-| encoder | first success | best | sustained |
-| --- | --- | --- | --- |
-| `dino_patch`, 12×12 grid | 1.75M | **1.00** | **0.88** |
-| `dino_global`, mean-pooled | 2.75M | 0.89 | 0.67 |
-| `dino_global`, CLS token | 7.75M | 0.80 | 0.58 |
-| `squint` CNN at 32 px | 3.50M | 0.71 | 0.52 |
+| encoder                    | first success | best     | sustained |
+| -------------------------- | ------------- | -------- | --------- |
+| `dino_patch`, 12×12 grid   | 1.75M         | **1.00** | **0.88**  |
+| `dino_global`, mean-pooled | 2.75M         | 0.89     | 0.67      |
+| `dino_global`, CLS token   | 7.75M         | 0.80     | 0.58      |
+| `squint` CNN at 32 px      | 3.50M         | 0.71     | 0.52      |
 
 the dense grid wins on both axes. it blooms first and holds the highest level once it is there. collapsing the same features to one vector per camera costs about twenty points of sustained success, and collapsing to the CLS token costs another nine and delays the bloom by five million steps. the only difference between the top row and the middle two is whether the patch grid survives to the head.
 
@@ -261,11 +257,11 @@ now, back to that sentence about actions being velocities. sim integrates one ev
 the mirror problem is that the sim arm reaches its target within a step and the real arm lags. if the target keeps advancing while the arm is behind, it winds up, and by the time the jaw closes the arm has sailed past the cube. the fix is a lag budget: the target only advances while every gated joint is within a few action steps of its measured pose, and the same threshold gates the next decision. it is a velocity-clamped ramp rather than a stopwatch, and it trades directly against speed.
 
 | budget | decisions/s | rail speed | 0.49 m traverse |
-| --- | --- | --- | --- |
-| 0.5 | 1.4 | 1.00 cm/s | 49.4 s |
-| 1.0 | 2.3 | 1.55 cm/s | 31.8 s |
-| 2.0 | 3.8 | 2.60 cm/s | 19.0 s |
-| 4.0 | 6.8 | 4.53 cm/s | 10.9 s |
+| ------ | ----------- | ---------- | --------------- |
+| 0.5    | 1.4         | 1.00 cm/s  | 49.4 s          |
+| 1.0    | 2.3         | 1.55 cm/s  | 31.8 s          |
+| 2.0    | 3.8         | 2.60 cm/s  | 19.0 s          |
+| 4.0    | 6.8         | 4.53 cm/s  | 10.9 s          |
 
 two exclusions earn their place. the gripper is exempt from the shared budget, because its whole range is 9.6 action steps and a jaw closed on the cube sits several steps short of its command for as long as it holds, so a shared gate would never clear again. it carries its own generous lead cap instead, since that lead is the grip force: a position servo only pushes as hard as the distance it is asked to close. and nothing advances without frames, because a lost camera must not mean the arm keeps gliding blind on a stale command.
 
@@ -287,7 +283,7 @@ so the simulation number was not the thing to optimize. an encoder that reaches 
 
 this is just a simple proof of concept (which is reliable and reproducible), it took me 1 week for the rl env and another to successfully adapt squint and more to the rl environment and to real life.
 
-the encoder turned out to be a sim2real decision rather than an accuracy decision. four learned the task, one transferred, and the sim success rate barely hinted at which. what mattered was whether the representation keeps *where things are* or only *what is present*.
+the encoder turned out to be a sim2real decision rather than an accuracy decision. four learned the task, one transferred, and the sim success rate barely hinted at which. what mattered was whether the representation keeps _where things are_ or only _what is present_.
 
 and suspect the reward before the architecture. five runs and three seeds at exactly zero were not an encoder problem.
 
