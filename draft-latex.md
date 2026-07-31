@@ -234,29 +234,7 @@ In this setup, the robot acts as a participant connecting to the policy (also as
 
 The robot exposes its controls while sending raw camera frames to the policy. On the policy side, a simple bridge is written to rectify reality to simulation constraints. Sending raw frames is deliberate: the human watching the web UI gets the full wide-angle view, and the policy privately reconstructs its narrow 168 px version before every inference.
 
-```mermaid
-flowchart TD
-    subgraph robot["robot runtime"]
-        cams["two raw frames<br/>640×480, 120° DFOV"]
-        qpos["measured joint state"]
-        servos["servos track the target"]
-    end
-
-    subgraph policy["policy operator"]
-        rect["rectify per camera<br/>rotate, undistort, zoom, crop, colour"]
-        stack["stack wrist + overhead<br/>168×168×6"]
-        tok["frozen DINOv2<br/>288 patch tokens"]
-        actor["actor mean<br/>delta action in [-1,1]^7"]
-        integrate["integrate running target"]
-        bridge["sim units to wire units"]
-    end
-
-    cams -- livekit room --> rect
-    qpos -- livekit room --> actor
-    rect --> stack --> tok --> actor --> integrate --> bridge
-    bridge -- joint targets --> servos
-    integrate -. next tick's state .-> actor
-```
+![one deploy tick](blog-viz/out/fig9_deploy_loop.png)
 
 The bridge itself is thin, so the network's tensors never leave sim space: radians to degrees for the arm, metres to a normalized 0-to-100 position for the rail. One joint, `wrist_roll`, carries a measured 90° offset because its calibrated zero is not the URDF zero. Everything else is identity, checked against a live arm rather than assumed.
 

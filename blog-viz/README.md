@@ -3,6 +3,9 @@
 Figures for the sim2real write-up in [`../draft.md`](../draft.md). One script per figure, each
 writing into `out/`.
 
+[`../draft-latex.md`](../draft-latex.md) is the X Articles version: no inline math, since X renders
+only block LaTeX, and `fig9` in place of the mermaid diagram, which X does not render either.
+
 Nothing here re-declares a number that lives somewhere else. The reward constants come from the
 training config, the camera mappings from the deploy tree, the sim frames from the training env
 itself, and the training curves from a cached Weights & Biases pull. A figure cannot drift from
@@ -75,6 +78,7 @@ jaw-closing ramp and the horizon came down to 200 steps.
 | 6 | domain-randomization draws | `fig6_domain_randomization.py` | sim |
 | 7 | DINOv2 features, overhead camera | `fig7_dino_features.py` | sim + reference + torch.hub |
 | 8 | DINOv2 features, wrist camera | `fig8_dino_features_wrist.py` | same, via `fig7.main("arm_camera")` |
+| 9 | the deploy loop | `fig9_deploy_loop.py` | nothing; it is drawn, not measured |
 
 Still missing, because they need capture the repo cannot synthesize:
 
