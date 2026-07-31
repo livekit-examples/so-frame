@@ -12,7 +12,7 @@ each tick until a new one replaces it, as sim did.
 --max-lag bounds the arm, in action steps: the target advances only while it is within that far of
 the measured pose. It doubles as the decision gate, so keep it wide, and it yields after a second
 of waiting so a joint that can never arrive cannot freeze the arm. The gripper is exempt from the
-shared budget and carries its own lead cap, GRIPPER_LEAD.
+shared budget and is otherwise ungated, integrating exactly as sim does.
 
 --viz changes the budget and the rail's step size live while the arm moves; if the timeout count
 keeps climbing, the budget is too tight for this arm.
@@ -72,12 +72,6 @@ CHECKPOINTS: dict[str, tuple[str, str, str | None]] = {
 # a position servo only pushes as hard as the distance it is asked to close.
 GATED: tuple[str, ...] = tuple(k for k in bridge.JOINT_KEYS if k != "gripper.pos")
 
-# How far the gripper target may lead the measured jaw, in action steps: the jaw's own budget, since
-# it sustains its action every tick while being exempt from the shared gate. The cap is deliberately
-# wide because the lead IS the grip force, 3 steps of commanded closure past where the jaw sits
-# keeps the servo pushing on a held object while still bounding windup over a 9.6-step range.
-GRIPPER_LEAD = 3.0
-
 # The rail's trained per-step delta, in mm. A full-command action moves the carriage this far in one
 # control period, so it is also its top speed in mm per 100 ms.
 RAIL_STEP_MM = bridge.DELTA_LIMIT[bridge.RAIL] * 1000.0
@@ -97,12 +91,17 @@ def deltas(rail_step_mm: float) -> dict[str, float]:
 
 
 def joint_lag(sim_target: dict, sim_qpos: dict, delta: dict) -> tuple[float, str]:
-    """Worst lag across the gated joints, in action steps, with the joint responsible."""
+    """Worst lag across the gated joints, in action steps, with the joint responsible.
+
+    Measured against the CLAMPED target, the one the arm was actually commanded to: windup past a
+    joint stop is not lag the joint can ever work off.
+    """
     worst, who = 0.0, "-"
+    commanded = bridge.clamp_sim(sim_target)
     for k in GATED:
         if k not in sim_qpos:
             continue
-        d = abs(sim_target[k] - sim_qpos[k]) / delta[k]
+        d = abs(commanded[k] - sim_qpos[k]) / delta[k]
         if d > worst:
             worst, who = d, k.split(".")[0]
     return worst, who
@@ -410,9 +409,14 @@ async def main(claim: bool = True, start_paused: bool = True,
         print(f"[policy-{NAME}] --viz open")
 
     def send(target: dict[str, float], obs: Observation) -> None:
-        """Command one joint target, stamped as a reply to ``obs``."""
+        """Command one joint target, stamped as a reply to ``obs``.
+
+        Clamps here, at the wire, and nowhere upstream: sim_to_real only converts units, so this is
+        what keeps an out-of-range target off the servos, while `sim_target` itself stays the
+        unclamped accumulator the policy is fed.
+        """
         op.send_action(
-            bridge.sim_to_real(target),
+            bridge.sim_to_real(bridge.clamp_sim(target)),
             timestamp_us=int(time.time() * 1_000_000),
             in_reply_to_ts_us=obs.timestamp_us,
         )
@@ -448,10 +452,13 @@ async def main(claim: bool = True, start_paused: bool = True,
                 rows = []
                 if sim_target is not None and obs is not None:
                     meas = bridge.real_to_sim(dict(obs.state))
+                    # Clamped, so the lag shown is the one the gate acts on. Windup past a stop is
+                    # deliberately not in this number.
+                    commanded = bridge.clamp_sim(sim_target)
                     rows = [
                         (k.split(".")[0],
                          None if last_action is None else last_action[i],
-                         (sim_target[k] - meas[k]) / delta[k] if k in meas else 0.0)
+                         (commanded[k] - meas[k]) / delta[k] if k in meas else 0.0)
                         for i, k in enumerate(bridge.JOINT_KEYS)
                     ]
                 win.show_stack(rgb)
@@ -600,17 +607,18 @@ async def main(claim: bool = True, start_paused: bool = True,
             # relative timing of the arm's approach against the jaw's closure is what a grasp is.
             # Without pixels nothing advances: a lost camera must not mean the arm keeps moving
             # blind on a stale command.
+            # NOT re-clamped to the joint limits here: sim accumulates on the previous TARGET and
+            # never clamps it (`_target_qpos += action`, then straight to the drive), so the excess
+            # past a stop persists and IS the force the servo pushes with. Clamping the accumulator
+            # discarded that excess every tick, which both weakened every hold and fed the policy a
+            # target_qpos pinned at the stop where training showed it winding past. send() clamps.
             if last_action is not None and rgb is not None:
                 stepped = dict(sim_target)
                 for i, k in enumerate(bridge.JOINT_KEYS):
                     if k in GATED and behind:
                         continue    # budget spent; wait for the joints, unless the wait timed out
                     stepped[k] += float(last_action[i]) * delta[k]
-                    if k not in GATED and k in sim_qpos:
-                        # Bound the jaw against its measured position instead: see GRIPPER_LEAD.
-                        lead = GRIPPER_LEAD * delta[k]
-                        stepped[k] = min(sim_qpos[k] + lead, max(sim_qpos[k] - lead, stepped[k]))
-                sim_target = bridge.clamp_sim(stepped)
+                sim_target = stepped
 
             send(sim_target, obs)
     except KeyboardInterrupt:
@@ -649,8 +657,8 @@ def cli() -> None:
                              "(default 3.0). It bounds the sustained action and doubles as the "
                              "decision gate, so keep it wide: a tight budget costs feedback rate "
                              "for what is usually just servo droop. The gripper is exempt and "
-                             "carries its own lead cap. With --viz this is only the starting "
-                             "value.")
+                             "ungated, integrating as sim does. With --viz this is only the "
+                             "starting value.")
     parser.add_argument("--rail-step", type=float, default=RAIL_STEP_MM, metavar="MM",
                         help=f"how far one full-command action moves the carriage, in mm (default "
                              f"{RAIL_STEP_MM:.1f}, the trained value). Also its top speed per "

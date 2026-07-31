@@ -84,10 +84,8 @@ the budget is stricter than the hardware.
 
 Two things are deliberately excluded. **The gripper is exempt from the shared budget**: its whole
 range is 9.6 action steps, so a jaw closed on the object sits several steps short of its command for
-as long as it holds, and the shared gate would never clear again. It is not unbounded, though. It
-sustains its action every tick like every other joint, capped by its own `GRIPPER_LEAD` of 3 action
-steps measured against the jaw's own position. That lead *is* the grip force, since a position servo
-only pushes as hard as the distance it is asked to close, so the cap is deliberately wide.
+as long as it holds, and the shared gate would never clear again. It gets no gating of its own
+either: the target accumulates every tick, bounded only by the joint limits, exactly as in sim.
 **Nothing advances without frames**: a lost camera must not mean the arm keeps gliding blind on a
 stale command. The two cameras publish as separate tracks, so the loop holds the latest rectified
 view per camera rather than waiting for both to land in one observation, and a view older than
