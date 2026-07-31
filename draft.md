@@ -1,4 +1,4 @@
-# Making zero-shot sim2real possible on so-frame
+# Zero-shot Sim2Real Manipulation From Scratch For Enthusiasts
 
 For the past months, we've been designing a cheap robot rig for benchmarking our transport at LiveKit, called so-frame.
 
