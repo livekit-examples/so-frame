@@ -109,21 +109,22 @@ BIN_WALL_COLLISION_THICKNESS = 0.005
 # =====================================================================================
 WORK_SURFACE_Z = 0.0
 
-# ONE spawn zone spanning the workspace, shared by both objects: x [-0.270, -0.012],
-# y [-0.760, -0.050], i.e. 258 x 710 mm. The measured intersection of three limits:
+# ONE spawn zone shared by both objects: x [-0.374, -0.016], y [-0.766, -0.038], i.e. 358 x 728 mm.
 #
-#   1. Top-down graspable reach, x [-0.27, +0.06]. x is the binding axis; the rail gives 820 mm
-#      of y travel.
-#   2. The static overhead camera's footprint, the largest axis-aligned rectangle inside its view
-#      of the work surface, evaluated at both the cube's height and the taller bin's rim. The
-#      policy is vision-only, so anything outside this is unlearnable.
-#   3. Where the bin physically settles on the panels: x [-0.34, 0.00], y [-0.80, -0.05].
+# Three edges are the overhead camera's footprint, the largest axis-aligned rectangle inside its view
+# measured at both the cube's height and the taller bin's rim: the policy is vision-only, so a spawn
+# out of frame is unobservable rather than merely hard. The far -x edge is pulled 100 mm inside that
+# (-0.474 -> -0.374), since top-down reach, x [-0.27, +0.06], cannot cross it.
+#
+# Reach still stops 104 mm short of that edge, so only 69% of the zone is completable and success is
+# capped near there, not at 1.0. Fully solvable zone, if you want it: CENTER (-0.141, -0.405),
+# HALF (0.129, 0.355).
 #
 # The arm is in the zone too, so at reset it occludes the cube in a minority of spawns,
 # concentrated where the arm parks. All of them clear once the gantry moves, so the occlusion is
 # transient, not unobservable state.
-WORKSPACE_CENTER = (-0.141, -0.405)
-WORKSPACE_HALF = (0.129, 0.355)
+WORKSPACE_CENTER = (-0.195, -0.402)
+WORKSPACE_HALF = (0.179, 0.364)
 
 # Extra inset on top of each object's own footprint. The zone bounds are measured at the NOMINAL
 # camera pose, and randomization jitters the overhead camera a few mm and up to a degree of FOV
