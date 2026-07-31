@@ -76,13 +76,27 @@ T_LABEL = 11
 T_TICK = 10
 T_FOOT = 9
 
-# macOS Helvetica lacks a few glyphs (arrows, some superscripts). matplotlib falls back per glyph
-# down this list, so those borrow from DejaVu while everything else stays Helvetica.
-FONT_STACK = ["Helvetica", "Arial", "DejaVu Sans"]
+# Inter, with fallbacks. matplotlib falls back per glyph down this list, so anything Inter lacks
+# borrows from further along instead of dropping to a tofu box.
+#
+#     brew install --cask font-inter
+#
+# Without it the figures silently render in Helvetica, which is close enough to miss at a glance
+# and wrong enough to look off next to the ones that have it, so check_font() says so out loud.
+FONT_STACK = ["Inter", "Helvetica", "Arial", "DejaVu Sans"]
+
+
+def check_font():
+    """Warn if Inter is missing rather than quietly falling back to Helvetica."""
+    from matplotlib import font_manager as fm
+    if not any(f.name == "Inter" for f in fm.fontManager.ttflist):
+        print("[style] Inter not found, falling back to Helvetica. "
+              "Install it with: brew install --cask font-inter")
 
 
 def apply():
     """Set the global rcParams every figure shares."""
+    check_font()
     matplotlib.rcParams.update({
         "font.family": FONT_STACK,
         "font.size": T_TICK,
