@@ -46,11 +46,11 @@ in the simulation, the cube and bin's positions and rotations are randomized for
 
 the task is considered successful if all of the following hold: the cube settles inside the bin, the cube and the robot are both static, and the robot touches neither the cube nor the bin. episodes are capped at 200 steps, each step one action. the robot is controlled at 10 hz, so each episode has 20 seconds.
 
-the simulator we use is ManiSkill3 from Sapien. it is a popular framework with state of the art visual rendering, which is why i picked it, as we want to focus on visual learning instead of the state-based learning mostly used in locomotion. furthermore, ManiSkill's author has an official implementation for sim2real on the so101 which is of great reference.
+the simulator we use is [ManiSkill3](https://github.com/haosulab/ManiSkill) from [Sapien](https://github.com/haosulab/SAPIEN). it is a popular framework with state of the art visual rendering, which is why i picked it, as we want to focus on visual learning instead of the state-based learning mostly used in locomotion. furthermore, ManiSkill's author has an [official implementation for sim2real on the so101](https://github.com/StoneT2000/lerobot-sim2real) which is of great reference.
 
 # formalizing the problem
 
-this part can be hard for some readers, as i'll formalize the RL environment mathematically as a Markov Decision Process. if you don't know what that is, i recommend watching [this video](#), as well as reading up on [this RL cheat sheet](#) from OpenAI.
+this part can be hard for some readers, as i'll formalize the RL environment mathematically as a Markov Decision Process. if you don't know what that is, i recommend watching [this video](https://www.youtube.com/watch?v=KZeIEiBrT_w), as well as reading up on [Spinning Up](https://spinningup.openai.com/en/latest/) from OpenAI.
 
 I like formalizing as it's easier for me to explain, aka it has the highest information density.
 
@@ -169,7 +169,7 @@ with our environment defined mathematically, we'll need to worry about how do we
 
 this leads us to [squint](https://arxiv.org/abs/2602.21203), which is a zero shot sim2real method on the SO101 published in february this year.
 
-thanks to pratham for introducing me to this method on his twitter thread and sharing his squint notes with me.
+thanks to [pratham](https://x.com/PrathamJainAI/status/2076232338447724623) for introducing me to this method on his twitter thread and sharing his squint notes with me.
 
 the answer to the question above is both. squint is a visual Soft Actor-Critic, off-policy and entropy-regularized, so parallel simulation can fill a replay buffer fast while a learned critic squeezes many gradient updates out of every environment step. instead of the plain discounted return it maximizes return plus an entropy bonus,
 
@@ -191,15 +191,15 @@ hold that thought.
 
 ### 2. dinov2 encoder
 
-squint has a problem when going to higher resolution, which is that it focuses too much on unwanted visual artifacts such as shadows and wires. a CNN trained purely inside a simulator has never seen the real world, so it has no prior for what is signal and what is a rendering artifact. to improve upon this, i then switched the from-scratch CNN encoder for a DINOv2 pre-trained encoder, ViT-S/14 with registers, trained self-supervised on real images at scale.
+squint has a problem when going to higher resolution, which is that it focuses too much on unwanted visual artifacts such as shadows and wires. a CNN trained purely inside a simulator has never seen the real world, so it has no prior for what is signal and what is a rendering artifact. to improve upon this, i then switched the from-scratch CNN encoder for a [DINOv2](https://github.com/facebookresearch/dinov2) pre-trained encoder, ViT-S/14 with registers, trained self-supervised on real images at scale.
 
 it stays frozen on purpose. fine-tuning it on sim renders would just re-teach it the simulator's quirks and throw away the prior that motivated the swap.
 
-![dinov2 features, sim vs real](blog-viz/out/fig7_dino_features.png)
+![dinov2 features, overhead camera](blog-viz/out/fig7_dino_features.png)
 
 the middle column is the reason to bother. the same frozen backbone on a sim render and on a rectified real frame, both painted by a single shared PCA so the colours are comparable rather than each image being flattered by its own projection. the surface, the arm and the frame edges take the same colours in both worlds, and we did not have to train for it.
 
-the mistake to avoid is treating DINOv2 like a CNN, flattening its output into one vector and moving on. it does not hand you a feature image, it hands you tokens. at 168 px, twelve of its 14-pixel patches a side, each camera is a 12×12 grid of 384-dim patch tokens, 288 for the pair. so the head consumes tokens: both grids go in jointly with a learned per-camera embedding, self-attention runs over the sequence, and a learned readout token collects the answer. this follows the [Patch Policy](#) recipe, whose claim is exactly that dense representations are what embodied control needs.
+the mistake to avoid is treating DINOv2 like a CNN, flattening its output into one vector and moving on. it does not hand you a feature image, it hands you tokens. at 168 px, twelve of its 14-pixel patches a side, each camera is a 12×12 grid of 384-dim patch tokens, 288 for the pair. so the head consumes tokens: both grids go in jointly with a learned per-camera embedding, self-attention runs over the sequence, and a learned readout token collects the answer. this follows the [Patch Policy](https://arxiv.org/abs/2607.18236) recipe, whose claim is exactly that dense representations are what embodied control needs.
 
 ![dinov2 features, wrist camera](blog-viz/out/fig8_dino_features_wrist.png)
 
@@ -215,7 +215,7 @@ training is 12M environment steps on a single RTX PRO 6000, replay retention of 
 
 four encoders, same task, same reward, same retention, same budget.
 
-![the four encoders, and the recipe change](blog-viz/out/fig1_encoder_curves.png)
+![evaluation success by encoder](blog-viz/out/fig1_encoder_curves.png)
 
 | encoder                    | first success | best     | sustained |
 | -------------------------- | ------------- | -------- | --------- |
@@ -236,7 +236,7 @@ three more things from the run history:
 
 # deployment
 
-my so-frame is built to be a remote rig and so i always connect to it remotely through livekit portal.
+my so-frame is built to be a remote rig and so i always connect to it remotely through [livekit portal](https://github.com/livekit/portal).
 
 in this setup, the robot acts as a participant connecting to the policy (also as a participant) through a livekit room.
 
