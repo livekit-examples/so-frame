@@ -214,12 +214,11 @@ We have four encoders, same task, same reward, same retention, same budget.
 
 The dense grid wins on both axes. It blooms first and holds the highest level once it is there. Collapsing the same features to one vector per camera costs about twenty points of sustained success, and collapsing to the CLS token costs another nine and delays the bloom by five million steps. The only difference between the top row and the middle two is whether the patch grid survives to the head.
 
-Some notes from the run history:
+Two things about the shape of those curves.
 
-- Before the reward ladder got its jaw-closing ramp and the horizon came down to 200 steps, this same CNN ran five times, three of them separate seeds, 12M steps each, and never placed a single cube. Not rarely, never. Nothing about the encoder changed between those runs and the 0.71 above, so I spent a while suspecting the architecture when the reward was the problem.
-- Take the best checkpoint, not the last one. `dino_patch` hits 1.00 at 4.75M and then wanders between 0.69 and 1.00 for the remaining seven million steps, ending at 0.83. An earlier run of the same head peaked at 0.74 and decayed to flat zero. Critic loss stays stable throughout, so this is not divergence, it is a confidently over-optimistic critic.
-- The entropy temperature ends up in the 1e-4 range in every run, successful or not, so alpha on the floor diagnoses nothing. Printed with three decimals it reads as 0.000, which looks worse than it is.
-- Eval is 35 episodes, so a reading is a multiple of 1/35, and 0/35 is a real policy state rather than sampling noise off something that half works. One run is not an experiment here.
+The long flat stretch before the bloom is the reward ladder doing what it is built to do. Reaching and grasping are densely shaped, so the return climbs from the first thousand steps, but success is terminal and conjunctive: the cube has to be in the bin, slow, with the arm stopped and touching nothing, all inside 200 steps. None of that pays partial credit. So the policy spends millions of steps getting better at rungs a through c with the metric pinned at exactly zero, and the moment opening the jaw over the bin starts paying, placements arrive in bulk rather than one at a time. That is why the bloom is a step rather than a ramp, and why the return is the leading indicator you should watch instead.
+
+The ceiling is not 1.0 because evaluation runs with the full randomization on. Every episode draws its own lighting, PD gains, camera pose and FOV, joint-read noise and sensor augmentation, and some of those draws are simply harder than others. The strict success condition costs a few more: a placement that lands the cube but ends with the arm still drifting, or a finger resting on the rim, scores nothing at all despite looking finished. And on a 20 mm cube there is not much margin in the grasp, so a miss usually eats enough of the 200 steps that the episode cannot recover. `dino_patch` sitting around 0.88 with peaks at 1.00 is what a policy that basically works looks like under those conditions.
 
 # Deployment
 
