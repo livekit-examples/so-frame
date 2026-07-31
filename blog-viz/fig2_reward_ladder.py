@@ -65,7 +65,7 @@ def main():
         ax.annotate("", xy=(i + 0.5, nxt), xytext=(i + 0.5, top),
                     arrowprops=dict(arrowstyle="-|>", color=style.FAINT, lw=1.0,
                                     shrinkA=0, shrinkB=0))
-        ax.text(i + 0.58, (top + nxt) / 2, f"+{nxt - top:g}", ha="left", va="center",
+        ax.text(i + 0.535, (top + nxt) / 2, f"+{nxt - top:g}", ha="left", va="center",
                 fontsize=style.T_FOOT, color=style.FAINT)
 
     ax.set_xlim(-0.62, len(STAGES) - 0.30)

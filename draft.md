@@ -40,7 +40,9 @@ the task for the robot is to pick up a cube on the work surface and place it in 
 - cube: 20 mm, ~3.2 g, blue.
 - bin: 100 mm square, 30 mm tall, 2 mm walls, so a 96 mm opening 28 mm deep. yellow.
 
-in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 458 × 728 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
+in the simulation, the cube and bin's positions and rotations are randomized for each episode. both come from one zone, 358 × 728 mm, the bin placed first and the cube rejection-sampled until it clears the bin by 50 mm.
+
+three edges of that zone are the overhead camera's footprint, measured at both the cube's height and the taller bin's rim, since the policy is vision only and a spawn out of frame is unobservable rather than merely hard. the far edge is pulled 100 mm inside that, because top-down reach cannot cross it at all. reach still stops 104 mm short of where the camera stops, so 69% of the zone is completable and success caps near there rather than at 1.0.
 
 ![the spawn zone, and episodes drawn from it](blog-viz/out/fig5_spawn_zone.png)
 
@@ -83,18 +85,18 @@ first the predicates, all read off the sim state:
 - $\mathrm{G}$: the cube is grasped, both jaws in contact and closing on it
 - $\mathrm{B}$: the cube is horizontally inside the bin's 96 mm opening, $|p^{x}_{\text{item}} - p^{x}_{\text{bin}}| < 0.048$ and likewise in $y$
 - $\mathrm{T}$: the robot is touching the cube
-- $\mathrm{I}$: the cube is *in* the bin, $\mathrm{B}$ and its lowest corner within 5 mm of the bin floor
+- $\mathrm{I}$: the cube is _in_ the bin, $\mathrm{B}$ and its lowest corner within 5 mm of the bin floor
 - $\Sigma = \mathrm{I} \wedge \|\dot p_{\text{item}}\| \le 0.02 \wedge \neg\mathrm{T} \wedge \text{robot static} \wedge \neg\text{touching the bin}$
 
 and the distances: $d_{xy}$ and $d_z$ from the tool centre to the cube, $d_g = \|g - p_{\text{item}}\|$ from the cube to the drop point $g$, and $o \in [0,1]$ for how far the jaw is open.
 
-| stage | condition | reward |
-| --- | --- | --- |
-| a. reach | otherwise | $r_{\text{reach}} \in [0, 1.5]$ |
-| b. grasped | $\mathrm{G} \wedge \neg\mathrm{B}$ | $2 + \big(1 - \tanh(5 d_g)\big) \in [2, 3]$ |
-| c. holding over the bin | $\mathrm{B} \wedge \mathrm{T}$ | $4 + o \in [4, 5]$ |
-| d. released over the bin | $\mathrm{B} \wedge \neg\mathrm{T}$ | $6$ |
-| e. success | $\Sigma$ | $10$ |
+| stage                    | condition                          | reward                                      |
+| ------------------------ | ---------------------------------- | ------------------------------------------- |
+| a. reach                 | otherwise                          | $r_{\text{reach}} \in [0, 1.5]$             |
+| b. grasped               | $\mathrm{G} \wedge \neg\mathrm{B}$ | $2 + \big(1 - \tanh(5 d_g)\big) \in [2, 3]$ |
+| c. holding over the bin  | $\mathrm{B} \wedge \mathrm{T}$     | $4 + o \in [4, 5]$                          |
+| d. released over the bin | $\mathrm{B} \wedge \neg\mathrm{T}$ | $6$                                         |
+| e. success               | $\Sigma$                           | $10$                                        |
 
 $$r_{\text{reach}} = \underbrace{0.5\big(1 - \tanh(5\,d_{xy})\big)}_{\text{align over the cube}} \;+\; \mathbb{1}[\,d_{xy} < 0.03\,]\underbrace{0.5\big(1 - \tanh(5\,d_z)\big)}_{\text{then descend}} \;+\; \mathbb{1}[\,d_{xy} < 0.03 \,\wedge\, d_z < 0.02\,]\underbrace{0.5\,(1 - o)}_{\text{then close}}$$
 
@@ -283,16 +285,6 @@ two exclusions earn their place. the gripper is exempt from the shared budget, b
 
 > _deploy `--viz` screenshot pending._
 
-### only one of them survived
-
-here is the part i did not expect. in simulation all four encoders learn the task and rank in a sensible order, 0.52 to 0.88 sustained. on the real robot that ranking collapses into a binary. only `dino_patch` works. the others do not degrade gracefully, they fail.
-
-with hindsight the explanation is in the squint figure. at 32 px the real cube is two pixels and hue is all the CNN can key on, which makes it a colour detector, and colour is exactly the channel a cheap USB camera under a lightbox is least reliable about. that is what the gain and gamma in the mapping correct for and what the augmentation trains against, but there is no other cue to fall back on when the correction is imperfect. the collapsed DINOv2 variants have the real-image prior but have thrown away where anything is. one vector per camera says "a blue thing is present" far more easily than "it is there".
-
-the dense grid keeps both, and it is the only one of the four with enough left over to absorb the difference between a render and a rectified photograph of a room.
-
-> _closer clip pending: a continuous real rollout, no human in the loop._
-
 # takeaway
 
 this is just a simple proof of concept (which is reliable and reproducible), it took me 1 week for the rl env and another to successfully adapt squint and more to the rl environment and to real life.
@@ -300,13 +292,6 @@ this is just a simple proof of concept (which is reliable and reproducible), it 
 some learnings as of now:
 
 - there is nothing i can do in sim to reliably compensate for how crap the sts3215 response is. it just sucks. i can throw a bunch of domain randomization at it, but for the love of god, i don't want to do it like that.
-- patch policy greatly improves policy performance. global mean and cls token cannot compare, in sim or in real. i spent a good amount of time trying to figure out a way there and then the paper dropped and i was like this is it.
+- pretrained models help generalization and improve sample efficiency (u can say duh sherlock). in my case, only my dino backbone models transfer to the real world, so it holds some weight, or i can say damn, maybe i'm stupid with doing squint.
+- patch policy greatly improves policy performance. global mean and cls token cannot compare, in sim or in real. i spent a good amount of time trying to figure out a way there, then [the paper dropped out of nowhere](https://x.com/jeffacce/status/2080017577749684718?s=20) and i was like this is it. god level timing.
 - visual is one thing, matching control behaviors and system delay is a whole other problem set, which i have not solved.
-
-so the simulation number was never the thing to optimize. an encoder that reaches 0.71 in sim and zero on the robot is not eighty percent as good as one that reaches 0.88 and works.
-
-rl is more than just picking and placing stuff. since this is visual and proprio only, the hardest problem is now engineering the reward function.
-
-but even before the reward function, we can make the policy learn useful behavior through prior demonstrations.
-
-therefore, this work unlocks an immense space for hobbyists to explore and reproduce state of the art results in modern robot learning.
