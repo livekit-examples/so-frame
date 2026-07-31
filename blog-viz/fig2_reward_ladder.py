@@ -15,15 +15,15 @@ cfg = config()
 
 # (label, floor, shaping headroom, what the shaping pays for)
 STAGES = [
-    ("reach", 0.0, 1.0 + cfg.SHAPE_REACH_CLOSE,
+    ("Rung A\nreach", 0.0, 1.0 + cfg.SHAPE_REACH_CLOSE,
      "align over the cube,\ndescend once aligned,\nthen close the jaw on it"),
-    ("grasped", cfg.RUNG_GRASPED, 1.0,
+    ("Rung B\ngrasped", cfg.RUNG_GRASPED, 1.0,
      "carry toward the drop point,\n5 cm above the bin rim"),
-    ("holding\nover the bin", cfg.RUNG_HOLDING, cfg.SHAPE_HOLD_OPEN,
+    ("Rung C\nholding\nover the bin", cfg.RUNG_HOLDING, cfg.SHAPE_HOLD_OPEN,
      "open the jaw"),
-    ("released\nover the bin", cfg.RUNG_RELEASED, 0.0,
+    ("Rung D\nreleased\nover the bin", cfg.RUNG_RELEASED, 0.0,
      "flat: letting go is\nalready the reward"),
-    ("success", cfg.REWARD_SUCCESS, 0.0,
+    ("Rung E\nsuccess", cfg.REWARD_SUCCESS, 0.0,
      "cube settled in the bin,\narm and cube static,\njaw clear"),
 ]
 

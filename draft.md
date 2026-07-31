@@ -88,13 +88,13 @@ First we define a few states of the system for the sake of simplifying the rewar
 
 And the distances: $d_{xy}$ and $d_z$ from the tool centre to the cube, $d_g = \|g - p_{\text{item}}\|$ from the cube to the drop point $g$, and $o \in [0,1]$ for how far the jaw is open.
 
-| stage                    | condition                          | reward                                      |
-| ------------------------ | ---------------------------------- | ------------------------------------------- |
-| a. reach                 | otherwise                          | $r_{\text{reach}} \in [0, 1.5]$             |
-| b. grasped               | $\mathrm{G} \wedge \neg\mathrm{B}$ | $2 + \big(1 - \tanh(5 d_g)\big) \in [2, 3]$ |
-| c. holding over the bin  | $\mathrm{B} \wedge \mathrm{T}$     | $4 + o \in [4, 5]$                          |
-| d. released over the bin | $\mathrm{B} \wedge \neg\mathrm{T}$ | $6$                                         |
-| e. success               | $\Sigma$                           | $10$                                        |
+| stage                             | condition                          | reward                                      |
+| --------------------------------- | ---------------------------------- | ------------------------------------------- |
+| **Rung A**, reach                 | otherwise                          | $r_{\text{reach}} \in [0, 1.5]$             |
+| **Rung B**, grasped               | $\mathrm{G} \wedge \neg\mathrm{B}$ | $2 + \big(1 - \tanh(5 d_g)\big) \in [2, 3]$ |
+| **Rung C**, holding over the bin  | $\mathrm{B} \wedge \mathrm{T}$     | $4 + o \in [4, 5]$                          |
+| **Rung D**, released over the bin | $\mathrm{B} \wedge \neg\mathrm{T}$ | $6$                                         |
+| **Rung E**, success               | $\Sigma$                           | $10$                                        |
 
 $$r_{\text{reach}} = \underbrace{0.5\big(1 - \tanh(5\,d_{xy})\big)}_{\text{align over the cube}} \;+\; \mathbb{1}[\,d_{xy} < 0.03\,]\underbrace{0.5\big(1 - \tanh(5\,d_z)\big)}_{\text{then descend}} \;+\; \mathbb{1}[\,d_{xy} < 0.03 \,\wedge\, d_z < 0.02\,]\underbrace{0.5\,(1 - o)}_{\text{then close}}$$
 
@@ -102,11 +102,11 @@ The per-step reward is normalized by the maximum, $\hat r_t = r_t / 10$, and wha
 
 ![the reward ladder](blog-viz/out/fig2_reward_ladder.png)
 
-Stages d and e are easy to conflate. Stage d fires the instant the jaw stops touching a cube that is over the opening, and says nothing about where that cube ends up: it can still be in the air, it can catch the rim and bounce out, and the arm can be leaning on the bin throughout. Stage e needs the outcome, cube down on the floor and slow, arm stopped, robot touching neither. So d is the decision to let go, e is that decision having worked, which is why d is flat: nothing left to shape, the only way up is for the throw to land.
+**Rung D** and **Rung E** are easy to conflate. **Rung D** fires the instant the jaw stops touching a cube that is over the opening, and says nothing about where that cube ends up: it can still be in the air, it can catch the rim and bounce out, and the arm can be leaning on the bin throughout. **Rung E** needs the outcome, cube down on the floor and slow, arm stopped, robot touching neither. So **Rung D** is the decision to let go, **Rung E** is that decision having worked, which is why **Rung D** is flat: nothing left to shape, the only way up is for the throw to land.
 
 The ordering replaces a pile of bonuses and hover taxes. "let go, don't hover" is $5 < 6$, and regression handles itself, since dropping the cube falls to a lower rung with no penalty needed.
 
-The two jaw terms are mirror images and took longest to get right. Opening pays in c, so a jaw opening over the bin climbs toward d instead of leaping a plateau; closing pays at the top of a, but only with the tool on the cube in both axes. Both are capped below the next rung, so a jaw shutting on nothing loses to a grasp, and the most open still-holding pose loses to a release. An earlier version made the gripper binary to force a clean release, which was treating a reward problem as an action-space problem.
+The two jaw terms are mirror images and took longest to get right. Opening pays in **Rung C**, so a jaw opening over the bin climbs toward **Rung D** instead of leaping a plateau; closing pays at the top of **Rung A**, but only with the tool on the cube in both axes. Both are capped below the next rung, so a jaw shutting on nothing loses to a grasp, and the most open still-holding pose loses to a release. An earlier version made the gripper binary to force a clean release, which was treating a reward problem as an action-space problem.
 
 No penalty terms anywhere: speed is capped by the action space and torque by the servos' stall.
 
@@ -216,7 +216,7 @@ The dense grid wins on both axes. It blooms first and holds the highest level on
 
 Two things about the shape of those curves.
 
-The long flat stretch before the bloom is the reward ladder doing what it is built to do. Reaching and grasping are densely shaped, so the return climbs from the first thousand steps, but success is terminal and conjunctive: the cube has to be in the bin, slow, with the arm stopped and touching nothing, all inside 200 steps. None of that pays partial credit. So the policy spends millions of steps getting better at rungs a through c with the metric pinned at exactly zero, and the moment opening the jaw over the bin starts paying, placements arrive in bulk rather than one at a time. That is why the bloom is a step rather than a ramp, and why the return is the leading indicator you should watch instead.
+The long flat stretch before the bloom is the reward ladder doing what it is built to do. Reaching and grasping are densely shaped, so the return climbs from the first thousand steps, but success is terminal and conjunctive: the cube has to be in the bin, slow, with the arm stopped and touching nothing, all inside 200 steps. None of that pays partial credit. So the policy spends millions of steps getting better at **Rung A** through **Rung C** with the metric pinned at exactly zero, and the moment opening the jaw over the bin starts paying, placements arrive in bulk rather than one at a time. That is why the bloom is a step rather than a ramp, and why the return is the leading indicator you should watch instead.
 
 The ceiling is not 1.0 because evaluation runs with the full randomization on. Every episode draws its own lighting, PD gains, camera pose and FOV, joint-read noise and sensor augmentation, and some of those draws are simply harder than others. The strict success condition costs a few more: a placement that lands the cube but ends with the arm still drifting, or a finger resting on the rim, scores nothing at all despite looking finished. And on a 20 mm cube there is not much margin in the grasp, so a miss usually eats enough of the 200 steps that the episode cannot recover. `dino_patch` sitting around 0.88 with peaks at 1.00 is what a policy that basically works looks like under those conditions.
 
@@ -256,7 +256,7 @@ The bridge itself is thin, so the network's tensors never leave sim space: radia
 
 <video src="blog-viz/assets/deploy_policy.mp4" controls muted loop playsinline width="100%"></video>
 
-That is the `--viz` window during a real rollout: the two rectified views the encoder is fed on the left, and a bar per joint on the right for the action it was given and how far it lags its target, red once a joint is over its own gate.
+That is the policy visualization window during a real rollout: the two rectified views the encoder is fed on the left, and a bar per joint on the right for the action it was given and how far it lags its target, red once a joint is over its own gate.
 
 # Takeaway
 
