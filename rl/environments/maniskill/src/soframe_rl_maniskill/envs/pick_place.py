@@ -74,7 +74,10 @@ class PickPlaceBin(DualCameraEnv):
 
     Cube and bin spawn anywhere in ONE workspace zone (bin first, then the cube at least
     config.SPAWN_MIN_GAP clear of it), each with a random z-rotation. Success = cube settled in
-    the bin, robot clear and static."""
+    the bin, robot clear and static.
+
+    The zone is entirely in frame, and entirely reachable once the jaw is allowed to come in tilted
+    rather than straight down (see config.WORKSPACE_CENTER for the measured envelopes)."""
 
     SUPPORTED_ROBOTS = ["so101_on_frame"]
     SUPPORTED_OBS_MODES = [
@@ -286,7 +289,7 @@ class PickPlaceBin(DualCameraEnv):
             # The bin goes anywhere in the workspace; the cube then goes anywhere in the same zone
             # that clears the bin by at least SPAWN_MIN_GAP, so the pair can appear in any relative
             # arrangement. Each object samples from the zone inset by its own footprint plus
-            # SPAWN_PADDING, so it lands fully inside the reachable area.
+            # SPAWN_PADDING, so it lands fully inside the overhead camera's frame.
             origin = self.agent.robot.pose.p[env_idx, :2] + torch.tensor(
                 [self.workspace_center[0], self.workspace_center[1]]
             )
@@ -294,8 +297,8 @@ class PickPlaceBin(DualCameraEnv):
 
             # Yaw is sampled up front so the edge inset can use each object's ACTUAL rotated
             # footprint. A square of half-size h at yaw t spans h*(|cos t| + |sin t|) per axis,
-            # between h and h*sqrt(2); insetting by the worst case would cost almost all of the
-            # bin's x freedom (258 mm of zone against a 141 mm diagonal).
+            # between h and h*sqrt(2); insetting by the worst case costs the bin real x freedom
+            # (358 mm of zone against a 141 mm diagonal).
             item_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
             bin_qs = randomization.random_quaternions(b, lock_x=True, lock_y=True)
 
