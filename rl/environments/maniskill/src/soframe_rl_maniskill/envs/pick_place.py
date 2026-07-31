@@ -76,8 +76,8 @@ class PickPlaceBin(DualCameraEnv):
     config.SPAWN_MIN_GAP clear of it), each with a random z-rotation. Success = cube settled in
     the bin, robot clear and static.
 
-    The zone is in frame but not all of it is in reach (see config.WORKSPACE_CENTER), so success is
-    capped near 0.69 by construction."""
+    The zone is entirely in frame, and entirely reachable once the jaw is allowed to come in tilted
+    rather than straight down (see config.WORKSPACE_CENTER for the measured envelopes)."""
 
     SUPPORTED_ROBOTS = ["so101_on_frame"]
     SUPPORTED_OBS_MODES = [
