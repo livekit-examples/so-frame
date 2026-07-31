@@ -114,11 +114,13 @@ WORK_SURFACE_Z = 0.0
 # Three edges are the overhead camera's footprint, the largest axis-aligned rectangle inside its view
 # measured at both the cube's height and the taller bin's rim: the policy is vision-only, so a spawn
 # out of frame is unobservable rather than merely hard. The far -x edge is pulled 100 mm inside that
-# (-0.474 -> -0.374), since top-down reach, x [-0.27, +0.06], cannot cross it.
+# (-0.474 -> -0.374), where the jaw has to come in tilted.
 #
-# Reach still stops 104 mm short of that edge, so only 69% of the zone is completable and success is
-# capped near there, not at 1.0. Fully solvable zone, if you want it: CENTER (-0.141, -0.405),
-# HALF (0.129, 0.355).
+# Reach at the cube's height, measured by sweeping the joint limits: x [-0.247, +0.050] with the jaw
+# within 15 deg of vertical, x [-0.378, +0.117] at any jaw angle. The zone sits inside the latter, and
+# each object's own footprint inset pulls it further in (cube centres to x [-0.340, -0.050]), so every
+# spawn is workable, just not all of them straight down. Do NOT quote the top-down number as the
+# task's reach limit: v6_dino hits 1.00 success_at_end and sustains 0.86-0.97.
 #
 # The arm is in the zone too, so at reset it occludes the cube in a minority of spawns,
 # concentrated where the arm parks. All of them clear once the gantry moves, so the occlusion is
