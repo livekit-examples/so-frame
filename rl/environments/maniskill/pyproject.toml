@@ -9,7 +9,7 @@ description = "Vision-based RL (pick a cube, place it in a bin) for the SO-101-o
 requires-python = ">=3.10,<3.13"
 dependencies = [
   "soframe-policy",
-  "mani_skill_nightly",
+  "mani_skill==3.0.1",
   "gymnasium",
   "torch>=2.6.0",
   "torchvision>=0.21.0",
@@ -23,6 +23,13 @@ dependencies = [
   "dacite",
   "transforms3d",
 ]
+
+# mani_skill is pinned to the released 3.0.1 rather than mani_skill_nightly, which is what this
+# tree inherited from Squint's dependency list. Nothing here needs post-3.0.1 ManiSkill: every
+# symbol this package imports exists in 3.0.1, and SimConfig / SceneConfig / CameraConfig carry
+# the same fields, so the nightlies only added a pyright annotation sweep on top. A fixed release
+# also matches what third-party backends validate against -- the AMD/HIP PhysX port
+# (github.com/pham-tuan-binh/ManiSkill, tools/amd_port) is validated on 3.0.1 + sapien 3.0.3.
 
 # train.py / examples/*.py are plain scripts run directly (`uv run python train.py ...`),
 # matching Squint's own layout, not console_scripts. `uv sync` still installs this
