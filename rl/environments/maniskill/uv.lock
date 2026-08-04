@@ -887,8 +887,8 @@ wheels = [
 ]
 
 [[package]]
-name = "mani-skill-nightly"
-version = "2026.6.23.446"
+name = "mani-skill"
+version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dacite" },
@@ -915,8 +915,9 @@ dependencies = [
     { name = "trimesh" },
     { name = "tyro" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/87/fbb5485f98656b7cedfee779f925f53e4eecfcd38216afeeaf6467f31f35/mani_skill-3.0.1.tar.gz", hash = "sha256:d4eb4f02ab7032d168ffe91ec5af9e2e19eed00481659962d659fe37b0f23028", size = 101412863, upload-time = "2026-04-21T05:52:25.699Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/63/1c6e78c56d088333cbf9961d6cd7c22a8e0a3f08656354479dd3669deb1c/mani_skill_nightly-2026.6.23.446-py3-none-any.whl", hash = "sha256:5bdfc848e9994e889b9685e9c1f6d1762fc9389f23d9a6189eca9d31b8c433c0", size = 101727488, upload-time = "2026-06-23T04:46:38.424Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/44/cac08a55040c45f31e18cdc09a9dcc74bbd053fa36eb78c527d0318862bb/mani_skill-3.0.1-py3-none-any.whl", hash = "sha256:685de2f03c300b1ede49881a1bf6306ad062082d39c8d3be8b8e85603f32e33a", size = 101729066, upload-time = "2026-04-21T05:52:19.889Z" },
 ]
 
 [[package]]
@@ -1948,7 +1949,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dacite" },
     { name = "gymnasium" },
-    { name = "mani-skill-nightly" },
+    { name = "mani-skill" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "soframe-policy" },
@@ -1966,7 +1967,7 @@ dependencies = [
 requires-dist = [
     { name = "dacite" },
     { name = "gymnasium" },
-    { name = "mani-skill-nightly" },
+    { name = "mani-skill", specifier = "==3.0.1" },
     { name = "numpy" },
     { name = "opencv-python", specifier = "==4.12.0.88" },
     { name = "soframe-policy", editable = "../../policy" },
