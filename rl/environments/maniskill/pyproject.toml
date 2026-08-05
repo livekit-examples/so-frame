@@ -31,18 +31,45 @@ dependencies = [
   # system ROCm 7, GPU physics and torchvision's C++ ops are mutually exclusive -- which means
   # train.py cannot import.
   #
-  # Matching the ROCm MAJOR removes the conflict at its root: both sides become .so.7, torchvision
-  # loads, and --fix-torch-rocm is not needed at all. cp310 wheels exist on rocm7.1 for torch
-  # 2.10-2.13, so this stays on Python 3.10 -- no interpreter change, and the port's
-  # pysapien.cpython-310 still applies.
-  # Pinned exactly rather than as a range, for two reasons. This branch targets one validated
-  # hardware/driver stack, so "whatever resolves today" is not a virtue here. And practically:
-  # download.pytorch.org serves no PEP 658 metadata (the .metadata sidecar 403s), so uv must read
-  # each CANDIDATE wheel over the network to learn its dependencies -- and these wheels are 5.6 GB.
-  # A range of five candidate versions turns `uv lock` into a multi-gigabyte operation; one exact
-  # version makes it a single wheel. Bump deliberately, not incidentally.
-  "torch==2.13.0",
-  "torchvision==0.28.0",
+  # Matching the ROCm MAJOR resolves that: both sides become .so.7, so torchvision loads. cp310
+  # wheels exist on rocm7.1 for torch 2.10-2.13, so this stays on Python 3.10, no interpreter
+  # change, and the port's pysapien.cpython-310 still applies.
+  #
+  # BUT MATCHING MAJORS DOES NOT REMOVE THE NEED FOR --fix-torch-rocm, which is the opposite of
+  # what an earlier version of this comment claimed. torch still SHIPS its own libamdhip64.so with
+  # SONAME libamdhip64.so.7, and the system has one too. Two copies of the same soname in one
+  # process makes HIP abort:
+  #
+  #   F hip.cpp:512] hipApiName has non-null function pointer 1 despite this being the first
+  #                  instance of the library being copies
+  #
+  # observed as a hard abort during scene reconfiguration. What matching the majors actually buys
+  # is that --fix-torch-rocm becomes SAFE for torchvision: once torch's copies are moved aside, the
+  # system's .so.7 satisfies the soname torchvision's _C.so needs. On a ROCm 6 wheel it could not.
+  # So the rule is: match the major AND apply the fix.
+  # Pinned exactly, and the exact value is load-bearing in a way that is easy to get wrong.
+  #
+  # torchrl X.Y is COMPILED against a specific torch, and the pairing is torchrl 0.N <-> torch
+  # 2.(N-1). That is why torchrl 0.7.2 declares torch>=2.6.0. So torchrl 0.13.x wants torch 2.12,
+  # NOT the newest wheel on the index. Pairing 0.13.3 with torch 2.13.0 fails like this:
+  #
+  #   torchrl/_torchrl.cpython-310-x86_64-linux-gnu.so:
+  #     undefined symbol: _ZN5torch8autograd10deleteNodeEPNS0_4NodeE
+  #
+  # and torchrl CATCHES that ImportError and degrades quietly. Rollout collection then runs fine
+  # for thousands of steps and the process SEGFAULTS at the first gradient update, when the replay
+  # buffer first touches the C++ path. The crash tracks --learning-starts exactly, which is the
+  # tell: with 500 it dies at step 496, with 2000 at step 1984.
+  #
+  # Also practical: download.pytorch.org serves no PEP 658 metadata (the .metadata sidecar 403s),
+  # so uv reads each CANDIDATE wheel over the network to learn its dependencies, and these wheels
+  # are ~5.5 GB. A five-version range turns `uv lock` into a multi-gigabyte operation that ran past
+  # 15 minutes without finishing; one exact version resolved 109 packages in 4.65 seconds.
+  #
+  # Bump torch and torchrl together, deliberately, and check the extension actually loads:
+  #   python -c "import torchrl._torchrl"      # must not raise
+  "torch==2.12.1",
+  "torchvision==0.27.1",
   # AMD: torch pulls Triton from the ROCm index, and uv only maps DIRECT dependencies to an index,
   # so it must be named here or it is looked for on PyPI, where it does not exist.
   #
@@ -89,13 +116,13 @@ dependencies = [
 # tools/amd_port/REPRODUCE.md; the short version is:
 #
 #     uv sync
-#     /path/to/ManiSkill/tools/amd_port/install-into.sh .venv
+#     /path/to/ManiSkill/tools/amd_port/install-into.sh .venv --fix-torch-rocm
 #     uv run python train.py
 #
-# Note the absence of --fix-torch-rocm, and of any LD_LIBRARY_PATH step. Both were needed while
-# this branch used a ROCm 6 torch wheel on a ROCm 7 system; matching the ROCm major (see the torch
-# pin above) makes them unnecessary. The port's libraries carry an $ORIGIN rpath, so nothing has to
-# be exported at runtime.
+# --fix-torch-rocm is REQUIRED, on an aligned stack as much as a mismatched one: torch ships its own
+# libamdhip64.so.7 and so does the system, and two copies of one soname make HIP abort. See the
+# torch pin above. No LD_LIBRARY_PATH step is needed, though: the port's libraries carry an $ORIGIN
+# rpath, so nothing has to be exported at runtime.
 #
 # The port lives in PhysX and SAPIEN, not in ManiSkill, so mani_skill stays the unmodified 3.0.1
 # release from PyPI -- there is no fork to track.
