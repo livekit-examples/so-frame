@@ -11,25 +11,55 @@ dependencies = [
   "soframe-policy",
   "mani_skill==3.0.1",
   "gymnasium",
-  # Both bounds are load-bearing, and the LOWER one is not a preference:
-  #   >=2.6.0  is required by tensordict==0.7.2 and torchrl==0.7.2 (both declare torch>=2.6.0).
-  #            So this environment CANNOT reuse the torch 2.5.1+rocm6.2 wheel the AMD port was
-  #            validated against -- worth knowing, because that wheel is likely already in your
-  #            uv cache and the ROCm wheels are ~4 GB each. Downgrading torch here means
-  #            downgrading torchrl/tensordict to 0.6.x too.
-  #   <2.8     because a torch 2.9.1 ROCm wheel was found to be missing libmagma.so during the
-  #            port work. Relax once a newer ROCm wheel is confirmed good.
-  # The ROCm index for >=2.6 is rocm6.3 (the rocm6.2 index stops at 2.5.1), which is why
-  # [tool.uv.sources] below points at rocm6.3. The port itself is indifferent: install-into.sh
-  # --fix-torch-rocm moves torch's BUNDLED ROCm libraries aside so the system ROCm is used, so
-  # the wheel's own ROCm minor version does not have to match the port's.
-  "torch>=2.6.0,<2.8",
-  "torchvision>=0.21.0",
-  # AMD: torch pulls this from the ROCm index and uv only maps DIRECT dependencies to
-  # an index, so it must be named here or it is looked for on PyPI, where it does not exist.
-  "pytorch-triton-rocm ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "tensordict==0.7.2",
-  "torchrl==0.7.2",
+  # >=2.10 is the ROCm alignment requirement, and it is the whole reason for the pins below.
+  #
+  # The AMD box runs system ROCm 7.2.1, and the port's libPhysXGpu_64.so / SAPIEN are built
+  # against it. PyTorch published NO ROCm 7 wheels until torch 2.10 -- the indexes are
+  # rocm6.2 (torch 2.5), rocm6.3 (2.7-2.9), rocm6.4 (2.8-2.9), rocm7.0 (2.10), rocm7.1 (2.10+).
+  # So any torch below 2.10 necessarily puts a ROCm 6 runtime in a ROCm 7 process, and the two
+  # cannot coexist:
+  #
+  #   * torch's bundled libamdhip64.so has SONAME libamdhip64.so.6; the system one is .so.7.
+  #   * Leave torch's ROCm 6 libraries in place and SAPIEN dies with
+  #     `undefined symbol: hsa_amd_memory_get_preferred_copy_engine, version ROCR_1` --
+  #     ROCm 6's libhsa-runtime64 cannot serve the system's libamdhip64.so.7.
+  #   * Move them aside (the port's --fix-torch-rocm, pitfall P10) and SAPIEN works, but now
+  #     nothing provides libamdhip64.so.6, so torchvision's _C.so will not dlopen and
+  #     `import torchvision` fails with `operator torchvision::nms does not exist`.
+  #
+  # All five subsets of that move were tested: there is no middle ground. On a ROCm 6 wheel with
+  # system ROCm 7, GPU physics and torchvision's C++ ops are mutually exclusive -- which means
+  # train.py cannot import.
+  #
+  # Matching the ROCm MAJOR removes the conflict at its root: both sides become .so.7, torchvision
+  # loads, and --fix-torch-rocm is not needed at all. cp310 wheels exist on rocm7.1 for torch
+  # 2.10-2.13, so this stays on Python 3.10 -- no interpreter change, and the port's
+  # pysapien.cpython-310 still applies.
+  # Pinned exactly rather than as a range, for two reasons. This branch targets one validated
+  # hardware/driver stack, so "whatever resolves today" is not a virtue here. And practically:
+  # download.pytorch.org serves no PEP 658 metadata (the .metadata sidecar 403s), so uv must read
+  # each CANDIDATE wheel over the network to learn its dependencies -- and these wheels are 5.6 GB.
+  # A range of five candidate versions turns `uv lock` into a multi-gigabyte operation; one exact
+  # version makes it a single wheel. Bump deliberately, not incidentally.
+  "torch==2.13.0",
+  "torchvision==0.28.0",
+  # AMD: torch pulls Triton from the ROCm index, and uv only maps DIRECT dependencies to an index,
+  # so it must be named here or it is looked for on PyPI, where it does not exist.
+  #
+  # NOTE THE NAME. torch renamed this dependency between 2.7 and 2.13: it was
+  # `pytorch-triton-rocm`, it is now `triton-rocm`. Keeping the old name produces a resolution
+  # error that names the NEW one and reads like a missing package rather than a rename:
+  #   Because there is no version of triton-rocm==3.7.1 and torch>=2.13.0+rocm7.1 depends on
+  #   triton-rocm==3.7.1, we can conclude that torch>=2.13.0+rocm7.1 cannot be used.
+  # If you move back to a torch 2.7-2.9 wheel, this goes back to `pytorch-triton-rocm`.
+  "triton-rocm ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  # Moved from 0.7.2 to track torch >=2.10. 0.7.2's compiled extensions target torch 2.7 and warn
+  # `Failed to import torchrl C++ binaries` against anything newer. The API surface this package
+  # actually uses is small and long-stable across that range -- TensorDict, from_module,
+  # from_modules, tensordict.nn.CudaGraphModule, torchrl.data.LazyTensorStorage and ReplayBuffer --
+  # which is why the version jump is a pin change rather than a migration.
+  "tensordict>=0.13,<0.14",
+  "torchrl>=0.13,<0.14",
   "numpy",
   "tyro",
   "tqdm",
@@ -59,27 +89,34 @@ dependencies = [
 # tools/amd_port/REPRODUCE.md; the short version is:
 #
 #     uv sync
-#     /path/to/ManiSkill/tools/amd_port/install-into.sh .venv --fix-torch-rocm
-#     source ~/maniskill-amd/env.sh
+#     /path/to/ManiSkill/tools/amd_port/install-into.sh .venv
 #     uv run python train.py
+#
+# Note the absence of --fix-torch-rocm, and of any LD_LIBRARY_PATH step. Both were needed while
+# this branch used a ROCm 6 torch wheel on a ROCm 7 system; matching the ROCm major (see the torch
+# pin above) makes them unnecessary. The port's libraries carry an $ORIGIN rpath, so nothing has to
+# be exported at runtime.
 #
 # The port lives in PhysX and SAPIEN, not in ManiSkill, so mani_skill stays the unmodified 3.0.1
 # release from PyPI -- there is no fork to track.
 #
-# torch must come from the ROCm index. The rocm6.2 index tops out at torch 2.5.1, which does not
-# satisfy the torch>=2.6.0 that tensordict/torchrl 0.7.2 require, so rocm6.3 is used.
+# torch must come from the ROCm index, and the index must match the SYSTEM ROCm major -- rocm7.1
+# for ROCm 7.x. Using a rocm6.x index on a ROCm 7 machine makes GPU physics and torchvision
+# mutually exclusive; the torch pin above explains exactly why. If you are on system ROCm 6.x,
+# point these at rocm6.3 instead and pin torch accordingly.
 [tool.uv]
 environments = ["sys_platform == 'linux'"]
 
 [[tool.uv.index]]
-name = "pytorch-rocm63"
-url = "https://download.pytorch.org/whl/rocm6.3"
+name = "pytorch-rocm71"
+url = "https://download.pytorch.org/whl/rocm7.1"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-rocm63" }
-torchvision = { index = "pytorch-rocm63" }
-pytorch-triton-rocm = { index = "pytorch-rocm63" }
+torch = { index = "pytorch-rocm71" }
+torchvision = { index = "pytorch-rocm71" }
+# triton-rocm, not pytorch-triton-rocm -- torch renamed it; see the dependency list above.
+triton-rocm = { index = "pytorch-rocm71" }
 soframe-policy = { path = "../../policy", editable = true }
 
 [tool.uv.build-backend]
