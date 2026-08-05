@@ -11,10 +11,18 @@ dependencies = [
   "soframe-policy",
   "mani_skill==3.0.1",
   "gymnasium",
-  # Upper bound is deliberate on this branch: a torch 2.9.1 ROCm wheel was found to be
-  # missing libmagma.so during the port work, and 2.7.x sits closest to the
-  # torch 2.5.1+rocm6.2 combination the AMD port was actually validated against.
-  # Relax it once a newer ROCm wheel is confirmed good.
+  # Both bounds are load-bearing, and the LOWER one is not a preference:
+  #   >=2.6.0  is required by tensordict==0.7.2 and torchrl==0.7.2 (both declare torch>=2.6.0).
+  #            So this environment CANNOT reuse the torch 2.5.1+rocm6.2 wheel the AMD port was
+  #            validated against -- worth knowing, because that wheel is likely already in your
+  #            uv cache and the ROCm wheels are ~4 GB each. Downgrading torch here means
+  #            downgrading torchrl/tensordict to 0.6.x too.
+  #   <2.8     because a torch 2.9.1 ROCm wheel was found to be missing libmagma.so during the
+  #            port work. Relax once a newer ROCm wheel is confirmed good.
+  # The ROCm index for >=2.6 is rocm6.3 (the rocm6.2 index stops at 2.5.1), which is why
+  # [tool.uv.sources] below points at rocm6.3. The port itself is indifferent: install-into.sh
+  # --fix-torch-rocm moves torch's BUNDLED ROCm libraries aside so the system ROCm is used, so
+  # the wheel's own ROCm minor version does not have to match the port's.
   "torch>=2.6.0,<2.8",
   "torchvision>=0.21.0",
   # AMD: torch pulls this from the ROCm index and uv only maps DIRECT dependencies to
