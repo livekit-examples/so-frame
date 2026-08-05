@@ -11,8 +11,15 @@ dependencies = [
   "soframe-policy",
   "mani_skill==3.0.1",
   "gymnasium",
-  "torch>=2.6.0",
+  # Upper bound is deliberate on this branch: a torch 2.9.1 ROCm wheel was found to be
+  # missing libmagma.so during the port work, and 2.7.x sits closest to the
+  # torch 2.5.1+rocm6.2 combination the AMD port was actually validated against.
+  # Relax it once a newer ROCm wheel is confirmed good.
+  "torch>=2.6.0,<2.8",
   "torchvision>=0.21.0",
+  # AMD: torch pulls this from the ROCm index and uv only maps DIRECT dependencies to
+  # an index, so it must be named here or it is looked for on PyPI, where it does not exist.
+  "pytorch-triton-rocm ; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "tensordict==0.7.2",
   "torchrl==0.7.2",
   "numpy",
@@ -39,7 +46,32 @@ dependencies = [
 # The encoder/actor definitions and the checkpoint format are shared with the deploy tree
 # (rl/deploy), so both take the same package as a path dependency. Anything a checkpoint
 # contains is defined once, in policy/, rather than hand-copied per tree.
+# --- AMD / ROCm -------------------------------------------------------------------------------
+# This branch runs on AMD RDNA3 (gfx1100) via the ManiSkill AMD port. See the ManiSkill repo's
+# tools/amd_port/REPRODUCE.md; the short version is:
+#
+#     uv sync
+#     /path/to/ManiSkill/tools/amd_port/install-into.sh .venv --fix-torch-rocm
+#     source ~/maniskill-amd/env.sh
+#     uv run python train.py
+#
+# The port lives in PhysX and SAPIEN, not in ManiSkill, so mani_skill stays the unmodified 3.0.1
+# release from PyPI -- there is no fork to track.
+#
+# torch must come from the ROCm index. The rocm6.2 index tops out at torch 2.5.1, which does not
+# satisfy the torch>=2.6.0 that tensordict/torchrl 0.7.2 require, so rocm6.3 is used.
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+
+[[tool.uv.index]]
+name = "pytorch-rocm63"
+url = "https://download.pytorch.org/whl/rocm6.3"
+explicit = true
+
 [tool.uv.sources]
+torch = { index = "pytorch-rocm63" }
+torchvision = { index = "pytorch-rocm63" }
+pytorch-triton-rocm = { index = "pytorch-rocm63" }
 soframe-policy = { path = "../../policy", editable = true }
 
 [tool.uv.build-backend]
